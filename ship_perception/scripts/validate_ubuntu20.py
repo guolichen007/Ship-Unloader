@@ -62,6 +62,13 @@ def read_build_dependencies(path):
     return values
 
 
+def system_eigen_directory():
+    for name in ("/usr/lib/cmake/eigen3", "/usr/share/eigen3/cmake"):
+        if (pathlib.Path(name) / "Eigen3Config.cmake").is_file():
+            return name
+    raise RuntimeError("未找到 Ubuntu20 系统 Eigen3 配置目录")
+
+
 def check_artifact(data, gate, sha, config_hash):
     expected_name = gate.upper()
     if data.get("gate") != expected_name or data.get("git_sha") != sha:
@@ -112,6 +119,7 @@ def main():
     parser.add_argument("--jobs", type=int, default=2)
     parser.add_argument("--cmake", default="/usr/bin/cmake", help="absolute CMake executable; defaults to Ubuntu system CMake")
     parser.add_argument("--ctest", default="/usr/bin/ctest", help="absolute CTest executable; defaults to Ubuntu system CTest")
+    parser.add_argument("--eigen-dir", help="显式系统 Eigen 配置目录；默认优先 /usr/lib/cmake/eigen3")
     args = parser.parse_args()
     if not re.fullmatch(r"[a-f0-9]{40}", args.sha) or args.jobs < 1:
         parser.error("--sha must be a full lowercase SHA and --jobs must be positive")
@@ -196,14 +204,19 @@ def main():
         # Provisional code/integration failure; ClaudeCLI must inspect the log and
         # reclassify ENV_FAIL if missing/broken environment dependencies are proven.
         failure_type = "CODE_FAIL"
+        eigen_directory = args.eigen_dir or system_eigen_directory()
         if run_log([args.cmake, "-S", str(PROJECT), "-B", str(build), "-DCMAKE_BUILD_TYPE=Release",
-                    "-DM0_WITH_PCL=ON", "-DBUILD_TESTING=ON"], "configure.log"):
+                    "-DEigen3_DIR=" + eigen_directory, "-DM0_WITH_PCL=ON", "-DBUILD_TESTING=ON"], "configure.log"):
             raise RuntimeError("configure failed; inspect configure.log for dependency/compatibility evidence")
         step = "dependency_evidence"
         dependencies = read_build_dependencies(build / "build_dependencies.txt")
         report["BUILD_DEPENDENCIES"] = dependencies
         report["PCL"] = dependencies["PCL_VERSION"]
         report["EIGEN"] = dependencies["EIGEN_VERSION"]
+        if dependencies["EIGEN_VERSION"] != "3.3.7":
+            failure_type = "ENV_FAIL"
+            raise RuntimeError("正式通道要求系统 Eigen3.3.7，实际解析 " + dependencies["EIGEN_VERSION"])
+        report["SMALL_GICP"] = dependencies.get("SMALL_GICP_COMMIT", "UNKNOWN")
         report["GXX_ENVIRONMENT"] = report["GXX"]
         report["GXX"] = dependencies["CXX_COMPILER"] + " " + dependencies["CXX_COMPILER_VERSION"]
         with (directory / "environment.txt").open("a", encoding="utf-8") as log:
