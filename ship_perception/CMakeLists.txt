@@ -4,6 +4,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+set(M0_EIGEN_VERSION "${EIGEN3_VERSION_STRING}")
+get_target_property(M0_EIGEN_INCLUDE_DIRS Eigen3::Eigen INTERFACE_INCLUDE_DIRECTORIES)
 find_package(Python3 3.8 REQUIRED COMPONENTS Interpreter)
 set(M0_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/config/m0.json" CACHE FILEPATH "Versioned M0 config")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${M0_CONFIG}"
@@ -27,14 +29,26 @@ target_include_directories(ship_core PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generate
 target_link_libraries(ship_core PUBLIC Eigen3::Eigen)
 option(M0_WITH_PCL "Build PCD I/O using system PCL (required on validation lane)" ON)
 if(M0_WITH_PCL)
-  find_package(PkgConfig REQUIRED)
-  pkg_check_modules(PCL REQUIRED IMPORTED_TARGET pcl_common pcl_io)
+  # Ubuntu 20.04 PCL 1.10 may expose only versioned pkg-config modules.
+  # Use the package's CMake config, including its transitive I/O dependencies.
+  # The project enables C as well as CXX for PCL/VTK's MPI::MPI_C dependency.
+  find_package(PCL 1.10 REQUIRED COMPONENTS common io)
   add_library(ship_pcd src/sensor/pcd.cpp)
-  target_link_libraries(ship_pcd PUBLIC ship_core PkgConfig::PCL)
+  target_include_directories(ship_pcd SYSTEM PRIVATE ${PCL_INCLUDE_DIRS})
+  target_compile_options(ship_pcd PRIVATE ${PCL_DEFINITIONS})
+  target_link_libraries(ship_pcd PUBLIC ship_core PRIVATE ${PCL_LIBRARIES})
 else()
+  set(PCL_VERSION "DISABLED_DEVELOPER_ONLY")
   add_library(ship_pcd src/sensor/pcd_stub.cpp)
   target_link_libraries(ship_pcd PUBLIC ship_core)
 endif()
+# Record the dependencies actually selected by CMake, not unrelated .pc files
+# elsewhere on the host. Plain key/value format preserves paths without JSON escaping.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/build_dependencies.txt"
+  "CMAKE_COMMAND=${CMAKE_COMMAND}\nCMAKE_VERSION=${CMAKE_VERSION}\n"
+  "CXX_COMPILER=${CMAKE_CXX_COMPILER}\nCXX_COMPILER_VERSION=${CMAKE_CXX_COMPILER_VERSION}\n"
+  "EIGEN_VERSION=${M0_EIGEN_VERSION}\nEIGEN_CONFIG_DIR=${Eigen3_DIR}\nEIGEN_INCLUDE_DIRS=${M0_EIGEN_INCLUDE_DIRS}\n"
+  "PCL_VERSION=${PCL_VERSION}\nPCL_CONFIG_DIR=${PCL_DIR}\nPCL_INCLUDE_DIRS=${PCL_INCLUDE_DIRS}\n")
 add_executable(synthetic_replay tools/replay_main.cpp)
 target_link_libraries(synthetic_replay PRIVATE ship_pcd)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
