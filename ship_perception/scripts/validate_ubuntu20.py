@@ -4,7 +4,7 @@ import argparse
 import datetime
 import hashlib
 import json
-import os
+import math
 import pathlib
 import platform
 import re
@@ -15,7 +15,7 @@ import uuid
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PROJECT = ROOT / "ship_perception"
 GATES = ["g%d" % i for i in range(1, 8)]
-RUN_ORDER = ["replay_selfcheck", "pcd_selfcheck"] + GATES
+RUN_ORDER = ["validation_boundary", "replay_selfcheck", "pcd_selfcheck"] + GATES
 LAB_STATUS = dict(g1="PASS_LAB", g2="PASS_SYNTHETIC", g3="PASS_SYNTHETIC",
                   g4="PASS_SYNTHETIC", g5="PASS_LAB", g6="PASS_LAB", g7="PASS_LAB_LOCAL")
 
@@ -52,12 +52,15 @@ def check_artifact(data, gate, sha, config_hash):
         raise ValueError("artifact gate/SHA mismatch: " + gate)
     if data.get("config_hash") != config_hash or data.get("mode") != "EVALUATION_MODE":
         raise ValueError("artifact config/mode mismatch: " + gate)
-    if data.get("dataset_id") != "synthetic_ship_grid_v1" or not data.get("timestamp"):
+    dataset = "local_xyz_fixture_v1" if gate == "pcd_selfcheck" else "synthetic_ship_grid_v1"
+    if data.get("dataset_id") != dataset or not data.get("timestamp"):
         raise ValueError("artifact dataset/timestamp missing or incorrect: " + gate)
     if data.get("status") != "PASS_SYNTHETIC" or data.get("error"):
         raise ValueError("gate did not pass: " + gate)
     if not isinstance(data.get("metrics"), dict) or not data["metrics"]:
         raise ValueError("missing numeric evidence: " + gate)
+    if any(type(v) not in (int, float) or not math.isfinite(v) for v in data["metrics"].values()):
+        raise ValueError("nonfinite or nonnumeric evidence: " + gate)
 
 
 def write_report(directory, report):
@@ -182,6 +185,9 @@ def main():
                 if gate in GATES:
                     report[gate.upper()] = "FAIL"
                 raise RuntimeError("gate failed; preserve evidence and classify CODE_FAIL vs TEST_FAIL")
+            if gate == "validation_boundary":
+                report["execution"][gate] = "COMPLETE"
+                continue
             artifact = build / "artifacts" / gate / "report.json"
             check_artifact(json.loads(artifact.read_text()), gate, args.sha, config_hash)
             report["execution"][gate] = "COMPLETE"

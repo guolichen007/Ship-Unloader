@@ -14,6 +14,11 @@ int main() { return test::run("G6", [](test::Metrics& m) {
     }
     CHECK(local_error<cfg::local_precision_limit_m);
     CHECK(absolute_error>cfg::absolute_float_min_loss_m);
+    const auto rotated=pose(origin.world_xyz,{.1,-.2,.3});
+    const Eigen::Vector3f p(.13f,-.27f,.019f);
+    const Eigen::Vector3d world=rotated*p.cast<double>();
+    const Eigen::Vector3f roundtrip=(rotated.inverse()*world).cast<float>();
+    CHECK((roundtrip-p).norm()<cfg::local_precision_limit_m);
     m["absolute_float_max_error_m_at_"+std::to_string(int(base))]=absolute_error;
     m["local_float_max_error_m_at_"+std::to_string(int(base))]=local_error;
   }

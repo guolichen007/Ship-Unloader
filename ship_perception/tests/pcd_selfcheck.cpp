@@ -14,4 +14,4 @@ int main(int argc,char** argv) { return test::run("PCD_SELFCHECK", [&](test::Met
     CHECK((rebuilt[i]-points[i].cast<double>()).norm()<cfg::point_tolerance_m);
   test::throws([]{load_local_pcd("file_that_does_not_exist.pcd");});
   m["input_points"]=double(points.size());
-}); }
+}, "local_xyz_fixture_v1"); }

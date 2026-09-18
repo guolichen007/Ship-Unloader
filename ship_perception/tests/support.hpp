@@ -36,7 +36,8 @@ inline std::string json_string(const std::string& s) {
   return out.str();
 }
 using Metrics = std::map<std::string, double>;
-inline int run(const std::string& gate, const std::function<void(Metrics&)>& body) {
+inline int run(const std::string& gate, const std::function<void(Metrics&)>& body,
+               const std::string& dataset_id = ship::cfg::dataset_id) {
   Metrics metrics;
   std::string error;
   try { body(metrics); } catch (const std::exception& e) { error = e.what(); }
@@ -46,7 +47,7 @@ inline int run(const std::string& gate, const std::function<void(Metrics&)>& bod
   out << std::setprecision(17) << "{\n\"gate\":" << json_string(gate)
       << ",\n\"status\":\"" << status << "\",\n\"git_sha\":\"" << ship::cfg::git_sha
       << "\",\n\"config_hash\":\"" << ship::cfg::config_hash
-      << "\",\n\"dataset_id\":\"" << ship::cfg::dataset_id
+      << "\",\n\"dataset_id\":\"" << dataset_id
       << "\",\n\"calibration_version\":\"" << ship::cfg::calibration_version
       << "\",\n\"mode\":\"EVALUATION_MODE\",\n\"timestamp\":" << std::time(nullptr)
       << ",\n\"scope\":\"M0 harness; no registration or site acceptance\",\n\"error\":"

@@ -1,0 +1,247 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "ship_perception.m0.v1",
+  "title": "M0 configuration version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "seed",
+    "dataset_id",
+    "calibration_version",
+    "mode",
+    "frames",
+    "frame_period_ns",
+    "scan_duration_ns",
+    "noise_sigma_m",
+    "drop_probability",
+    "outlier_probability",
+    "outlier_scale_m",
+    "timestamp_offset_ns",
+    "timestamp_jitter_ns",
+    "drift_mps",
+    "heave_m",
+    "rpy_amplitude_rad",
+    "frequency_hz",
+    "smooth_random_m",
+    "lidar2_translation_m",
+    "lidar2_rpy_rad",
+    "extrinsic_error_m",
+    "extrinsic_error_rad",
+    "dynamic_points",
+    "decimation",
+    "math_tolerance",
+    "point_tolerance_m",
+    "noisy_rms_limit_m",
+    "fault_min_rms_m",
+    "local_precision_limit_m",
+    "absolute_float_min_loss_m",
+    "world_origins_m",
+    "local_origin_world_m",
+    "occlusion_enabled",
+    "occlusion_min_m",
+    "occlusion_max_m",
+    "queue_capacity",
+    "latency_samples"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+$",
+      "const": "ship_perception.m0"
+    },
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "dataset_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "calibration_version": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "mode": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+$",
+      "const": "EVALUATION_MODE"
+    },
+    "frames": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 10000
+    },
+    "frame_period_ns": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 1000000000000
+    },
+    "scan_duration_ns": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 1000000000000
+    },
+    "noise_sigma_m": {
+      "type": "number",
+      "minimum": 0
+    },
+    "drop_probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "outlier_probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "outlier_scale_m": {
+      "type": "number",
+      "minimum": 0
+    },
+    "timestamp_offset_ns": {
+      "type": "integer",
+      "maximum": 1000000000000,
+      "minimum": -1000000000000
+    },
+    "timestamp_jitter_ns": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000000000
+    },
+    "drift_mps": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "number"
+      }
+    },
+    "heave_m": {
+      "type": "number",
+      "minimum": 0
+    },
+    "rpy_amplitude_rad": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "number"
+      }
+    },
+    "frequency_hz": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "smooth_random_m": {
+      "type": "number",
+      "minimum": 0
+    },
+    "lidar2_translation_m": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "number"
+      }
+    },
+    "lidar2_rpy_rad": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "number"
+      }
+    },
+    "extrinsic_error_m": {
+      "type": "number"
+    },
+    "extrinsic_error_rad": {
+      "type": "number"
+    },
+    "dynamic_points": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "decimation": {
+      "type": "integer",
+      "exclusiveMinimum": 0
+    },
+    "math_tolerance": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "point_tolerance_m": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "noisy_rms_limit_m": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "fault_min_rms_m": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "local_precision_limit_m": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "absolute_float_min_loss_m": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "world_origins_m": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "number"
+      }
+    },
+    "local_origin_world_m": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "number"
+      }
+    },
+    "occlusion_enabled": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "occlusion_min_m": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "number"
+      }
+    },
+    "occlusion_max_m": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "number"
+      }
+    },
+    "queue_capacity": {
+      "type": "integer",
+      "exclusiveMinimum": 0
+    },
+    "latency_samples": {
+      "type": "integer",
+      "exclusiveMinimum": 0
+    }
+  }
+}
