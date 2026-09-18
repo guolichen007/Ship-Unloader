@@ -6,12 +6,10 @@ execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/../to
 if(NOT vendor_status EQUAL 0)
   message(FATAL_ERROR "small_gicp 源码校验失败")
 endif()
-add_library(small_gicp_vendor STATIC
-  "${SMALL_GICP_SOURCE_DIR}/src/small_gicp/registration/registration.cpp"
-  "${SMALL_GICP_SOURCE_DIR}/src/small_gicp/registration/registration_helper.cpp")
-target_include_directories(small_gicp_vendor SYSTEM PUBLIC "${SMALL_GICP_SOURCE_DIR}/include")
-target_link_libraries(small_gicp_vendor PUBLIC Eigen3::Eigen)
+# 核心模板采用 SerialReduction，完全不编译依赖 OpenMP 的上游 helper。
+add_library(small_gicp_vendor INTERFACE)
+target_include_directories(small_gicp_vendor SYSTEM INTERFACE "${SMALL_GICP_SOURCE_DIR}/include")
+target_link_libraries(small_gicp_vendor INTERFACE Eigen3::Eigen)
 if(MSVC)
-  target_compile_definitions(small_gicp_vendor PRIVATE _USE_MATH_DEFINES)
-  target_compile_options(small_gicp_vendor PRIVATE /bigobj)
+  target_compile_definitions(small_gicp_vendor INTERFACE _USE_MATH_DEFINES)
 endif()

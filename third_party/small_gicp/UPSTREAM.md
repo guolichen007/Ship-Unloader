@@ -8,7 +8,7 @@
 - 导入日期：2026-09-18
 - 范围：include、src/small_gicp/registration、cmake、CMakeLists.txt、LICENSE。
 - 原始源码修改：无。文件来自该提交的 git show 原始 blob，逐字节校验值见 SOURCE_SHA256.json。
-- 构建方式：项目自有 CMake wrapper 仅编译 helper 源码，链接已解析的 Eigen；不执行上游自动下载逻辑。
+- 构建方式：项目自有 CMake wrapper 链接已解析的 Eigen；适配器实例化核心 Registration<GICPFactor, SerialReduction> 模板，不编译带 OpenMP 的 helper，不执行上游自动下载逻辑。
 - PCL wrapper、TBB、OpenMP、march-native、Python、上游示例与 benchmark：均不启用。
 
 以后修改上游文件必须提供独立 patch、原始与修改后校验值及原因。不要直接覆盖此快照。
