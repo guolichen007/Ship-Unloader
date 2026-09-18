@@ -31,14 +31,19 @@ TrackingResult ShipTracker::process(const TrackingInput& input) {
   const auto start=monotonic_ns();
   TrackingResult out;out.T_W_B=last_pose_;out.map=map_.stats();out.initialized=initialized_;
   auto target=map_.snapshot();out.tracking_target_revision=target?target->revision:0;
-  auto finish=[&]() {out.map=map_.stats();out.total_ms=double(monotonic_ns()-start)*1e-6;return out;};
+  auto finish=[&]() {
+    if(!out.valid && out.registration.failure_reason.empty()) out.registration.failure_reason=out.failure_reason;
+    out.map=map_.stats();out.total_ms=double(monotonic_ns()-start)*1e-6;return out;
+  };
   try {
     if(initialized_ && input.frame_id<=last_frame_) {out.failure_reason="NON_MONOTONIC_FRAME";return finish();}
     const auto observation=prepare_observation(input,config_);
     out.prepare_ms=double(monotonic_ns()-start)*1e-6;
     if(observation.points.size()<std::size_t(config_.registration.min_points)) {out.failure_reason="INSUFFICIENT_OBSERVATION";return finish();}
     if(!initialized_) {
-      Transform provisional=Transform::Identity();provisional.linear()=input.bootstrap_R_W_B;
+      Transform provisional=Transform::Identity();
+      provisional.linear()=input.bootstrap_R_W_B*pose(Eigen::Vector3d::Zero(),
+        {config_.tracking.bootstrap_roll_rad,config_.tracking.bootstrap_pitch_rad,config_.tracking.bootstrap_yaw_rad}).linear();
       if(!healthy_transform(provisional,config_)) {out.failure_reason="INVALID_BOOTSTRAP_PRIOR";return finish();}
       Eigen::Vector3d centroid=Eigen::Vector3d::Zero();for(const auto& p:observation.points) centroid+=p.cast<double>();
       centroid/=double(observation.points.size());provisional.translation()=observation.T_W_C*centroid;

@@ -36,6 +36,15 @@ def generate(path, output):
     m = data["tracking_map"]
     if not m["suspect_min_conflict_frames"] < m["quarantine_min_conflict_frames"] <= m["conflict_window_frames"]:
         raise ValueError("冲突窗口与隔离门槛不一致")
+    r = data["registration"]
+    if not 3 <= r["neighbors"] <= r["min_points"] <= m["max_reference_voxels"] <= 1000000:
+        raise ValueError("邻域、最少点数和参考容量不一致")
+    if not 1 <= r["max_iterations"] <= 10000 or m["candidate_ttl_frames"] < m["min_support_frames"]:
+        raise ValueError("迭代上限或候选生命周期无效")
+    if len(data["acceptance"]["capture_yaw_deg"]) != len(data["acceptance"]["capture_translation_m"]):
+        raise ValueError("组合捕获范围档位数量不一致")
+    if len(set(data["acceptance"]["seeds"])) != len(data["acceptance"]["seeds"]):
+        raise ValueError("种子不可重复")
     lines = ["#pragma once", "#include <cstdint>", "#include <vector>", "namespace ship { namespace v14 {", "struct Config {"]
     for section, values in data.items():
         if not isinstance(values, dict):

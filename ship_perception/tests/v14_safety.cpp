@@ -54,7 +54,7 @@ int main() {
   REQUIRE(limited.stats().active<=36);REQUIRE(limited.stats().candidates<=2);
   REQUIRE(limited.commit(30,ground,{},good));REQUIRE(limited.stats().candidates==0);
   // 健康检查：NaN、反射、非正交、齐次行和 Hessian 非有限值。
-  for(int mode=0;mode<5;++mode) {
+  for(int mode=0;mode<7;++mode) {
     auto inject=std::make_unique<Injected>();auto* control=inject.get();control->next=accepted();
     ShipTracker tracker(std::move(inject),Method::GICP);
     TrackingInput in;in.T_W_C=[](std::int64_t){return Transform::Identity();};
@@ -66,6 +66,8 @@ int main() {
     if(mode==2) control->next.T_target_source.linear()(0,1)=.1;
     if(mode==3) control->next.T_target_source.matrix()(3,0)=.1;
     if(mode==4) {control->next.hessian_available=true;control->next.H(0,0)=std::numeric_limits<double>::infinity();}
+    if(mode==5) control->next.rmse=std::numeric_limits<double>::quiet_NaN();
+    if(mode==6) {control->next.objective_available=true;control->next.raw_objective=std::numeric_limits<double>::infinity();}
     const auto snap=tracker.map().snapshot();in.frame_id=1;const auto rejected=tracker.process(in);
     REQUIRE(!rejected.valid);REQUIRE(rejected.registration.mathematical_failure);
     REQUIRE(rejected.T_W_B.matrix()==first.T_W_B.matrix());REQUIRE(tracker.map().snapshot()==snap);
@@ -80,6 +82,21 @@ int main() {
   control->next.T_target_source.translation().x()+=1.2;in.frame_id=1;
   const auto rejected=tracker.process(in);REQUIRE(!rejected.valid);REQUIRE(rejected.map.revision==first.map.revision);
   REQUIRE(rejected.map.candidate_revision==0);REQUIRE(rejected.T_W_B.matrix()==first.T_W_B.matrix());
+  // 隔离后参考支撑不足：下一帧必须停止接受新位姿。
+  Config sparse;sparse.registration.min_points=37;
+  auto sparse_backend=std::make_unique<Injected>();auto* sparse_control=sparse_backend.get();sparse_control->next=accepted();
+  ShipTracker sparse_tracker(std::move(sparse_backend),Method::GICP,sparse);
+  TrackingInput sparse_in;sparse_in.T_W_C=[](std::int64_t){return Transform::Identity();};
+  SensorObservation elevated;elevated.T_C_L.translation()=Eigen::Vector3d(0,0,3);
+  for(const auto& p:anchors) elevated.points.push_back({(p-Eigen::Vector3f(0,0,3)).eval()});
+  sparse_in.sensors.push_back(elevated);const auto sparse_first=sparse_tracker.process(sparse_in);REQUIRE(sparse_first.valid);
+  sparse_control->next.T_target_source=sparse_first.T_B_C;
+  sparse_in.sensors[0].points.pop_back();sparse_in.sensors[0].points.push_back(sparse_in.sensors[0].points[0]);
+  TrackingResult removed;
+  for(std::uint64_t f=1;f<=10;++f) {sparse_in.frame_id=f;removed=sparse_tracker.process(sparse_in);REQUIRE(removed.valid);}
+  REQUIRE(removed.needs_reinitialization);REQUIRE(removed.map.active==36);
+  sparse_in.frame_id=11;const auto unsupported=sparse_tracker.process(sparse_in);
+  REQUIRE(!unsupported.valid);REQUIRE(unsupported.needs_reinitialization);REQUIRE(unsupported.map.revision==removed.map.revision);
   std::cout<<"PASS: snapshot, revision, quarantine, occlusion, recovery, promotion, capacity, invalid SE3/H, legal wrong pose\n";
   return 0;
  } catch(const std::exception& e) {std::cerr<<e.what()<<std::endl;return 1;}

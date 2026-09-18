@@ -57,6 +57,7 @@ RegistrationResult SmallGicpBackend::align(const RegistrationRequest& q) {
       engine.align(*impl_->gaussian,source_cloud,*impl_->gaussian,q.initial_guess);
     result.T_target_source=raw.T_target_source;
     result.H=raw.H; result.hessian_available=true;
+    result.raw_objective=raw.error;result.objective_available=true;
     result.iterations=raw.iterations;result.iterations_available=true;
     result.converged=raw.converged;
     result=validate_result(result,q,c,*impl_->quality_tree);

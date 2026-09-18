@@ -49,26 +49,33 @@ ReplayScan generate_scan(const std::vector<Eigen::Vector3f>& source,
   result.frame.local_origin_world=origin;
   result.ground_truth_ship={stamp,ship_pose(stamp)};
   std::mt19937 rng(o.seed);
+  std::mt19937 noise_rng(o.noise_seed), dropout_rng(o.dropout_seed), time_rng(o.time_seed), dynamic_rng(o.dynamic_seed);
+  auto& measurement=o.independent_streams?noise_rng:rng;
+  auto& dropout=o.independent_streams?dropout_rng:rng;
+  auto& clock_rng=o.independent_streams?time_rng:rng;
+  auto& dynamics=o.independent_streams?dynamic_rng:rng;
   std::uniform_real_distribution<double> unit(0,1), scatter(-1,1);
   std::normal_distribution<double> noise(0,1);
   std::uniform_int_distribution<std::int64_t> jitter(-o.timestamp_jitter_ns,o.timestamp_jitter_ns);
   auto append = [&](const Eigen::Vector3d& world,std::int64_t time,std::size_t index) {
     Eigen::Vector3d local=(crane_pose(time)*sensor.T_crane_lidar_true).inverse()*world;
-    for(int axis=0;axis<3;++axis) local[axis]+=o.noise_sigma_m*noise(rng);
-    if(unit(rng)<o.outlier_probability)
-      for(int axis=0;axis<3;++axis) local[axis]+=o.outlier_scale_m*scatter(rng);
-    const auto offset=checked_add(checked_add(checked_sub(time,stamp),o.timestamp_offset_ns),jitter(rng));
+    for(int axis=0;axis<3;++axis) local[axis]+=o.noise_sigma_m*noise(measurement);
+    const bool outlier=unit(measurement)<o.outlier_probability;
+    if(outlier)
+      for(int axis=0;axis<3;++axis) local[axis]+=o.outlier_scale_m*scatter(measurement);
+    const auto offset=checked_add(checked_add(checked_sub(time,stamp),o.timestamp_offset_ns),jitter(clock_rng));
     (void)checked_add(stamp,offset);
     const Eigen::Vector3f point=local.cast<float>();
     if(!point.allFinite()) throw std::overflow_error("nonfinite sensor point");
     result.frame.points.push_back({point,1.f,offset,sensor.id});
     result.source_indices.push_back(index);
     result.true_point_times_ns.push_back(time);
+    result.static_structure.push_back(!outlier && index!=std::numeric_limits<std::size_t>::max());
   };
   for(std::size_t i=0;i<source.size();++i) {
     if(!source[i].allFinite()) throw std::invalid_argument("nonfinite source point");
     const Eigen::Vector3d p=source[i].cast<double>();
-    if(i%o.decimation!=0 || unit(rng)<o.drop_probability) continue;
+    if(i%o.decimation!=0 || unit(dropout)<o.drop_probability) continue;
     if(o.occlude && (p.array()>=o.occlusion_min.array()).all() &&
                      (p.array()<=o.occlusion_max.array()).all()) continue;
     const double fraction=source.size()>1 ? double(i)/double(source.size()-1) : 0;
@@ -79,7 +86,7 @@ ReplayScan generate_scan(const std::vector<Eigen::Vector3f>& source,
     // A compact moving cluster in the world, distinct from the static ship map.
     Eigen::Vector3d p(0,0,3);
     p.x()=static_cast<double>(stamp)*1e-9;
-    for(int axis=0;axis<3;++axis) p[axis]+=.15*scatter(rng);
+    for(int axis=0;axis<3;++axis) p[axis]+=.15*scatter(dynamics);
     append(origin.world_xyz+p,stamp,std::numeric_limits<std::size_t>::max());
   }
   return result;

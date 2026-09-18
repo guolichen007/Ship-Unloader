@@ -32,7 +32,8 @@ class PclBackend final : public RegistrationBackend {
       backend.setMaximumIterations(int(config_.registration.max_iterations));
       backend.setCorrespondenceRandomness(int(config_.registration.neighbors));
       backend.setMaxCorrespondenceDistance(config_.registration.correspondence_m);
-      backend.setTransformationEpsilon(config_.registration.translation_epsilon_m*config_.registration.translation_epsilon_m);
+      backend.setTransformationEpsilon(config_.registration.translation_epsilon_m);
+      backend.setRotationEpsilon(config_.registration.rotation_epsilon_rad);
       pcl::PointCloud<pcl::PointXYZ> aligned;
       result.backend_executed=true;
       backend.align(aligned,q.initial_guess.matrix().cast<float>());

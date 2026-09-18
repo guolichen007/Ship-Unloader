@@ -58,11 +58,15 @@ RegistrationResult validate_result(RegistrationResult r,const RegistrationReques
   r.valid=false; r.quality_available=false;
   std::string reason;
   if(!healthy_transform(r.T_target_source,c,&reason) ||
-     (r.hessian_available && !r.H.allFinite()) || !std::isfinite(r.elapsed_ms) || r.elapsed_ms<0) {
+     (r.hessian_available && !r.H.allFinite()) ||
+     (r.objective_available && !std::isfinite(r.raw_objective)) ||
+     !std::isfinite(r.rmse) || !std::isfinite(r.overlap_ratio) || !std::isfinite(r.fitness_score) ||
+     !std::isfinite(r.elapsed_ms) || r.elapsed_ms<0) {
     r.mathematical_failure=true;
     r.failure_reason=reason.empty()?"NONFINITE_BACKEND_METRIC":reason;
     r.T_target_source=Transform::Identity(); r.H.setZero(); r.hessian_available=false;
     r.rmse=0; r.fitness_score=0; r.overlap_ratio=0; r.elapsed_ms=0;
+    r.raw_objective=0;r.objective_available=false;
     return r;
   }
   double sum=0; r.inliers=0;

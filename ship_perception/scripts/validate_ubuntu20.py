@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Clean-build an exact SHA on Ubuntu 20.04. Never edits product code or tags a baseline."""
+"""Ubuntu20 精确 SHA：PCL-ON 全新构建、原门禁回归和 V1.4 Full Acceptance。"""
 import argparse
 import datetime
 import hashlib
@@ -15,7 +15,7 @@ import uuid
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PROJECT = ROOT / "ship_perception"
 GATES = ["g%d" % i for i in range(1, 8)]
-RUN_ORDER = ["validation_boundary", "replay_selfcheck", "pcd_selfcheck"] + GATES
+RUN_ORDER = ["validation_boundary", "v14_validation_boundary", "replay_selfcheck", "pcd_selfcheck", "v14_backend", "v14_safety", "g5_harness"] + GATES
 LAB_STATUS = dict(g1="PASS_LAB", g2="PASS_SYNTHETIC", g3="PASS_SYNTHETIC",
                   g4="PASS_SYNTHETIC", g5="PASS_LAB", g6="PASS_LAB", g7="PASS_LAB_LOCAL")
 
@@ -70,7 +70,7 @@ def system_eigen_directory():
 
 
 def check_artifact(data, gate, sha, config_hash):
-    expected_name = gate.upper()
+    expected_name = "G5" if gate == "g5_harness" else gate.upper()
     if data.get("gate") != expected_name or data.get("git_sha") != sha:
         raise ValueError("artifact gate/SHA mismatch: " + gate)
     if data.get("config_hash") != config_hash or data.get("mode") != "EVALUATION_MODE":
@@ -103,13 +103,29 @@ def write_report(directory, report):
                ("M0_CODE", "M0_CODE"), ("M0_SYNTHETIC", "M0_SYNTHETIC"),
                ("M0_LINUX20_BUILD", "M0_LINUX20_BUILD"), ("M0_SITE", "M0_SITE"),
                ("本SHA最终结论", "FINAL_DECISION"), ("允许进入下一阶段", "ALLOW_NEXT_STAGE")]
-    lines = ["# M0 machine evidence — independent ClaudeCLI review required", "", "```text"]
+    labels += [("V1.4_CODE", "V14_CODE"), ("V1.4_FULL", "V14_FULL"),
+               ("合格后端集合", "QUALIFIED_BACKENDS"), ("原始M0正式证据", "ORIGINAL_M0_EVIDENCE")]
+    lines = ["# V1.4 机器验证证据 — 等待 ClaudeCLI 独立复核", "", "```text"]
     lines += ["%s=%s" % (label, report.get(key) if report.get(key) is not None else "NOT_RUN") for label, key in labels]
-    lines += ["```", "", "G5_SCOPE=HARNESS_ONLY; registration/EKF/observability/NEES not implemented.",
-              "BASELINE_M0_SHA=PENDING (this script never creates a baseline).", "",
-              "Machine evidence is not the independent review. ClaudeCLI must inspect logs,",
-              "confirm failure classification and return the final report. SITE_PENDING remains."]
-    (directory / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    lines += ["```", "", "G5_SCOPE=REGISTRATION_AND_CLOSED_LOOP；原 G5 保留为 g5_harness。",
+              "本脚本不创建基线或标签；原 M0 正式通过报告仍需按真实证据归档。", "",
+              "机器证据不能替代独立审查。ClaudeCLI 必须检查日志、复核失败分类并返回结构化报告。",
+              "不自动允许合并或进入下一阶段；现场保持 SITE_PENDING。"]
+    (directory / "验证摘要.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def check_v14_report(path, sha, config_hash, profile):
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if (data.get("implementation_sha") != sha or data.get("worktree") != "CLEAN" or
+            data.get("config_hash") != config_hash or data.get("profile") != profile or
+            data.get("status") != "PASS_SYNTHETIC" or not data.get("qualified_backends")):
+        raise ValueError("V1.4 证据版本/配置/通过状态不匹配")
+    if not data.get("metadata", {}).get("pcl_available"):
+        raise ValueError("正式通道没有执行 PCL 对照")
+    for name, expected in data["artifact_sha256"].items():
+        if pathlib.Path(name).name != name or hashlib.sha256((path.parent / name).read_bytes()).hexdigest() != expected:
+            raise ValueError("V1.4 产物哈希不匹配: " + name)
+    return data
 
 
 def main():
@@ -145,6 +161,9 @@ def main():
                   G5_SCOPE="HARNESS_ONLY", execution={}, BASELINE_M0_SHA=None,
                   CMAKE_EXECUTABLE=args.cmake, CTEST_EXECUTABLE=args.ctest,
                   FAIL_TYPE_REVIEW_REQUIRED=False)
+    report.update(V14_CODE="NOT_RUN", V14_FULL="NOT_RUN", QUALIFIED_BACKENDS=[],
+                  ORIGINAL_M0_EVIDENCE="PENDING_ARCHIVE", G5_SCOPE="REGISTRATION_AND_CLOSED_LOOP")
+    v14_hash = hashlib.sha256((PROJECT / "config/v14.json").read_bytes()).hexdigest()
     report.update({g.upper(): None for g in GATES})
     report.update({g + "_SITE": "SITE_PENDING" for g in ("G2", "G3", "G4", "G7")})
     failure_type = "ENV_FAIL"
@@ -217,6 +236,11 @@ def main():
             failure_type = "ENV_FAIL"
             raise RuntimeError("正式通道要求系统 Eigen3.3.7，实际解析 " + dependencies["EIGEN_VERSION"])
         report["SMALL_GICP"] = dependencies.get("SMALL_GICP_COMMIT", "UNKNOWN")
+        if report["SMALL_GICP"] != "fd29d8cf94cf05ed7ad21c81c27b65963110adb5":
+            raise RuntimeError("small_gicp 固定提交不匹配")
+        if not dependencies["CXX_COMPILER_VERSION"].startswith("9.") or not dependencies["CMAKE_VERSION"].startswith("3.16."):
+            failure_type = "ENV_FAIL"
+            raise RuntimeError("正式兼容验证要求 GCC9 与 CMake3.16")
         report["GXX_ENVIRONMENT"] = report["GXX"]
         report["GXX"] = dependencies["CXX_COMPILER"] + " " + dependencies["CXX_COMPILER_VERSION"]
         with (directory / "environment.txt").open("a", encoding="utf-8") as log:
@@ -232,6 +256,10 @@ def main():
         # CTest 3.16 compatible: cwd=build, never --test-dir.
         if run_log([args.ctest, "-N"], "ctest_inventory.log", build):
             raise RuntimeError("test inventory failed")
+        inventory = (directory / "ctest_inventory.log").read_text(encoding="utf-8")
+        registered = set(re.findall(r"Test\s+#\d+:\s+(\S+)", inventory))
+        if not set(RUN_ORDER).issubset(registered):
+            raise RuntimeError("CTest 注册项目缺失: " + str(set(RUN_ORDER) - registered))
         for gate in RUN_ORDER:
             step = gate
             report["execution"][gate] = "RUNNING"
@@ -240,14 +268,25 @@ def main():
                 if gate in GATES:
                     report[gate.upper()] = "FAIL"
                 raise RuntimeError("gate failed; preserve evidence and classify CODE_FAIL vs TEST_FAIL")
-            if gate == "validation_boundary":
+            if gate in ("validation_boundary", "v14_validation_boundary", "v14_backend", "v14_safety"):
                 report["execution"][gate] = "COMPLETE"
                 continue
             artifact = build / "artifacts" / gate / "report.json"
-            check_artifact(json.loads(artifact.read_text()), gate, args.sha, config_hash)
+            if gate == "g5":
+                check_v14_report(artifact, args.sha, v14_hash, "quick")
+            else:
+                check_artifact(json.loads(artifact.read_text()), gate, args.sha, config_hash)
             report["execution"][gate] = "COMPLETE"
             if gate in GATES:
                 report[gate.upper()] = LAB_STATUS[gate]
+        step = "v14_full_acceptance"
+        full_output = directory / "v14_full"
+        if run_log([sys.executable, str(PROJECT / "tools/run_v14.py"), str(build / "v14_evaluate"),
+                    "full", str(full_output)], "v14_full.log"):
+            raise RuntimeError("Full Acceptance 失败；不能用 Quick 代替")
+        full = check_v14_report(full_output / "report.json", args.sha, v14_hash, "full")
+        report.update(V14_FULL="PASS_SYNTHETIC", QUALIFIED_BACKENDS=full["qualified_backends"],
+                      V14_FULL_REPORT=str(full_output / "report.json"))
         step = "replay_export"
         if run_log([sys.executable, str(PROJECT / "tools/replay.py"), "--executable", str(build / "synthetic_replay"),
                     "--input", str(PROJECT / "tests/fixtures/local_xyz.pcd"),
@@ -260,8 +299,8 @@ def main():
         if git("status", "--porcelain", "--untracked-files=normal") or git("rev-parse", "HEAD") != args.sha:
             report["WORKTREE"] = "NOT_CLEAN"
             raise RuntimeError("repository changed during validation")
-        report.update(M0_CODE="PASS", M0_SYNTHETIC="PASS",
-                      FINAL_DECISION="M0_MACHINE_CHECKS_PASS_AWAITING_CLAUDECLI_REVIEW")
+        report.update(M0_CODE="HARNESS_REGRESSION_PASS", M0_SYNTHETIC="HARNESS_REGRESSION_PASS", V14_CODE="PASS",
+                      FINAL_DECISION="V14_MACHINE_CHECKS_PASS_AWAITING_CLAUDECLI_REVIEW")
     except Exception as exc:
         report.update(FIRST_FAIL=step, FAIL_TYPE=failure_type, error=str(exc), FINAL_DECISION="FAIL",
                       FAIL_TYPE_REVIEW_REQUIRED=True)
@@ -271,7 +310,7 @@ def main():
     finally:
         write_report(directory, report)
         print("\nSTRUCTURED_REPORT=" + str(directory / "report.json"))
-        print("SUMMARY=" + str(directory / "summary.md"))
+        print("SUMMARY=" + str(directory / "验证摘要.md"))
     return 0 if report["FAIL_TYPE"] == "NONE" else 1
 
 

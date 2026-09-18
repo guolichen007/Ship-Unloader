@@ -18,6 +18,8 @@ struct Trajectory {
 struct ReplayOptions {
   std::uint32_t seed = 42;
   std::int64_t scan_duration_ns = 80000000;
+  bool independent_streams = false; // M0 默认随机序列保持不变。
+  std::uint32_t noise_seed=0, dropout_seed=0, time_seed=0, dynamic_seed=0;
   double noise_sigma_m = 0;
   double drop_probability = 0;
   double outlier_probability = 0;
@@ -39,6 +41,7 @@ struct ReplayScan {
   Frame frame; // xyz in the LiDAR frame, not world coordinates
   std::vector<std::size_t> source_indices; // max<size_t> means dynamic point
   std::vector<std::int64_t> true_point_times_ns;
+  std::vector<bool> static_structure; // 仅评分通道：排除注入离群与动态点。
   PoseStamped ground_truth_ship;
   Sensor sensor;
 };

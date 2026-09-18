@@ -222,7 +222,10 @@
       "additionalProperties": false,
       "required": [
         "max_step_translation_m",
-        "max_step_rotation_rad"
+        "max_step_rotation_rad",
+        "bootstrap_roll_rad",
+        "bootstrap_pitch_rad",
+        "bootstrap_yaw_rad"
       ],
       "properties": {
         "max_step_translation_m": {
@@ -234,6 +237,21 @@
           "type": "number",
           "minimum": 1e-12,
           "maximum": 10000
+        },
+        "bootstrap_roll_rad": {
+          "type": "number",
+          "minimum": -3.141592653589793,
+          "maximum": 3.141592653589793
+        },
+        "bootstrap_pitch_rad": {
+          "type": "number",
+          "minimum": -3.141592653589793,
+          "maximum": 3.141592653589793
+        },
+        "bootstrap_yaw_rad": {
+          "type": "number",
+          "minimum": -3.141592653589793,
+          "maximum": 3.141592653589793
         }
       }
     },

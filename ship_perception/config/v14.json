@@ -5,14 +5,14 @@
     "downsample_m": 0.10,
     "voxel_m": 0.30,
     "neighbors": 20,
-    "max_iterations": 50,
+    "max_iterations": 100,
     "correspondence_m": 0.70,
     "quality_distance_m": 0.20,
     "min_points": 30,
     "min_overlap": 0.50,
     "max_rmse_m": 0.10,
-    "translation_epsilon_m": 0.0001,
-    "rotation_epsilon_rad": 0.0001,
+    "translation_epsilon_m": 0.0005,
+    "rotation_epsilon_rad": 0.0005,
     "determinant_tolerance": 0.000001,
     "orthogonality_tolerance": 0.000001,
     "homogeneous_tolerance": 0.000000001,
@@ -36,6 +36,9 @@
     "max_candidate_voxels": 20000
   },
   "tracking": {
+    "bootstrap_roll_rad": 0.0,
+    "bootstrap_pitch_rad": 0.0,
+    "bootstrap_yaw_rad": 0.0,
     "max_step_translation_m": 0.50,
     "max_step_rotation_rad": 0.17453292519943295
   },

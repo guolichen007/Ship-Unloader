@@ -25,6 +25,7 @@ struct RegistrationResult {
   // small_gicp 的右扰动排列为 [旋转, 平移]；不是已标定协方差。
   Eigen::Matrix<double,6,6> H = Eigen::Matrix<double,6,6>::Zero();
   bool hessian_available = false;
+  bool objective_available = false;
   bool iterations_available = false;
   bool quality_available = false;
   bool backend_executed = false;
@@ -33,6 +34,7 @@ struct RegistrationResult {
   bool mathematical_failure = false;
   double rmse = 0, overlap_ratio = 0, fitness_score = 0;
   double elapsed_ms = 0;
+  double raw_objective = 0;
   std::size_t source_points = 0, target_points = 0, inliers = 0, iterations = 0;
   std::string failure_reason;
 };

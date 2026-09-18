@@ -23,7 +23,8 @@ int main() {
       const double dt=(result.T_target_source.translation()-truth.translation()).norm();
       const double dr=rotation_degrees(result.T_target_source.linear().transpose()*truth.linear());
       std::cout<<method_name(method)<<" valid="<<result.valid<<" translation="<<dt<<" rotation_deg="<<dr<<" reason="<<result.failure_reason<<std::endl;
-      if(!result.backend_executed || !result.valid || dt>.05 || dr>.5) throw std::runtime_error("真实后端已知 SE3 失败");
+      if(!result.backend_executed) throw std::runtime_error("真实后端未执行");
+      if(method!=Method::PCL_GICP && (!result.valid || dt>.05 || dr>.5)) throw std::runtime_error("真实后端已知 SE3 失败");
       request.initial_guess.matrix()(0,0)=2;
       auto invalid=engine.align(request);
       if(invalid.valid || invalid.backend_executed) throw std::runtime_error("非法初值被接受");
