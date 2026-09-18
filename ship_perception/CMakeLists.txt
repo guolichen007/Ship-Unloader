@@ -23,11 +23,21 @@ execute_process(COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/
 if(NOT config_result EQUAL 0)
   message(FATAL_ERROR "Invalid M0 configuration")
 endif()
+set(V14_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/config/v14.json" CACHE FILEPATH "V1.4 配置")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${V14_CONFIG}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/config/v14.schema.json" "${CMAKE_CURRENT_SOURCE_DIR}/tools/configure_v14.py")
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/configure_v14.py"
+  "${V14_CONFIG}" "${CMAKE_CURRENT_BINARY_DIR}/generated/ship_perception/v14_config.hpp" RESULT_VARIABLE v14_result)
+if(NOT v14_result EQUAL 0)
+  message(FATAL_ERROR "V1.4 配置校验失败")
+endif()
 include(CTest)
 add_library(ship_core src/replay/replay.cpp)
 target_include_directories(ship_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_include_directories(ship_core PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(ship_core PUBLIC Eigen3::Eigen)
+add_library(ship_registration src/registration/quality.cpp)
+target_link_libraries(ship_registration PUBLIC ship_core PRIVATE small_gicp_vendor)
 option(M0_WITH_PCL "Build PCD I/O using system PCL (required on validation lane)" ON)
 if(M0_WITH_PCL)
   # Ubuntu 20.04 PCL 1.10 may expose only versioned pkg-config modules.

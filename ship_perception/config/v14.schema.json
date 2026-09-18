@@ -1,0 +1,411 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "registration",
+    "tracking_map",
+    "tracking",
+    "acceptance",
+    "replay"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "ship_perception.v14"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000000000,
+      "const": 1
+    },
+    "registration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "downsample_m",
+        "voxel_m",
+        "neighbors",
+        "max_iterations",
+        "correspondence_m",
+        "quality_distance_m",
+        "min_points",
+        "min_overlap",
+        "max_rmse_m",
+        "translation_epsilon_m",
+        "rotation_epsilon_rad",
+        "determinant_tolerance",
+        "orthogonality_tolerance",
+        "homogeneous_tolerance",
+        "max_local_coordinate_m"
+      ],
+      "properties": {
+        "downsample_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "voxel_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "neighbors": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000
+        },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000
+        },
+        "correspondence_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "quality_distance_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "min_points": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000
+        },
+        "min_overlap": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "max_rmse_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "translation_epsilon_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "rotation_epsilon_rad": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "determinant_tolerance": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "orthogonality_tolerance": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "homogeneous_tolerance": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "max_local_coordinate_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        }
+      }
+    },
+    "tracking_map": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "voxel_m",
+        "min_support_frames",
+        "position_std_max_m",
+        "candidate_ttl_frames",
+        "conflict_window_frames",
+        "suspect_min_conflict_frames",
+        "quarantine_min_conflict_frames",
+        "promotion_max_rmse_m",
+        "promotion_min_overlap",
+        "support_distance_m",
+        "ray_radius_m",
+        "ray_margin_m",
+        "roi_margin_m",
+        "max_reference_voxels",
+        "max_candidate_voxels"
+      ],
+      "properties": {
+        "voxel_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "min_support_frames": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000
+        },
+        "position_std_max_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "candidate_ttl_frames": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000
+        },
+        "conflict_window_frames": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000
+        },
+        "suspect_min_conflict_frames": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000
+        },
+        "quarantine_min_conflict_frames": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000
+        },
+        "promotion_max_rmse_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "promotion_min_overlap": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "support_distance_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "ray_radius_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "ray_margin_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "roi_margin_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "max_reference_voxels": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000
+        },
+        "max_candidate_voxels": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000
+        }
+      }
+    },
+    "tracking": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_step_translation_m",
+        "max_step_rotation_rad"
+      ],
+      "properties": {
+        "max_step_translation_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "max_step_rotation_rad": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "translation_p95_m",
+        "rotation_p95_deg",
+        "static_p95_m",
+        "min_valid_ratio",
+        "max_consecutive_failures",
+        "view_change_min",
+        "view_change_max",
+        "quick_frames",
+        "full_frames",
+        "seeds",
+        "capture_yaw_deg",
+        "capture_translation_m"
+      ],
+      "properties": {
+        "translation_p95_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "rotation_p95_deg": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "static_p95_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "min_valid_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "max_consecutive_failures": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000
+        },
+        "view_change_min": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "view_change_max": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "quick_frames": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000
+        },
+        "full_frames": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000
+        },
+        "seeds": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000000
+          }
+        },
+        "capture_yaw_deg": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "number",
+            "minimum": 1e-12,
+            "maximum": 10000
+          }
+        },
+        "capture_translation_m": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "number",
+            "minimum": 1e-12,
+            "maximum": 10000
+          }
+        }
+      }
+    },
+    "replay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "frame_period_ns",
+        "diagnostic_scan_ns",
+        "surface_spacing_m",
+        "noise_sigma_m",
+        "density_drop",
+        "view_dropout",
+        "ordinary_dropout",
+        "transient_points",
+        "outlier_probability",
+        "initial_offset_m",
+        "initial_yaw_deg"
+      ],
+      "properties": {
+        "frame_period_ns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000000
+        },
+        "diagnostic_scan_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "surface_spacing_m": {
+          "type": "number",
+          "minimum": 1e-12,
+          "maximum": 10000
+        },
+        "noise_sigma_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "density_drop": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "view_dropout": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "ordinary_dropout": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "transient_points": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "outlier_probability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "initial_offset_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "initial_yaw_deg": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

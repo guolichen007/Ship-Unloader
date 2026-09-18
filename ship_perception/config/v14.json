@@ -1,0 +1,69 @@
+{
+  "schema": "ship_perception.v14",
+  "version": 1,
+  "registration": {
+    "downsample_m": 0.10,
+    "voxel_m": 0.30,
+    "neighbors": 20,
+    "max_iterations": 50,
+    "correspondence_m": 0.70,
+    "quality_distance_m": 0.20,
+    "min_points": 30,
+    "min_overlap": 0.50,
+    "max_rmse_m": 0.10,
+    "translation_epsilon_m": 0.0001,
+    "rotation_epsilon_rad": 0.0001,
+    "determinant_tolerance": 0.000001,
+    "orthogonality_tolerance": 0.000001,
+    "homogeneous_tolerance": 0.000000001,
+    "max_local_coordinate_m": 1000.0
+  },
+  "tracking_map": {
+    "voxel_m": 0.10,
+    "min_support_frames": 5,
+    "position_std_max_m": 0.03,
+    "candidate_ttl_frames": 10,
+    "conflict_window_frames": 20,
+    "suspect_min_conflict_frames": 5,
+    "quarantine_min_conflict_frames": 10,
+    "promotion_max_rmse_m": 0.06,
+    "promotion_min_overlap": 0.80,
+    "support_distance_m": 0.08,
+    "ray_radius_m": 0.04,
+    "ray_margin_m": 0.20,
+    "roi_margin_m": 1.0,
+    "max_reference_voxels": 50000,
+    "max_candidate_voxels": 20000
+  },
+  "tracking": {
+    "max_step_translation_m": 0.50,
+    "max_step_rotation_rad": 0.17453292519943295
+  },
+  "acceptance": {
+    "translation_p95_m": 0.05,
+    "rotation_p95_deg": 0.5,
+    "static_p95_m": 0.10,
+    "min_valid_ratio": 0.99,
+    "max_consecutive_failures": 1,
+    "view_change_min": 0.20,
+    "view_change_max": 0.40,
+    "quick_frames": 50,
+    "full_frames": 200,
+    "seeds": [42, 1337, 2026],
+    "capture_yaw_deg": [1.0, 3.0, 5.0],
+    "capture_translation_m": [0.2, 0.5, 1.0]
+  },
+  "replay": {
+    "frame_period_ns": 100000000,
+    "diagnostic_scan_ns": 80000000,
+    "surface_spacing_m": 0.16,
+    "noise_sigma_m": 0.005,
+    "density_drop": 0.35,
+    "view_dropout": 0.15,
+    "ordinary_dropout": 0.02,
+    "transient_points": 40,
+    "outlier_probability": 0.02,
+    "initial_offset_m": 0.15,
+    "initial_yaw_deg": 2.0
+  }
+}
