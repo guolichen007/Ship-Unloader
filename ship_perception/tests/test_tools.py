@@ -53,6 +53,27 @@ class BoundaryTests(unittest.TestCase):
         self.assertFalse(validate.ubuntu20('ID=debian\nVERSION_ID="20.04"\n'))
         self.assertFalse(validate.ubuntu20("Windows"))
 
+    def test_resolved_dependencies_required_for_formal_pcl_lane(self):
+        evidence = dict(CMAKE_COMMAND="/usr/bin/cmake", CMAKE_VERSION="3.16.3",
+                        CXX_COMPILER="/usr/bin/c++", CXX_COMPILER_VERSION="9.4.0",
+                        EIGEN_VERSION="3.3.7", EIGEN_CONFIG_DIR="/usr/share/eigen3/cmake",
+                        EIGEN_INCLUDE_DIRS="/usr/include/eigen3", PCL_VERSION="1.10.0",
+                        PCL_CONFIG_DIR="/usr/lib/x86_64-linux-gnu/cmake/pcl",
+                        PCL_INCLUDE_DIRS="/usr/include/pcl-1.10;/usr/include/eigen3")
+        with tempfile.TemporaryDirectory() as temp:
+            path = pathlib.Path(temp) / "build_dependencies.txt"
+            def write(values):
+                path.write_text("\n".join(k + "=" + v for k, v in values.items()), encoding="utf-8")
+            write(evidence)
+            resolved = validate.read_build_dependencies(path)
+            self.assertEqual(resolved["EIGEN_VERSION"], "3.3.7")
+            self.assertEqual(resolved["PCL_INCLUDE_DIRS"], evidence["PCL_INCLUDE_DIRS"])
+            for key, value in [("PCL_VERSION", "DISABLED_DEVELOPER_ONLY"),
+                               ("EIGEN_VERSION", ""), ("PCL_CONFIG_DIR", "PCL_DIR-NOTFOUND")]:
+                write(dict(evidence, **{key: value}))
+                with self.subTest(key=key), self.assertRaises(ValueError):
+                    validate.read_build_dependencies(path)
+
     def test_missing_or_stale_evidence_cannot_pass(self):
         valid = dict(gate="G1", git_sha="a" * 40, config_hash="b" * 64,
                      mode="EVALUATION_MODE", dataset_id="synthetic_ship_grid_v1",

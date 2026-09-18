@@ -33,6 +33,16 @@ bash ship_perception/scripts/validate_ubuntu20.sh --sha "$SHA" --base-sha NONE -
 保存 `configure.log`、`build.log`、`ctest.log`、`report.json`、`summary.md`、
 G5 `scenarios.csv`、G7 `timing.csv` 以及 PCD 回放文件。
 
+正式脚本默认使用 `/usr/bin/cmake` 和 `/usr/bin/ctest`，避免 PATH 中 pip 版本覆盖系统工具。
+确有必要覆盖时，显式传入 `--cmake /绝对路径/cmake --ctest /绝对路径/ctest`，并在报告说明。
+`build/build_dependencies.txt` 保存 CMake 实际解析的 PCL/Eigen 版本、配置与头文件路径，
+以及实际 C++ 编译器。报告中的 PCL/EIGEN 以此为准；dpkg/pkg-config 结果单独保留为环境诊断，
+不能据此推断实际链接版本。configure 失败初步归类 CODE_FAIL，仍须独立审查；若证实缺少依赖，
+应改判 ENV_FAIL。所有失败报告均标记 `FAIL_TYPE_REVIEW_REQUIRED=true`。
+
+如果上轮 ClaudeCLI 写入了未跟踪的 `docs/会话上下文.md`，它也会使工作树不干净。
+请先将自己的上下文文件妥善保存到仓库外再复验；不要删除、覆盖它或使用 reset/clean 强行清理。
+
 ## 给 ClaudeCLI 的指令
 
 阅读 `docs/specs/` 中的 ClaudeCLI 独立验证总指令与冻结总纲，以及本文件。

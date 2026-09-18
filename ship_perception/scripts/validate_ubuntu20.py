@@ -46,6 +46,22 @@ def ubuntu20(os_release):
     return values.get("ID") == "ubuntu" and values.get("VERSION_ID") == "20.04"
 
 
+def read_build_dependencies(path):
+    values = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values[key] = value
+    for key in ("CMAKE_COMMAND", "CMAKE_VERSION", "CXX_COMPILER", "CXX_COMPILER_VERSION",
+                "EIGEN_VERSION", "EIGEN_CONFIG_DIR", "EIGEN_INCLUDE_DIRS",
+                "PCL_VERSION", "PCL_CONFIG_DIR", "PCL_INCLUDE_DIRS"):
+        if not values.get(key) or values[key].endswith("NOTFOUND"):
+            raise ValueError("missing resolved build dependency: " + key)
+    if values["PCL_VERSION"] == "DISABLED_DEVELOPER_ONLY":
+        raise ValueError("formal validation requires PCL ON")
+    return values
+
+
 def check_artifact(data, gate, sha, config_hash):
     expected_name = gate.upper()
     if data.get("gate") != expected_name or data.get("git_sha") != sha:
@@ -68,11 +84,13 @@ def write_report(directory, report):
     labels = [
         ("验证目标SHA", "VALIDATION_SHA"), ("验证基线SHA", "BASE_SHA"), ("验证分支", "BRANCH"),
         ("OS", "OS"), ("KERNEL", "KERNEL"), ("GCC", "GCC"), ("GXX", "GXX"), ("CMAKE", "CMAKE"),
+        ("CMAKE_EXECUTABLE", "CMAKE_EXECUTABLE"), ("CTEST_EXECUTABLE", "CTEST_EXECUTABLE"),
         ("PCL", "PCL"), ("EIGEN", "EIGEN"), ("SMALL_GICP", "SMALL_GICP"), ("工作树", "WORKTREE"),
         ("构建门禁", "BUILD_GATE")]
     labels += [(g.upper(), g.upper()) for g in GATES]
     labels += [("G2_SITE", "G2_SITE"), ("G3_SITE", "G3_SITE"), ("G4_SITE", "G4_SITE"), ("G7_SITE", "G7_SITE"),
                ("首个失败项", "FIRST_FAIL"), ("失败类型", "FAIL_TYPE"),
+               ("失败分类需独立复核", "FAIL_TYPE_REVIEW_REQUIRED"),
                ("产品代码被Claude修改", "PRODUCT_CODE_MODIFIED_BY_CLAUDE"), ("Claude补丁SHA", "CLAUDE_PATCH_SHA"),
                ("日志路径", "LOG_DIR"), ("测试产物路径", "ARTIFACT_DIR"),
                ("M0_CODE", "M0_CODE"), ("M0_SYNTHETIC", "M0_SYNTHETIC"),
@@ -92,6 +110,8 @@ def main():
     parser.add_argument("--sha", required=True, help="full 40-character commit SHA, already checked out")
     parser.add_argument("--base-sha", default="NONE")
     parser.add_argument("--jobs", type=int, default=2)
+    parser.add_argument("--cmake", default="/usr/bin/cmake", help="absolute CMake executable; defaults to Ubuntu system CMake")
+    parser.add_argument("--ctest", default="/usr/bin/ctest", help="absolute CTest executable; defaults to Ubuntu system CTest")
     args = parser.parse_args()
     if not re.fullmatch(r"[a-f0-9]{40}", args.sha) or args.jobs < 1:
         parser.error("--sha must be a full lowercase SHA and --jobs must be positive")
@@ -114,7 +134,9 @@ def main():
                   FINAL_DECISION="NOT_VALIDATED", ALLOW_NEXT_STAGE="NO", config_hash=config_hash,
                   dataset_id="synthetic_ship_grid_v1", mode="EVALUATION_MODE", timestamp=run_id,
                   calibration_version="synthetic_v1_SITE_PENDING", independent_review="REQUIRED",
-                  G5_SCOPE="HARNESS_ONLY", execution={}, BASELINE_M0_SHA=None)
+                  G5_SCOPE="HARNESS_ONLY", execution={}, BASELINE_M0_SHA=None,
+                  CMAKE_EXECUTABLE=args.cmake, CTEST_EXECUTABLE=args.ctest,
+                  FAIL_TYPE_REVIEW_REQUIRED=False)
     report.update({g.upper(): None for g in GATES})
     report.update({g + "_SITE": "SITE_PENDING" for g in ("G2", "G3", "G4", "G7")})
     failure_type = "ENV_FAIL"
@@ -140,9 +162,11 @@ def main():
         with (directory / "environment.txt").open("w", encoding="utf-8") as log:
             log.write(os_text + "\n" + platform.platform() + "\n")
             commands = {"GCC": ["gcc", "--version"], "GXX": ["g++", "--version"],
-                        "CMAKE": ["cmake", "--version"], "PYTHON": [sys.executable, "--version"],
-                        "GIT": ["git", "--version"], "PCL": ["pkg-config", "--modversion", "pcl_common"],
-                        "EIGEN": ["pkg-config", "--modversion", "eigen3"],
+                        "CMAKE": [args.cmake, "--version"], "CTEST": [args.ctest, "--version"],
+                        "PYTHON": [sys.executable, "--version"], "GIT": ["git", "--version"],
+                        "PCL_DPKG": ["dpkg-query", "-W", "libpcl-dev"],
+                        "EIGEN_DPKG": ["dpkg-query", "-W", "libeigen3-dev"],
+                        "EIGEN_PKGCONFIG": ["pkg-config", "--modversion", "eigen3"],
                         "PACKAGES": ["dpkg-query", "-W", "libeigen3-dev", "libpcl-dev"]}
             for key, command in commands.items():
                 code, output = capture(command)
@@ -152,6 +176,12 @@ def main():
         if not ubuntu20(os_text):
             raise RuntimeError("formal validation requires Ubuntu 20.04; current OS is not accepted")
         report["OS"] = "Ubuntu 20.04"
+        step = "build_tools"
+        for tool in (args.cmake, args.ctest):
+            if not pathlib.Path(tool).is_absolute() or not pathlib.Path(tool).is_file():
+                raise RuntimeError("build tool must be an existing absolute executable: " + tool)
+            if run_log([tool, "--version"], "build_tools.log"):
+                raise RuntimeError("cannot execute build tool: " + tool)
         step = "cross_platform_audit"
         failure_type = "CODE_FAIL"
         for path in git("ls-files", "ship_perception").splitlines():
@@ -162,25 +192,37 @@ def main():
         if mode != "100755":
             raise RuntimeError("validation shell script is not executable in Git")
         step = "configure"
-        failure_type = "ENV_FAIL"
-        if run_log(["cmake", "-S", str(PROJECT), "-B", str(build), "-DCMAKE_BUILD_TYPE=Release",
+        # A configure failure is not evidence that dependencies are missing.
+        # Provisional code/integration failure; ClaudeCLI must inspect the log and
+        # reclassify ENV_FAIL if missing/broken environment dependencies are proven.
+        failure_type = "CODE_FAIL"
+        if run_log([args.cmake, "-S", str(PROJECT), "-B", str(build), "-DCMAKE_BUILD_TYPE=Release",
                     "-DM0_WITH_PCL=ON", "-DBUILD_TESTING=ON"], "configure.log"):
             raise RuntimeError("configure failed; inspect configure.log for dependency/compatibility evidence")
+        step = "dependency_evidence"
+        dependencies = read_build_dependencies(build / "build_dependencies.txt")
+        report["BUILD_DEPENDENCIES"] = dependencies
+        report["PCL"] = dependencies["PCL_VERSION"]
+        report["EIGEN"] = dependencies["EIGEN_VERSION"]
+        report["GXX_ENVIRONMENT"] = report["GXX"]
+        report["GXX"] = dependencies["CXX_COMPILER"] + " " + dependencies["CXX_COMPILER_VERSION"]
+        with (directory / "environment.txt").open("a", encoding="utf-8") as log:
+            log.write("\nCMAKE_SELECTED_DEPENDENCIES\n" + (build / "build_dependencies.txt").read_text(encoding="utf-8"))
         step = "build"
         failure_type = "CODE_FAIL"
-        if run_log(["cmake", "--build", str(build), "--parallel", str(args.jobs)], "build.log"):
+        if run_log([args.cmake, "--build", str(build), "--parallel", str(args.jobs)], "build.log"):
             report["BUILD_GATE"] = "FAIL"
             raise RuntimeError("clean build failed; inspect build.log")
         report["BUILD_GATE"] = "PASS"
         report["M0_LINUX20_BUILD"] = "PASS"
         failure_type = "TEST_FAIL"
         # CTest 3.16 compatible: cwd=build, never --test-dir.
-        if run_log(["ctest", "-N"], "ctest_inventory.log", build):
+        if run_log([args.ctest, "-N"], "ctest_inventory.log", build):
             raise RuntimeError("test inventory failed")
         for gate in RUN_ORDER:
             step = gate
             report["execution"][gate] = "RUNNING"
-            if run_log(["ctest", "-R", "^" + gate + "$", "--output-on-failure", "-V"], "ctest.log", build):
+            if run_log([args.ctest, "-R", "^" + gate + "$", "--output-on-failure", "-V"], "ctest.log", build):
                 report["execution"][gate] = "FAIL"
                 if gate in GATES:
                     report[gate.upper()] = "FAIL"
@@ -208,7 +250,8 @@ def main():
         report.update(M0_CODE="PASS", M0_SYNTHETIC="PASS",
                       FINAL_DECISION="M0_MACHINE_CHECKS_PASS_AWAITING_CLAUDECLI_REVIEW")
     except Exception as exc:
-        report.update(FIRST_FAIL=step, FAIL_TYPE=failure_type, error=str(exc), FINAL_DECISION="FAIL")
+        report.update(FIRST_FAIL=step, FAIL_TYPE=failure_type, error=str(exc), FINAL_DECISION="FAIL",
+                      FAIL_TYPE_REVIEW_REQUIRED=True)
         if report["BUILD_GATE"] == "NOT_RUN" and step in ("configure", "build"):
             report["BUILD_GATE"] = "FAIL"
         print("VALIDATION_FAILURE: " + str(exc), file=sys.stderr)
