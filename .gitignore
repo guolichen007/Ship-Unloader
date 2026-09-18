@@ -1,0 +1,8 @@
+/hold_detector/
+/*.md
+!/README.md
+/build*/
+/validation/
+/.local/
+__pycache__/
+*.pyc
