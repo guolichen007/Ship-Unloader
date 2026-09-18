@@ -11,4 +11,5 @@ CMakeLists.txt text eol=lf
 *.yml text eol=lf
 *.json text eol=lf
 *.md text eol=lf
+third_party/small_gicp/** -text
 * text=auto eol=lf
