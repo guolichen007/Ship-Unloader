@@ -32,6 +32,10 @@
   "local_precision_limit_m": 0.00001,
   "absolute_float_min_loss_m": 0.005,
   "world_origins_m": [500000.0, 6000000.0],
+  "local_origin_world_m": [500000.0, 6000000.0, 10.0],
+  "occlusion_enabled": 0,
+  "occlusion_min_m": [-1.0, -1.0, -1.0],
+  "occlusion_max_m": [1.0, 1.0, 1.0],
   "queue_capacity": 3,
   "latency_samples": 100
 }
