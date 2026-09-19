@@ -1,0 +1,728 @@
+{
+  "schema_version": "ship_perception.v15.dataset.1",
+  "independent_scans": 13,
+  "labeled_scans": 12,
+  "annotation_count": 23,
+  "extra_annotations": 11,
+  "audit_purpose": "FILE_AND_DUPLICATE_AUDIT_NOT_ALGORITHM_SCORING",
+  "scans": [
+    {
+      "dataset_id": "hold_detector_static_xyz_v1",
+      "scan_id": "2026-08-01-05-09-32",
+      "pcd_filename": "2026-08-01-05-09-32.pcd",
+      "pcd_path": "detect/test/2026-08-01-05-09-32.pcd",
+      "pcd_sha256": "ea736584c7d3815fec90a2bb6d7f1fd615c016452afaba083a75a4057c1cffb2",
+      "fields": [
+        "x",
+        "y",
+        "z",
+        "_"
+      ],
+      "point_count": 526037,
+      "finite_count": 526037,
+      "ordered_xyz_sha256": "3b1efdb3e1a67ce47d58535453d13ea6a1c234b10ce0c22ac2410dd6262c4a56",
+      "unordered_xyz_sha256": "89df5c9219aee55b2e5aaa00db91042b3f781d56e94a5fda0d880565d64133bb",
+      "bbox_xyz": [
+        [
+          -105.09200286865234,
+          -2.0546998977661133,
+          -12.829700469970703
+        ],
+        [
+          26.216299057006836,
+          29.137800216674805,
+          23.492799758911133
+        ]
+      ],
+      "annotation_files": [
+        "detect/pcd/2026-08-01-05-09-32_annotations.json"
+      ],
+      "annotation_sha256": [
+        "6f628daf59583be058c093c5a55a149ba4a8fe13e560d6dac52c4245d015503e"
+      ],
+      "aliases": [
+        {
+          "path": "detect/pcd/2026-08-01-05-09-32.pcd",
+          "sha256": "ea736584c7d3815fec90a2bb6d7f1fd615c016452afaba083a75a4057c1cffb2"
+        }
+      ],
+      "duplicate_group": "2026-08-01-05-09-32",
+      "annotation_scope": "PARTIAL_SINGLE_HATCH",
+      "source_family": "dated_scan",
+      "background_contamination": "UNASSESSED_GEOMETRY_ONLY",
+      "alignment_class": "UNASSESSED_GEOMETRY_ONLY",
+      "split_role": "DEVELOPMENT",
+      "golden_candidate": false,
+      "physical_vessel_id": "UNKNOWN",
+      "vessel_relationship": "UNKNOWN",
+      "notes": "静态XYZ；无可信射线轨迹；文件名和标注不得参与产品几何判定"
+    },
+    {
+      "dataset_id": "hold_detector_static_xyz_v1",
+      "scan_id": "2026-08-02-13-10-59",
+      "pcd_filename": "2026-08-02-13-10-59.pcd",
+      "pcd_path": "detect/test/2026-08-02-13-10-59.pcd",
+      "pcd_sha256": "3b5e29617b2adfc691b968abf4f82139672163e35d4cd7e072416baf10abf5a8",
+      "fields": [
+        "x",
+        "y",
+        "z",
+        "_"
+      ],
+      "point_count": 838016,
+      "finite_count": 838016,
+      "ordered_xyz_sha256": "4af1b210d08a39110d330b4ea3d228588aab12b1086a0b1d860e120a77511567",
+      "unordered_xyz_sha256": "ca72df09f605f021f2bbb9fd1867d69a9d59f24dac1097badfcb2730cc1c7989",
+      "bbox_xyz": [
+        [
+          -119.58699798583984,
+          -3.842400074005127,
+          -20.494699478149414
+        ],
+        [
+          24.333200454711914,
+          38.04050064086914,
+          9.874320030212402
+        ]
+      ],
+      "annotation_files": [
+        "detect/pcd/2026-08-02-13-10-59_annotations.json"
+      ],
+      "annotation_sha256": [
+        "af4abb244e5f54b9a21bee25a61fec1fd56edea27ee8323bc304bef46a14e40c"
+      ],
+      "aliases": [
+        {
+          "path": "detect/pcd/2026-08-02-13-10-59.pcd",
+          "sha256": "3b5e29617b2adfc691b968abf4f82139672163e35d4cd7e072416baf10abf5a8"
+        }
+      ],
+      "duplicate_group": "2026-08-02-13-10-59",
+      "annotation_scope": "PARTIAL_SINGLE_HATCH",
+      "source_family": "dated_scan",
+      "background_contamination": "UNASSESSED_GEOMETRY_ONLY",
+      "alignment_class": "UNASSESSED_GEOMETRY_ONLY",
+      "split_role": "SEALED_WEAK_HOLDOUT",
+      "golden_candidate": true,
+      "physical_vessel_id": "UNKNOWN",
+      "vessel_relationship": "LIKELY_DIFFERENT",
+      "notes": "静态XYZ；无可信射线轨迹；文件名和标注不得参与产品几何判定"
+    },
+    {
+      "dataset_id": "hold_detector_static_xyz_v1",
+      "scan_id": "2026-08-08-02-33-57",
+      "pcd_filename": "2026-08-08-02-33-57.pcd",
+      "pcd_path": "detect/test/2026-08-08-02-33-57.pcd",
+      "pcd_sha256": "28ab75a172a6e0d270e822cb66225c7fe09e8fbe8ecc39513cbeb3608d129c2f",
+      "fields": [
+        "intensity",
+        "_",
+        "x",
+        "y",
+        "z",
+        "_"
+      ],
+      "point_count": 163582,
+      "finite_count": 163582,
+      "ordered_xyz_sha256": "075e3effd48af392d37169f37f8e7f46905d175e65129db39059eeed092b5190",
+      "unordered_xyz_sha256": "182597e478b183de97a859bedc4c1b69bfa76daba7729509e0a8e22877c93ff9",
+      "bbox_xyz": [
+        [
+          -86.69010162353516,
+          -2.529900074005127,
+          -12.528800010681152
+        ],
+        [
+          21.82740020751953,
+          27.850099563598633,
+          -0.732312023639679
+        ]
+      ],
+      "annotation_files": [
+        "detect/pcd/2026-08-08-02-33-57_annotations.json"
+      ],
+      "annotation_sha256": [
+        "7b036c75d5e973146a1772b3c27b454080eaa4a47badcfa8d676e7426e58899f"
+      ],
+      "aliases": [
+        {
+          "path": "detect/pcd/2026-08-08-02-33-57.pcd",
+          "sha256": "28ab75a172a6e0d270e822cb66225c7fe09e8fbe8ecc39513cbeb3608d129c2f"
+        },
+        {
+          "path": "annotator/build/pcd/2026-08-08-02-33-57.pcd",
+          "sha256": "669e402089c55b08cd565d07035312ca82a17463ad5af9ba0dab465295b137c0"
+        }
+      ],
+      "duplicate_group": "2026-08-08-02-33-57",
+      "annotation_scope": "PARTIAL_SINGLE_HATCH",
+      "source_family": "dated_scan",
+      "background_contamination": "UNASSESSED_GEOMETRY_ONLY",
+      "alignment_class": "UNASSESSED_GEOMETRY_ONLY",
+      "split_role": "DEVELOPMENT",
+      "golden_candidate": false,
+      "physical_vessel_id": "UNKNOWN",
+      "vessel_relationship": "UNKNOWN",
+      "notes": "静态XYZ；无可信射线轨迹；文件名和标注不得参与产品几何判定"
+    },
+    {
+      "dataset_id": "hold_detector_static_xyz_v1",
+      "scan_id": "final_8_17_005",
+      "pcd_filename": "final_8_17_005.pcd",
+      "pcd_path": "detect/test/final_8_17_005.pcd",
+      "pcd_sha256": "0c5ff3186a01093e1b01e035e3ad415b1b1bd906e09bf11c50e1ef76b8986210",
+      "fields": [
+        "x",
+        "y",
+        "z",
+        "_"
+      ],
+      "point_count": 870738,
+      "finite_count": 870738,
+      "ordered_xyz_sha256": "b607762c37e2efd8b733a6172634eb207805c909ad0e482d2e1e9919f2fdb998",
+      "unordered_xyz_sha256": "b2e218f2316e11d89465ceefa3ca4d6f80fa433ce3cbafdcb2d02e90dc54eb62",
+      "bbox_xyz": [
+        [
+          -56.855499267578125,
+          6.666780245723203e-05,
+          -10.016400337219238
+        ],
+        [
+          59.22800064086914,
+          44.125701904296875,
+          1.0
+        ]
+      ],
+      "annotation_files": [
+        "detect/pcd/final_8_17_005_annotations.json"
+      ],
+      "annotation_sha256": [
+        "696ad1dc84bbbe93787d4a16594434e2c6a4ae01240776a565f2442e95df7995"
+      ],
+      "aliases": [
+        {
+          "path": "detect/pcd/final_8_17_005.pcd",
+          "sha256": "0c5ff3186a01093e1b01e035e3ad415b1b1bd906e09bf11c50e1ef76b8986210"
+        }
+      ],
+      "duplicate_group": "final_8_17_005",
+      "annotation_scope": "PARTIAL_SINGLE_HATCH",
+      "source_family": "final_map",
+      "background_contamination": "UNASSESSED_GEOMETRY_ONLY",
+      "alignment_class": "UNASSESSED_GEOMETRY_ONLY",
+      "split_role": "DEVELOPMENT",
+      "golden_candidate": false,
+      "physical_vessel_id": "UNKNOWN",
+      "vessel_relationship": "UNKNOWN",
+      "notes": "静态XYZ；无可信射线轨迹；文件名和标注不得参与产品几何判定"
+    },
+    {
+      "dataset_id": "hold_detector_static_xyz_v1",
+      "scan_id": "final_map_4_16_2d_005",
+      "pcd_filename": "final_map_4_16_2d_005.pcd",
+      "pcd_path": "detect/test/final_map_4_16_2d_005.pcd",
+      "pcd_sha256": "92bc204d6563a685bdfe12937dd86cc7afaf5f16219a28c9945035703dea5ec1",
+      "fields": [
+        "x",
+        "y",
+        "z"
+      ],
+      "point_count": 702793,
+      "finite_count": 702793,
+      "ordered_xyz_sha256": "e82faa5994e3a299e2d47398f6b0658a81df8db8d7087bcc3762ea44c3e8a8d8",
+      "unordered_xyz_sha256": "b017400212a8a57f6f463aefd46b83c9c5b64af4964071d3a636b07790e2c34c",
+      "bbox_xyz": [
+        [
+          -37.9732551574707,
+          1.239776611328125e-05,
+          -12.408784866333008
+        ],
+        [
+          54.75310516357422,
+          24.237213134765625,
+          0.5711502432823181
+        ]
+      ],
+      "annotation_files": [
+        "detect/pcd/1_annotations.json",
+        "detect/pcd/2_annotations.json",
+        "detect/pcd/final_map_4_16_2d_005_annotations.json"
+      ],
+      "annotation_sha256": [
+        "d8b3a3385e6bd68bdea7de706a64308282a109abe02b7bf435dcbfd2a77145f9",
+        "d69f369ee5c3a4ff3bdb1c099ee2025c010f4fe5e470579f6221cefbb7953f9f",
+        "6ed61fc0aed6a405edb1bc58ae0ed478dcd8cbedc12971818a4528796ef26ad7"
+      ],
+      "aliases": [
+        {
+          "path": "detect/pcd/1.pcd",
+          "sha256": "92bc204d6563a685bdfe12937dd86cc7afaf5f16219a28c9945035703dea5ec1"
+        },
+        {
+          "path": "detect/pcd/2.pcd",
+          "sha256": "92bc204d6563a685bdfe12937dd86cc7afaf5f16219a28c9945035703dea5ec1"
+        },
+        {
+          "path": "detect/pcd/final_map_4_16_2d_005.pcd",
+          "sha256": "92bc204d6563a685bdfe12937dd86cc7afaf5f16219a28c9945035703dea5ec1"
+        }
+      ],
+      "duplicate_group": "final_map_4_16_2d_005",
+      "annotation_scope": "PARTIAL_SINGLE_HATCH",
+      "source_family": "final_map",
+      "background_contamination": "UNASSESSED_GEOMETRY_ONLY",
+      "alignment_class": "UNASSESSED_GEOMETRY_ONLY",
+      "split_role": "DEVELOPMENT",
+      "golden_candidate": false,
+      "physical_vessel_id": "UNKNOWN",
+      "vessel_relationship": "UNKNOWN",
+      "notes": "静态XYZ；无可信射线轨迹；文件名和标注不得参与产品几何判定"
+    },
+    {
+      "dataset_id": "hold_detector_static_xyz_v1",
+      "scan_id": "final_map_4_22_2d_005",
+      "pcd_filename": "final_map_4_22_2d_005.pcd",
+      "pcd_path": "detect/test/final_map_4_22_2d_005.pcd",
+      "pcd_sha256": "3f2d2689653b93ea6e5d805cb7eecca11570d8bfa618c92fe7c60e49537f4969",
+      "fields": [
+        "x",
+        "y",
+        "z"
+      ],
+      "point_count": 2340328,
+      "finite_count": 2340328,
+      "ordered_xyz_sha256": "795f26bb46215684c5e14305545ca971498107e372a3c59a33c841bbbc3bf129",
+      "unordered_xyz_sha256": "720f6944aa62de060a4df5483d31b0123cf7ef67c714d9c4c3793c8b5554859c",
+      "bbox_xyz": [
+        [
+          -61.14872741699219,
+          1.430511474609375e-05,
+          -12.074624061584473
+        ],
+        [
+          31.992719650268555,
+          24.691020965576172,
+          0.999997079372406
+        ]
+      ],
+      "annotation_files": [
+        "detect/pcd/7_annotations.json",
+        "detect/pcd/8_annotations.json",
+        "detect/pcd/final_map_4_22_2d_005_annotations.json"
+      ],
+      "annotation_sha256": [
+        "c4d43c39cf0b21ab697dab295a5141bde1bb77833fd8aa90ac380d7abc806e60",
+        "45729652079cc024161ac34b2d59e3d12e6f8497249c706bab8c2324033d210e",
+        "4223ba6e9b4a268705e7ab08cf1c9c896a1aa02b029591b0d52477ea31feeb86"
+      ],
+      "aliases": [
+        {
+          "path": "detect/pcd/7.pcd",
+          "sha256": "3f2d2689653b93ea6e5d805cb7eecca11570d8bfa618c92fe7c60e49537f4969"
+        },
+        {
+          "path": "detect/pcd/8.pcd",
+          "sha256": "3f2d2689653b93ea6e5d805cb7eecca11570d8bfa618c92fe7c60e49537f4969"
+        },
+        {
+          "path": "detect/pcd/final_map_4_22_2d_005.pcd",
+          "sha256": "3f2d2689653b93ea6e5d805cb7eecca11570d8bfa618c92fe7c60e49537f4969"
+        }
+      ],
+      "duplicate_group": "final_map_4_22_2d_005",
+      "annotation_scope": "PARTIAL_SINGLE_HATCH",
+      "source_family": "final_map",
+      "background_contamination": "UNASSESSED_GEOMETRY_ONLY",
+      "alignment_class": "UNASSESSED_GEOMETRY_ONLY",
+      "split_role": "SEALED_WEAK_HOLDOUT",
+      "golden_candidate": true,
+      "physical_vessel_id": "UNKNOWN",
+      "vessel_relationship": "LIKELY_DIFFERENT",
+      "notes": "静态XYZ；无可信射线轨迹；文件名和标注不得参与产品几何判定"
+    },
+    {
+      "dataset_id": "hold_detector_static_xyz_v1",
+      "scan_id": "final_map_5_21_empty_boat",
+      "pcd_filename": "final_map_5_21_empty_boat.pcd",
+      "pcd_path": "detect/test/final_map_5_21_empty_boat.pcd",
+      "pcd_sha256": "6ebcd91a74a03b09b3315362d4db44891bd2ec84cb66f498083f40ea19f84aab",
+      "fields": [
+        "x",
+        "y",
+        "z"
+      ],
+      "point_count": 6303549,
+      "finite_count": 6303549,
+      "ordered_xyz_sha256": "9ed3393dc672c65b50ebdf8b28e2e8d8f0cd4835a7857ef188f14efc9575c034",
+      "unordered_xyz_sha256": "1f32eecb8354cf3da9817ca496c0931490004aee68c53a0d4ff0719bd30ce921",
+      "bbox_xyz": [
+        [
+          -29.18912696838379,
+          6.318092346191406e-06,
+          -9.52248477935791
+        ],
+        [
+          76.17053985595703,
+          20.799999237060547,
+          0.9999504089355469
+        ]
+      ],
+      "annotation_files": [
+        "detect/pcd/12_annotations.json",
+        "detect/pcd/final_map_5_21_empty_boat_annotations.json"
+      ],
+      "annotation_sha256": [
+        "945b7bdd4670c6039b1cc1e17e87c0278c84a64974719663781943be449e62ea",
+        "878d74296755ea59fe8f1b58e6fa332f1b6169cb47e80c4cc94d2e1d135c09b1"
+      ],
+      "aliases": [
+        {
+          "path": "detect/pcd/12.pcd",
+          "sha256": "6ebcd91a74a03b09b3315362d4db44891bd2ec84cb66f498083f40ea19f84aab"
+        },
+        {
+          "path": "detect/pcd/final_map_5_21_empty_boat.pcd",
+          "sha256": "6ebcd91a74a03b09b3315362d4db44891bd2ec84cb66f498083f40ea19f84aab"
+        }
+      ],
+      "duplicate_group": "final_map_5_21_empty_boat",
+      "annotation_scope": "PARTIAL_SINGLE_HATCH",
+      "source_family": "final_map",
+      "background_contamination": "UNASSESSED_GEOMETRY_ONLY",
+      "alignment_class": "UNASSESSED_GEOMETRY_ONLY",
+      "split_role": "SEALED_WEAK_HOLDOUT",
+      "golden_candidate": true,
+      "physical_vessel_id": "UNKNOWN",
+      "vessel_relationship": "LIKELY_DIFFERENT",
+      "notes": "静态XYZ；无可信射线轨迹；文件名和标注不得参与产品几何判定"
+    },
+    {
+      "dataset_id": "hold_detector_static_xyz_v1",
+      "scan_id": "final_map_5_29_2d_005",
+      "pcd_filename": "final_map_5_29_2d_005.pcd",
+      "pcd_path": "detect/test/final_map_5_29_2d_005.pcd",
+      "pcd_sha256": "3ea43b342fb3fee5792bb9bb7b85a97827c55117f139b3f505cf14c49f90c5a8",
+      "fields": [
+        "x",
+        "y",
+        "z"
+      ],
+      "point_count": 1192146,
+      "finite_count": 1192146,
+      "ordered_xyz_sha256": "4322bfac1f234b261f2d3e09abc60e7248ca77a9b00f90fc4671be6432c001ea",
+      "unordered_xyz_sha256": "a22a235228dbdee8bef839d8d43999e5b97ab006475e89b7ca121868105cdd37",
+      "bbox_xyz": [
+        [
+          -47.6159553527832,
+          3.719329833984375e-05,
+          -7.29176139831543
+        ],
+        [
+          63.86666488647461,
+          45.28425598144531,
+          0.9698734283447266
+        ]
+      ],
+      "annotation_files": [
+        "detect/pcd/3_annotations.json",
+        "detect/pcd/4_annotations.json",
+        "detect/pcd/final_map_5_29_2d_005_annotations.json"
+      ],
+      "annotation_sha256": [
+        "660db0e14893adad8af809d1477270d49f81ccbc419478e03a19867233de0342",
+        "8618a17eaaad87dab9480b8999705e514e913c610dd940b057d519068e24bc75",
+        "84e75508411c1c930874b7071be8f15a2fae24e4eb9cdee36ec14af5326ce53f"
+      ],
+      "aliases": [
+        {
+          "path": "detect/pcd/3.pcd",
+          "sha256": "3ea43b342fb3fee5792bb9bb7b85a97827c55117f139b3f505cf14c49f90c5a8"
+        },
+        {
+          "path": "detect/pcd/4.pcd",
+          "sha256": "3ea43b342fb3fee5792bb9bb7b85a97827c55117f139b3f505cf14c49f90c5a8"
+        },
+        {
+          "path": "detect/pcd/final_map_5_29_2d_005.pcd",
+          "sha256": "3ea43b342fb3fee5792bb9bb7b85a97827c55117f139b3f505cf14c49f90c5a8"
+        }
+      ],
+      "duplicate_group": "final_map_5_29_2d_005",
+      "annotation_scope": "PARTIAL_SINGLE_HATCH",
+      "source_family": "final_map",
+      "background_contamination": "UNASSESSED_GEOMETRY_ONLY",
+      "alignment_class": "UNASSESSED_GEOMETRY_ONLY",
+      "split_role": "DEVELOPMENT",
+      "golden_candidate": false,
+      "physical_vessel_id": "UNKNOWN",
+      "vessel_relationship": "UNKNOWN",
+      "notes": "静态XYZ；无可信射线轨迹；文件名和标注不得参与产品几何判定"
+    },
+    {
+      "dataset_id": "hold_detector_static_xyz_v1",
+      "scan_id": "final_map_6_8_2d_005",
+      "pcd_filename": "final_map_6_8_2d_005.pcd",
+      "pcd_path": "detect/test/final_map_6_8_2d_005.pcd",
+      "pcd_sha256": "a63a2a12b161bea552269f21110164490d669b77afbd4e2de0e6bb766bef9b6f",
+      "fields": [
+        "x",
+        "y",
+        "z"
+      ],
+      "point_count": 701989,
+      "finite_count": 701989,
+      "ordered_xyz_sha256": "283d3469adb07a6cde9cb9849c3d6b475fd7cf78df31627abd8ffb40e96f8f39",
+      "unordered_xyz_sha256": "ef808c52725e7d49ea3a0092b50adf85d105be4c386d2d2dca33fbb29915aaac",
+      "bbox_xyz": [
+        [
+          -55.51748275756836,
+          1.1920928955078125e-06,
+          -9.081313133239746
+        ],
+        [
+          47.49260330200195,
+          34.8736686706543,
+          0.6739406585693359
+        ]
+      ],
+      "annotation_files": [
+        "detect/pcd/final_map_6_8_2d_005_annotations.json"
+      ],
+      "annotation_sha256": [
+        "04b0719b7dd3dacc3cc803935fa988530fbd997602639feaff1aaa1ed8748c7c"
+      ],
+      "aliases": [
+        {
+          "path": "detect/pcd/final_map_6_8_2d_005.pcd",
+          "sha256": "a63a2a12b161bea552269f21110164490d669b77afbd4e2de0e6bb766bef9b6f"
+        }
+      ],
+      "duplicate_group": "final_map_6_8_2d_005",
+      "annotation_scope": "PARTIAL_SINGLE_HATCH",
+      "source_family": "final_map",
+      "background_contamination": "UNASSESSED_GEOMETRY_ONLY",
+      "alignment_class": "UNASSESSED_GEOMETRY_ONLY",
+      "split_role": "DEVELOPMENT",
+      "golden_candidate": false,
+      "physical_vessel_id": "UNKNOWN",
+      "vessel_relationship": "UNKNOWN",
+      "notes": "静态XYZ；无可信射线轨迹；文件名和标注不得参与产品几何判定"
+    },
+    {
+      "dataset_id": "hold_detector_static_xyz_v1",
+      "scan_id": "final_map_7_15_2d_005",
+      "pcd_filename": "final_map_7_15_2d_005.pcd",
+      "pcd_path": "detect/test/final_map_7_15_2d_005.pcd",
+      "pcd_sha256": "d61a10ef7aa1b53ef962e35dd8e5a074c6cf91a4c3c3af08375f08375addeaa1",
+      "fields": [
+        "x",
+        "y",
+        "z"
+      ],
+      "point_count": 1837174,
+      "finite_count": 1837174,
+      "ordered_xyz_sha256": "6ccce626822d481910b4c2a014f9094256dcb68ca61caa0eb2aa969ee40308c8",
+      "unordered_xyz_sha256": "2970eeab14b9676e6f6d4922df5ddcb1f08c571dfd868885f77ccc71dd0af9bb",
+      "bbox_xyz": [
+        [
+          -74.25381469726562,
+          2.384185791015625e-07,
+          -8.690977096557617
+        ],
+        [
+          74.88162231445312,
+          45.49325180053711,
+          0.9999485015869141
+        ]
+      ],
+      "annotation_files": [
+        "detect/pcd/9_annotations.json",
+        "detect/pcd/final_map_7_15_2d_005_annotations.json"
+      ],
+      "annotation_sha256": [
+        "7c16c25a65797df249b8b8051775db3bfcf4c5e8de380cf67ea6a2f9cb18beb9",
+        "7a74d1a53cfd520869abd10e81e5966e95126aa06c6a14359d6979dc0443e1b1"
+      ],
+      "aliases": [
+        {
+          "path": "detect/pcd/9.pcd",
+          "sha256": "d61a10ef7aa1b53ef962e35dd8e5a074c6cf91a4c3c3af08375f08375addeaa1"
+        },
+        {
+          "path": "detect/pcd/final_map_7_15_2d_005.pcd",
+          "sha256": "d61a10ef7aa1b53ef962e35dd8e5a074c6cf91a4c3c3af08375f08375addeaa1"
+        }
+      ],
+      "duplicate_group": "final_map_7_15_2d_005",
+      "annotation_scope": "PARTIAL_SINGLE_HATCH",
+      "source_family": "final_map",
+      "background_contamination": "UNASSESSED_GEOMETRY_ONLY",
+      "alignment_class": "UNASSESSED_GEOMETRY_ONLY",
+      "split_role": "SEALED_WEAK_HOLDOUT",
+      "golden_candidate": true,
+      "physical_vessel_id": "UNKNOWN",
+      "vessel_relationship": "LIKELY_DIFFERENT",
+      "notes": "静态XYZ；无可信射线轨迹；文件名和标注不得参与产品几何判定"
+    },
+    {
+      "dataset_id": "hold_detector_static_xyz_v1",
+      "scan_id": "final_map_7_16_2d_005",
+      "pcd_filename": "final_map_7_16_2d_005.pcd",
+      "pcd_path": "detect/test/final_map_7_16_2d_005.pcd",
+      "pcd_sha256": "3c7c08de7526f1a5e9777a481df69dcd3ed5c401d3f3f92a98faf70d8f7b647e",
+      "fields": [
+        "x",
+        "y",
+        "z"
+      ],
+      "point_count": 780777,
+      "finite_count": 780777,
+      "ordered_xyz_sha256": "a26a5b1642014b25eb414a7d52239faa02f245d6efaf8dab3713527666fd327c",
+      "unordered_xyz_sha256": "cf9e0bc46ca73b8fa04647d065cbe47614538f94255825e7bb97f4fcbbf95c18",
+      "bbox_xyz": [
+        [
+          -81.51625061035156,
+          2.574920654296875e-05,
+          -7.689092636108398
+        ],
+        [
+          31.80658721923828,
+          59.3067626953125,
+          0.9995156526565552
+        ]
+      ],
+      "annotation_files": [
+        "detect/pcd/10_annotations.json",
+        "detect/pcd/final_map_7_16_2d_005_annotations.json"
+      ],
+      "annotation_sha256": [
+        "24469c4860bbad38f21a7be71884b1d1b598f25f0bead3123a757a14e2243e1b",
+        "8be9100019b36c07a27f87a404ab1f09508045a1166264e66fca416b919485be"
+      ],
+      "aliases": [
+        {
+          "path": "detect/pcd/10.pcd",
+          "sha256": "3c7c08de7526f1a5e9777a481df69dcd3ed5c401d3f3f92a98faf70d8f7b647e"
+        },
+        {
+          "path": "detect/pcd/final_map_7_16_2d_005.pcd",
+          "sha256": "3c7c08de7526f1a5e9777a481df69dcd3ed5c401d3f3f92a98faf70d8f7b647e"
+        }
+      ],
+      "duplicate_group": "final_map_7_16_2d_005",
+      "annotation_scope": "PARTIAL_SINGLE_HATCH",
+      "source_family": "final_map",
+      "background_contamination": "UNASSESSED_GEOMETRY_ONLY",
+      "alignment_class": "UNASSESSED_GEOMETRY_ONLY",
+      "split_role": "DEVELOPMENT",
+      "golden_candidate": false,
+      "physical_vessel_id": "UNKNOWN",
+      "vessel_relationship": "UNKNOWN",
+      "notes": "静态XYZ；无可信射线轨迹；文件名和标注不得参与产品几何判定"
+    },
+    {
+      "dataset_id": "hold_detector_static_xyz_v1",
+      "scan_id": "final_map_7_2_005",
+      "pcd_filename": "final_map_7_2_005.pcd",
+      "pcd_path": "detect/test/final_map_7_2_005.pcd",
+      "pcd_sha256": "1b2294589ad682e459aa77acd443103943c951c1d3e487b391eb5090c73c8036",
+      "fields": [
+        "x",
+        "y",
+        "z"
+      ],
+      "point_count": 640240,
+      "finite_count": 640240,
+      "ordered_xyz_sha256": "427aa0c28d661892f5d31dd761e067d232c6c8a10e3e6ec97ba2983c31f060e5",
+      "unordered_xyz_sha256": "e23e9f4dda6e729fbd5177b81b55669960b98c656a9bcc014a59d307284bbc7f",
+      "bbox_xyz": [
+        [
+          -55.86321258544922,
+          0.0001468658447265625,
+          -7.043529510498047
+        ],
+        [
+          15.61355209350586,
+          27.63220977783203,
+          0.803396463394165
+        ]
+      ],
+      "annotation_files": [
+        "detect/pcd/5_annotations.json",
+        "detect/pcd/6_annotations.json",
+        "detect/pcd/final_map_7_2_005_annotations.json"
+      ],
+      "annotation_sha256": [
+        "fadcd17b4b7d821f03fe29c30bafebbc3df8c8e5dd46480941b56bfc994ae894",
+        "254d4c67f9041a4448947d799f1c2dcc6e158f8f6f7cf1e299fafae30a77d727",
+        "c233a35287e07b0a163373e154612d9af38ea72ded6121edd54a805890bfeb4f"
+      ],
+      "aliases": [
+        {
+          "path": "detect/pcd/5.pcd",
+          "sha256": "1b2294589ad682e459aa77acd443103943c951c1d3e487b391eb5090c73c8036"
+        },
+        {
+          "path": "detect/pcd/6.pcd",
+          "sha256": "1b2294589ad682e459aa77acd443103943c951c1d3e487b391eb5090c73c8036"
+        },
+        {
+          "path": "detect/pcd/final_map_7_2_005.pcd",
+          "sha256": "1b2294589ad682e459aa77acd443103943c951c1d3e487b391eb5090c73c8036"
+        }
+      ],
+      "duplicate_group": "final_map_7_2_005",
+      "annotation_scope": "PARTIAL_SINGLE_HATCH",
+      "source_family": "final_map",
+      "background_contamination": "UNASSESSED_GEOMETRY_ONLY",
+      "alignment_class": "UNASSESSED_GEOMETRY_ONLY",
+      "split_role": "DEVELOPMENT",
+      "golden_candidate": false,
+      "physical_vessel_id": "UNKNOWN",
+      "vessel_relationship": "UNKNOWN",
+      "notes": "静态XYZ；无可信射线轨迹；文件名和标注不得参与产品几何判定"
+    },
+    {
+      "dataset_id": "hold_detector_static_xyz_v1",
+      "scan_id": "final_map_8_22_cut",
+      "pcd_filename": "final_map_8_22_cut.pcd",
+      "pcd_path": "detect/test/final_map_8_22_cut.pcd",
+      "pcd_sha256": "5dbe0aec890a976552f60c596d1a11682dcd712f4c22f9a3ecefc73bbf1bff98",
+      "fields": [
+        "x",
+        "y",
+        "z",
+        "_"
+      ],
+      "point_count": 1027532,
+      "finite_count": 1027532,
+      "ordered_xyz_sha256": "5eddf5bd31f004eba9a5f6ccce679fbd4113dd259b811d4e1bcf00d1c12b9d38",
+      "unordered_xyz_sha256": "b0409c7b50cf9fcb68a13aefc5a79d2bfe75714f941217f05300d371fe7024e1",
+      "bbox_xyz": [
+        [
+          -69.9926986694336,
+          1.5139599781832658e-05,
+          -15.532299995422363
+        ],
+        [
+          82.75550079345703,
+          38.71739959716797,
+          0.9996809959411621
+        ]
+      ],
+      "annotation_files": [],
+      "annotation_sha256": [],
+      "aliases": [],
+      "duplicate_group": "final_map_8_22_cut",
+      "annotation_scope": "UNLABELED",
+      "source_family": "final_map",
+      "background_contamination": "UNASSESSED_GEOMETRY_ONLY",
+      "alignment_class": "UNASSESSED_GEOMETRY_ONLY",
+      "split_role": "DEVELOPMENT",
+      "golden_candidate": false,
+      "physical_vessel_id": "UNKNOWN",
+      "vessel_relationship": "UNKNOWN",
+      "notes": "静态XYZ；无可信射线轨迹；文件名和标注不得参与产品几何判定"
+    }
+  ]
+}
