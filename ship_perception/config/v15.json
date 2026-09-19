@@ -30,7 +30,7 @@
     "profile_min_drop_m": 0.15, "profile_max_residual_m": 0.08,
     "profile_max_bracket_m": 0.20, "profile_min_sections": 4,
     "line_inlier_m": 0.10, "line_min_length_m": 0.60,
-    "line_min_points": 6, "merge_angle_deg": 5.0,
+    "line_min_points": 6, "coarse_min_points": 3, "merge_angle_deg": 5.0,
     "merge_distance_m": 0.10, "corner_join_m": 0.20,
     "max_support_gap_m": 0.30, "min_edge_coverage": 0.80,
     "min_intersection_angle_deg": 20.0, "max_inferred_edges": 1,

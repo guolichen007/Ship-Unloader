@@ -309,7 +309,8 @@
         "high_quality_threshold",
         "side_probe_m",
         "beam_max_width_m",
-        "beam_min_length_m"
+        "beam_min_length_m",
+        "coarse_min_points"
       ],
       "properties": {
         "profile_half_length_m": {
@@ -421,6 +422,11 @@
           "type": "number",
           "minimum": 0,
           "maximum": 10.0
+        },
+        "coarse_min_points": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 100
         }
       }
     },
