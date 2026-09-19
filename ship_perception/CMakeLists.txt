@@ -125,3 +125,5 @@ if(BUILD_TESTING)
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/artifacts/pcd_selfcheck)
   endif()
 endif()
+
+include(cmake/V15.cmake)

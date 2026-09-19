@@ -1,0 +1,545 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "geometry",
+    "frame",
+    "roi",
+    "boundary",
+    "evaluation"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "ship_perception.v15"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1
+    },
+    "geometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coarse_voxel_m",
+        "candidate_voxel_m",
+        "refine_voxel_m",
+        "normal_k",
+        "normal_min_points",
+        "normal_radius_m",
+        "plane_inlier_m",
+        "normal_angle_deg",
+        "planarity_min",
+        "ransac_iterations",
+        "min_plane_points",
+        "max_plane_hypotheses",
+        "max_local_extent_m",
+        "max_input_points",
+        "max_candidate_points",
+        "grid_phase_x_m",
+        "grid_phase_y_m"
+      ],
+      "properties": {
+        "coarse_voxel_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5.0
+        },
+        "candidate_voxel_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1.5
+        },
+        "refine_voxel_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "normal_k": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 320
+        },
+        "normal_min_points": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 80
+        },
+        "normal_radius_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 6.0
+        },
+        "plane_inlier_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "normal_angle_deg": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 150.0
+        },
+        "planarity_min": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3.5
+        },
+        "ransac_iterations": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2560
+        },
+        "min_plane_points": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 400
+        },
+        "max_plane_hypotheses": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 160
+        },
+        "max_local_extent_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000.0
+        },
+        "max_input_points": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120000000
+        },
+        "max_candidate_points": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15000000
+        },
+        "grid_phase_x_m": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "grid_phase_y_m": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        }
+      }
+    },
+    "frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "aligned_angle_max_deg",
+        "candidate_score_gap",
+        "up_cluster_deg",
+        "max_up_hypotheses",
+        "longitudinal_ratio_min",
+        "normal_refine_deg"
+      ],
+      "properties": {
+        "aligned_angle_max_deg": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5.0
+        },
+        "candidate_score_gap": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "up_cluster_deg": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100.0
+        },
+        "max_up_hypotheses": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60
+        },
+        "longitudinal_ratio_min": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 11.5
+        },
+        "normal_refine_deg": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 30.0
+        }
+      }
+    },
+    "roi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "opening_drop_m",
+        "opening_min_area_m2",
+        "opening_max_area_m2",
+        "min_opening_cells",
+        "support_band_m",
+        "support_search_m",
+        "min_enclosure_ratio",
+        "min_deck_support_cells",
+        "min_deck_span_m",
+        "max_height_above_deck_m",
+        "max_opening_depth_m",
+        "boundary_search_m",
+        "support_weight",
+        "normal_weight",
+        "continuity_weight",
+        "opening_weight",
+        "enclosure_weight"
+      ],
+      "properties": {
+        "opening_drop_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3.0
+        },
+        "opening_min_area_m2": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20.0
+        },
+        "opening_max_area_m2": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 30000.0
+        },
+        "min_opening_cells": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 80
+        },
+        "support_band_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1.5
+        },
+        "support_search_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 40.0
+        },
+        "min_enclosure_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3.5
+        },
+        "min_deck_support_cells": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300
+        },
+        "min_deck_span_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20.0
+        },
+        "max_height_above_deck_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 30.0
+        },
+        "max_opening_depth_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 250.0
+        },
+        "boundary_search_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 15.0
+        },
+        "support_weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1.5
+        },
+        "normal_weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1.5
+        },
+        "continuity_weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2.0
+        },
+        "opening_weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2.5
+        },
+        "enclosure_weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2.5
+        }
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_half_length_m",
+        "profile_half_width_m",
+        "profile_step_m",
+        "profile_min_points",
+        "profile_min_drop_m",
+        "profile_max_residual_m",
+        "profile_max_bracket_m",
+        "profile_min_sections",
+        "line_inlier_m",
+        "line_min_length_m",
+        "line_min_points",
+        "merge_angle_deg",
+        "merge_distance_m",
+        "corner_join_m",
+        "max_support_gap_m",
+        "min_edge_coverage",
+        "min_intersection_angle_deg",
+        "max_inferred_edges",
+        "high_quality_threshold",
+        "side_probe_m",
+        "beam_max_width_m",
+        "beam_min_length_m"
+      ],
+      "properties": {
+        "profile_half_length_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 15.0
+        },
+        "profile_half_width_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1.5
+        },
+        "profile_step_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "profile_min_points": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120
+        },
+        "profile_min_drop_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1.5
+        },
+        "profile_max_residual_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "profile_max_bracket_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2.0
+        },
+        "profile_min_sections": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 40
+        },
+        "line_inlier_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "line_min_length_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 6.0
+        },
+        "line_min_points": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60
+        },
+        "merge_angle_deg": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50.0
+        },
+        "merge_distance_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "corner_join_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2.0
+        },
+        "max_support_gap_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3.0
+        },
+        "min_edge_coverage": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 8.0
+        },
+        "min_intersection_angle_deg": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 200.0
+        },
+        "max_inferred_edges": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "high_quality_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 7.0
+        },
+        "side_probe_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5.0
+        },
+        "beam_max_width_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 15.0
+        },
+        "beam_min_length_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10.0
+        }
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "local_annotation_margin_m",
+        "association_gap",
+        "association_min_score",
+        "duplicate_overlap_min",
+        "boundary_p95_m",
+        "corner_p95_m",
+        "coverage_total_min",
+        "coverage_edge_min",
+        "deck_offset_max_m",
+        "deck_tilt_budget_m",
+        "deck_angle_max_deg",
+        "deck_distance_p95_m",
+        "real_frame_min",
+        "real_deck_min",
+        "real_joint_min",
+        "real_association_min",
+        "quick_frames",
+        "full_frames"
+      ],
+      "properties": {
+        "local_annotation_margin_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 15.0
+        },
+        "association_gap": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "association_min_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3.5
+        },
+        "duplicate_overlap_min": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5.0
+        },
+        "boundary_p95_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1.5
+        },
+        "corner_p95_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1.5
+        },
+        "coverage_total_min": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 9.0
+        },
+        "coverage_edge_min": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 8.0
+        },
+        "deck_offset_max_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "deck_tilt_budget_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "deck_angle_max_deg": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2.5
+        },
+        "deck_distance_p95_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "real_frame_min": {
+          "type": "integer",
+          "minimum": 7,
+          "maximum": 7
+        },
+        "real_deck_min": {
+          "type": "integer",
+          "minimum": 7,
+          "maximum": 7
+        },
+        "real_joint_min": {
+          "type": "integer",
+          "minimum": 7,
+          "maximum": 7
+        },
+        "real_association_min": {
+          "type": "integer",
+          "minimum": 6,
+          "maximum": 6
+        },
+        "quick_frames": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 500
+        },
+        "full_frames": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2000
+        }
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

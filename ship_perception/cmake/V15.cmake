@@ -1,0 +1,17 @@
+set(V15_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/config/v15.json" CACHE FILEPATH "V1.5 配置")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${V15_CONFIG}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/config/v15.schema.json" "${CMAKE_CURRENT_SOURCE_DIR}/tools/configure_v15.py")
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/configure_v15.py"
+  "${V15_CONFIG}" "${CMAKE_CURRENT_BINARY_DIR}/generated/ship_perception/v15_config.hpp" RESULT_VARIABLE v15_result)
+if(NOT v15_result EQUAL 0)
+  message(FATAL_ERROR "V1.5 配置校验失败")
+endif()
+add_library(ship_structure src/structure/geometry_fit.cpp src/structure/offline_ship_frame.cpp)
+target_include_directories(ship_structure PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_link_libraries(ship_structure PUBLIC Eigen3::Eigen PRIVATE small_gicp_vendor)
+if(BUILD_TESTING)
+  add_executable(v15_frame tests/v15_frame.cpp)
+  target_link_libraries(v15_frame PRIVATE ship_structure)
+  add_test(NAME v15_frame COMMAND v15_frame)
+  add_test(NAME v14_frozen_paths COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/verify_v14_frozen.py")
+endif()
