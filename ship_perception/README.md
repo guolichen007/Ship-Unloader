@@ -41,8 +41,8 @@ M0 的 `config/m0.json` 与原阈值保持不变。V1.4 使用 `config/v14.json`
 |---|---|
 | G1/G2/G3/G4/G6/G7 | 原坐标、时间戳、吊机补偿、双雷达、float 精度与延时回归 |
 | g5_harness | 原 11 类场景的生成、GT 与故障注入断言 |
-| v14_backend | 真实 GICP/VGICP 已知 SE(3) 能力；PCL-ON 时追加对照 |
-| v14_safety | 数学非法输出、错误合法位姿、候选、隔离、容量、revision 和支撑不足 |
+| v14_backend | GICP/VGICP 已知 SE(3) 能力；PCL-ON 时 PCL 也必须执行、收敛、有效并达到 5cm/0.5° |
+| v14_safety | 非法输出、错误位姿、稳定/晋升点再隔离和重新审核、初始化质心顺序不变性、容量、revision 和支撑不足 |
 | v14_validation_boundary | 缺证据、后端拼接、benchmark 不公平、非法接受及地图污染的验收反例 |
 | G5 Quick | 50 帧、seed42、五个核心场景、两后端 benchmark 与独立闭环、GT 隔离和捕获诊断 |
 | Full Acceptance | 200 帧、42/1337/2026、11 个必测及 6 个诊断场景、同一后端整体放行 |

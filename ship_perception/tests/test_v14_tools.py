@@ -21,7 +21,7 @@ class AcceptanceTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.config = json.loads((PROJECT / "config/v14.json").read_text())
         self.config["acceptance"]["quick_frames"] = 3
-        (self.output / "metadata.json").write_text(json.dumps(dict(filtered=False, profile="quick", gt_isolation=True)))
+        self.metadata = dict(filtered=False, profile="quick", gt_isolation=True, pcl_available=False)
         self.series, self.quality, self.poses, self.maps, self.timing = [], [], [], [], []
         for scene in runner.QUICK:
             for method in runner.METHODS:
@@ -42,6 +42,7 @@ class AcceptanceTests(unittest.TestCase):
                                 candidate_revision=0, active=100, candidates=0, quarantined=0, suspect=0, stable=100))
 
     def audit(self):
+        (self.output / "metadata.json").write_text(json.dumps(self.metadata))
         for filename, rows in [("series.csv", self.series), ("quality.csv", self.quality), ("pose.csv", self.poses),
                                ("map.csv", self.maps), ("timing.csv", self.timing)]:
             with (self.output / filename).open("w", newline="") as stream:
@@ -85,6 +86,36 @@ class AcceptanceTests(unittest.TestCase):
     def test_nonfinite_metrics_cannot_pass(self):
         self.quality[0]["rmse"] = float("nan")
         with self.assertRaises(ValueError): self.audit()
+
+    def add_pcl_results(self):
+        self.metadata["pcl_available"] = True
+        for scene in runner.QUICK:
+            for source, destination in ((self.quality, self.quality), (self.poses, self.poses)):
+                row = next(r for r in source if r["scenario"] == scene and r["frame"] == 1 and r["lane"] == "benchmark")
+                destination.append(dict(row, method="PCL_GICP", lane="pcl_comparison"))
+
+    def test_pcl_comparison_required_when_enabled(self):
+        self.metadata["pcl_available"] = True
+        with self.assertRaisesRegex(ValueError, "PCL"): self.audit()
+        self.add_pcl_results()
+        self.assertEqual(self.audit(), ["GICP", "VGICP"])
+        self.quality.pop()
+        with self.assertRaisesRegex(ValueError, "PCL"): self.audit()
+
+    def test_pcl_comparison_must_execute(self):
+        self.add_pcl_results()
+        self.quality[-1].update(valid=0, backend_executed=0)
+        with self.assertRaisesRegex(ValueError, "PCL"): self.audit()
+
+    def test_pcl_illegal_output_blocked_even_when_rejected(self):
+        self.add_pcl_results()
+        self.quality[-1].update(valid=0, mathematical_failure=1)
+        with self.assertRaisesRegex(ValueError, "PCL"): self.audit()
+
+    def test_pcl_cannot_report_evidence_when_disabled(self):
+        self.add_pcl_results()
+        self.metadata["pcl_available"] = False
+        with self.assertRaisesRegex(ValueError, "PCL"): self.audit()
 
 
 if __name__ == "__main__":

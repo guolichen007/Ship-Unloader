@@ -16,12 +16,17 @@ void TrackingReferenceMap::initialize(const Points& points) {
   // 先完成全部验证，再修改地图。
   for(const auto& p:points) if(!p.allFinite() || p.cwiseAbs().maxCoeff()>config_.registration.max_local_coordinate_m)
     throw std::invalid_argument("非法地图初始点");
-  std::map<Key,Cell> initial;
+  struct Aggregate {Eigen::Vector3d sum=Eigen::Vector3d::Zero();std::size_t count=0;};
+  std::map<Key,Aggregate> voxels;
   for(const auto& p:points) {
-    const auto k=key(p.cast<double>());
-    if(initial.count(k)) continue;
+    auto& voxel=voxels[key(p.cast<double>())];
+    voxel.sum+=p.cast<double>();++voxel.count;
+  }
+  std::map<Key,Cell> initial;
+  // 先聚合完整体素，再按有序 key 截断容量，避免点顺序影响代表点或保留集合。
+  for(const auto& kv:voxels) {
     if(initial.size()>=std::size_t(config_.tracking_map.max_reference_voxels)) break;
-    Cell cell; cell.point=p.cast<double>(); initial.emplace(k,cell);
+    Cell cell;cell.point=kv.second.sum/double(kv.second.count);initial.emplace(kv.first,cell);
   }
   if(initial.size()<std::size_t(config_.registration.min_points)) throw std::invalid_argument("初始参考支撑不足");
   cells_=std::move(initial); rebuild();
@@ -58,7 +63,7 @@ bool TrackingReferenceMap::commit(std::uint64_t frame,const Points& points,const
       if(cell.support>=std::size_t(c.min_support_frames)) cell.stable=true;
       continue;
     }
-    if(cell.stable || !cell.bootstrap) continue;
+    // stable 只表示历史支持，不豁免自由空间冲突；晋升点也必须可被隔离。
     // 没有返回、遮挡、FOV 外均不计冲突；必须有射线穿越并更远返回。
     bool conflict=false;
     for(const auto& ray:rays) {

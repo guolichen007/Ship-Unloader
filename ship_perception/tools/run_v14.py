@@ -81,6 +81,14 @@ def audit(output, profile, config):
     quality_by_key = {tuple(r[k] for k in keys): r for r in quality}
     if not wanted.issubset(quality_by_key) or len(quality_by_key) != len(quality):
         raise ValueError("逐帧质量证据缺失或重复")
+    pcl_quality = {key: row for key, row in quality_by_key.items() if key[3] == "PCL_GICP" or key[4] == "pcl_comparison"}
+    pcl_pose_keys = {key for key in pose_keys if key[3] == "PCL_GICP" or key[4] == "pcl_comparison"}
+    pcl_expected = {(scene, str(seed), "1", "PCL_GICP", "pcl_comparison") for scene in scenes for seed in seeds} if metadata.get("pcl_available") else set()
+    if set(pcl_quality) != pcl_expected or pcl_pose_keys != pcl_expected:
+        raise ValueError("PCL 对照结果缺失或与构建可用性不一致")
+    for row in pcl_quality.values():
+        if row["backend_executed"] != "1" or row["mathematical_failure"] != "0":
+            raise ValueError("PCL 对照未真实执行或出现数学非法输出")
     for scene in scenes:
         for seed in seeds:
             for frame in range(1, frames):
