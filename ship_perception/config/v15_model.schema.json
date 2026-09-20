@@ -1,0 +1,642 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "V1.5 结构候选模型",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "software_git_sha",
+    "config_hash",
+    "review_status",
+    "control_ready",
+    "canonical",
+    "heading_semantics",
+    "candidate_id_semantics",
+    "frame_resolved",
+    "input_alignment",
+    "T_B_input",
+    "deck",
+    "hatches",
+    "structures",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ship_perception.v15.model.1"
+    },
+    "software_git_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "config_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "review_status": {
+      "const": "UNREVIEWED"
+    },
+    "control_ready": {
+      "const": false
+    },
+    "canonical": {
+      "const": false
+    },
+    "heading_semantics": {
+      "const": "UNRESOLVED"
+    },
+    "candidate_id_semantics": {
+      "const": "LOCAL_TO_THIS_MODEL"
+    },
+    "frame_resolved": {
+      "type": "boolean"
+    },
+    "input_alignment": {
+      "type": "string",
+      "enum": [
+        "ALIGNED",
+        "RAW",
+        "UNKNOWN"
+      ]
+    },
+    "T_B_input": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "deck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "valid",
+        "normal",
+        "offset",
+        "support_region",
+        "support_count",
+        "support_ratio",
+        "residual_p50_m",
+        "residual_p95_m",
+        "quality_score"
+      ],
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "normal": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offset": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "support_region": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          }
+        },
+        "support_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "support_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "residual_p50_m": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "residual_p95_m": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quality_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "hatches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidate_id",
+          "status",
+          "nominal_polygon",
+          "center",
+          "extent",
+          "observed_edge_count",
+          "inferred_edge_count",
+          "completeness",
+          "quality_score",
+          "boundaries",
+          "warnings"
+        ],
+        "properties": {
+          "candidate_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "COMPLETE_OBSERVED",
+              "COMPLETE_WITH_INFERENCE",
+              "PARTIAL"
+            ]
+          },
+          "nominal_polygon": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "center": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "extent": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "observed_edge_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "inferred_edge_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completeness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "quality_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "boundaries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "a",
+                "b",
+                "side",
+                "visibility",
+                "evidence_flags",
+                "evidence_mechanism",
+                "support_count",
+                "observed_support_length",
+                "extrapolation_length",
+                "fit_residual_p50_m",
+                "fit_residual_p95_m",
+                "normal_uncertainty_rad",
+                "quality_score",
+                "start",
+                "end",
+                "last_observed_ns",
+                "support_intervals"
+              ],
+              "properties": {
+                "a": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "b": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "side": {
+                  "type": "string",
+                  "enum": [
+                    "INNER_OPENING_FACE",
+                    "OUTER_FACE",
+                    "SIDE_UNRESOLVED"
+                  ]
+                },
+                "visibility": {
+                  "type": "string",
+                  "enum": [
+                    "VISIBLE",
+                    "UNCERTAIN"
+                  ]
+                },
+                "evidence_flags": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 7
+                },
+                "evidence_mechanism": {
+                  "type": "string"
+                },
+                "support_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "observed_support_length": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "extrapolation_length": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "fit_residual_p50_m": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "fit_residual_p95_m": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "normal_uncertainty_rad": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "quality_score": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "start": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "endpoint_bounded",
+                    "endpoint_uncertainty_m",
+                    "termination_evidence"
+                  ],
+                  "properties": {
+                    "endpoint_bounded": {
+                      "type": "boolean"
+                    },
+                    "endpoint_uncertainty_m": {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "termination_evidence": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "end": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "endpoint_bounded",
+                    "endpoint_uncertainty_m",
+                    "termination_evidence"
+                  ],
+                  "properties": {
+                    "endpoint_bounded": {
+                      "type": "boolean"
+                    },
+                    "endpoint_uncertainty_m": {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "termination_evidence": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "last_observed_ns": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "support_intervals": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                  }
+                }
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "structures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "reason",
+          "segment"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "COAMING_OR_HOLD_WALL",
+              "BEAM_OR_PARTITION",
+              "STRUCTURAL_LINEAR_UNKNOWN",
+              "HULL_STRUCTURE"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "segment": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "a",
+              "b",
+              "side",
+              "visibility",
+              "evidence_flags",
+              "evidence_mechanism",
+              "support_count",
+              "observed_support_length",
+              "extrapolation_length",
+              "fit_residual_p50_m",
+              "fit_residual_p95_m",
+              "normal_uncertainty_rad",
+              "quality_score",
+              "start",
+              "end",
+              "last_observed_ns",
+              "support_intervals"
+            ],
+            "properties": {
+              "a": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "b": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "side": {
+                "type": "string",
+                "enum": [
+                  "INNER_OPENING_FACE",
+                  "OUTER_FACE",
+                  "SIDE_UNRESOLVED"
+                ]
+              },
+              "visibility": {
+                "type": "string",
+                "enum": [
+                  "VISIBLE",
+                  "UNCERTAIN"
+                ]
+              },
+              "evidence_flags": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 7
+              },
+              "evidence_mechanism": {
+                "type": "string"
+              },
+              "support_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "observed_support_length": {
+                "type": "number",
+                "minimum": 0
+              },
+              "extrapolation_length": {
+                "type": "number",
+                "minimum": 0
+              },
+              "fit_residual_p50_m": {
+                "type": "number",
+                "minimum": 0
+              },
+              "fit_residual_p95_m": {
+                "type": "number",
+                "minimum": 0
+              },
+              "normal_uncertainty_rad": {
+                "type": "number",
+                "minimum": 0
+              },
+              "quality_score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "start": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "endpoint_bounded",
+                  "endpoint_uncertainty_m",
+                  "termination_evidence"
+                ],
+                "properties": {
+                  "endpoint_bounded": {
+                    "type": "boolean"
+                  },
+                  "endpoint_uncertainty_m": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "termination_evidence": {
+                    "type": "string"
+                  }
+                }
+              },
+              "end": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "endpoint_bounded",
+                  "endpoint_uncertainty_m",
+                  "termination_evidence"
+                ],
+                "properties": {
+                  "endpoint_bounded": {
+                    "type": "boolean"
+                  },
+                  "endpoint_uncertainty_m": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "termination_evidence": {
+                    "type": "string"
+                  }
+                }
+              },
+              "last_observed_ns": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "support_intervals": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
