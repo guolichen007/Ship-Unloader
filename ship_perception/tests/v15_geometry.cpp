@@ -1,4 +1,4 @@
-#include <ship_perception/structure/linear_structure_detector.hpp>
+#include <ship_perception/structure/topology_assembler.hpp>
 #include <iostream>
 using namespace ship::v15;
 int main(){try{
@@ -7,5 +7,12 @@ int main(){try{
   const auto structures=extract_structures(p,Config{});std::cout<<"OPENINGS="<<structures.openings.size()<<"\n";
   if(structures.openings.size()!=2)throw std::runtime_error("MULTI_OPENING");
   for(const auto& o:structures.openings){std::cout<<"EDGES="<<o.boundaries.size()<<"\n";for(const auto& e:o.boundaries)std::cout<<e.evidence_mechanism<<" "<<e.a.transpose()<<" -> "<<e.b.transpose()<<" support="<<e.observed_support_length<<"\n";if(o.boundaries.size()<4)throw std::runtime_error("VERTICAL_BLIND_BOUNDARY");}
+  const auto hatches=assemble_hatches(structures,Config{});
+  if(hatches.size()!=2)throw std::runtime_error("HATCH_COUNT");
+  for(const auto& h:hatches){std::cout<<"COMPLETE="<<(h.status==HatchStatus::COMPLETE_OBSERVED)<<"\n";if(h.status!=HatchStatus::COMPLETE_OBSERVED)throw std::runtime_error("HATCH_CLOSURE");}
+  auto partial=structures;partial.openings[0].boundaries.resize(2);
+  auto failed=assemble_hatches(partial,Config{});
+  if(failed[0].status!=HatchStatus::PARTIAL || failed[0].nominal_polygon)throw std::runtime_error("FORCED_CLOSURE");
+  for(const auto& edge:failed[0].boundaries)if(edge.start.bounded || edge.end.bounded || edge.start.uncertainty_m || edge.end.uncertainty_m)throw std::runtime_error("FALSE_ENDPOINT_BOUND");
   std::cout<<"TOP_DOWN_ZERO_VERTICAL_FACES=PASS\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}}

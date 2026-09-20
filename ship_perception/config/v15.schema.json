@@ -40,7 +40,8 @@
         "max_input_points",
         "max_candidate_points",
         "grid_phase_x_m",
-        "grid_phase_y_m"
+        "grid_phase_y_m",
+        "normal_min_secondary_ratio"
       ],
       "properties": {
         "coarse_voxel_m": {
@@ -127,6 +128,11 @@
           "type": "number",
           "minimum": -1,
           "maximum": 1
+        },
+        "normal_min_secondary_ratio": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 0.5
         }
       }
     },
@@ -139,7 +145,8 @@
         "up_cluster_deg",
         "max_up_hypotheses",
         "longitudinal_ratio_min",
-        "normal_refine_deg"
+        "normal_refine_deg",
+        "same_plane_overlap_min"
       ],
       "properties": {
         "aligned_angle_max_deg": {
@@ -171,6 +178,11 @@
           "type": "number",
           "minimum": 0,
           "maximum": 30.0
+        },
+        "same_plane_overlap_min": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 1.0
         }
       }
     },
@@ -194,7 +206,11 @@
         "normal_weight",
         "continuity_weight",
         "opening_weight",
-        "enclosure_weight"
+        "enclosure_weight",
+        "support_connectivity_m",
+        "deck_normal_mode_support_ratio",
+        "deck_normal_mode_angle_deg",
+        "deck_min_enclosure_ratio"
       ],
       "properties": {
         "opening_drop_m": {
@@ -281,6 +297,26 @@
           "type": "number",
           "minimum": 0,
           "maximum": 2.5
+        },
+        "support_connectivity_m": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 2.0
+        },
+        "deck_normal_mode_support_ratio": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 1.0
+        },
+        "deck_normal_mode_angle_deg": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 15.0
+        },
+        "deck_min_enclosure_ratio": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 1.0
         }
       }
     },
@@ -310,7 +346,14 @@
         "side_probe_m",
         "beam_max_width_m",
         "beam_min_length_m",
-        "coarse_min_points"
+        "coarse_min_points",
+        "side_inner_gap_max_m",
+        "beam_min_aspect_ratio",
+        "profile_deck_support_span_m",
+        "profile_lower_quantile",
+        "face_vertical_span_min_m",
+        "profile_deck_slope_max_deg",
+        "profile_step_slope_min"
       ],
       "properties": {
         "profile_half_length_m": {
@@ -427,6 +470,41 @@
           "type": "integer",
           "minimum": 3,
           "maximum": 100
+        },
+        "side_inner_gap_max_m": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 0.5
+        },
+        "beam_min_aspect_ratio": {
+          "type": "number",
+          "minimum": 1.0,
+          "maximum": 10.0
+        },
+        "profile_deck_support_span_m": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 1.0
+        },
+        "profile_lower_quantile": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 0.5
+        },
+        "face_vertical_span_min_m": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 1.0
+        },
+        "profile_deck_slope_max_deg": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 10.0
+        },
+        "profile_step_slope_min": {
+          "type": "number",
+          "minimum": 0.2,
+          "maximum": 20.0
         }
       }
     },

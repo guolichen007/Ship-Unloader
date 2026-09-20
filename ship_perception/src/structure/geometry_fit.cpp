@@ -8,6 +8,7 @@
 #include <queue>
 #include <set>
 #include <stdexcept>
+#include <climits>
 
 namespace ship { namespace v15 {
 struct LocalIndex::Impl {
@@ -57,8 +58,11 @@ std::vector<Normal> normals(const Points& p,const Config& c) {
     Eigen::Matrix3d cov=Eigen::Matrix3d::Zero();for(auto id:ids){const Eigen::Vector3d d=p[id].cast<double>()-mean;cov+=d*d.transpose();}
     cov/=double(ids.size());Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eig(cov);
     const auto e=eig.eigenvalues();if(eig.info()!=Eigen::Success || e[2]<1e-12 || e[1]<1e-12)continue;
-    out[i].direction=eig.eigenvectors().col(0);out[i].planarity=(e[1]-e[0])/e[2];
-    out[i].spread=std::sqrt(std::max(0.,e[0])/e[1]);out[i].valid=out[i].planarity>=c.geometry.planarity_min;
+    // A narrow but two-dimensional strip still has a stable plane normal.
+    // Separate rank-two support from orthogonal residual, instead of confusing
+    // anisotropic sampling with a non-planar surface.
+    out[i].direction=eig.eigenvectors().col(0);out[i].planarity=1-std::max(0.,e[0])/e[1];
+    out[i].spread=std::sqrt(std::max(0.,e[0])/e[1]);out[i].valid=out[i].planarity>=c.geometry.planarity_min && e[1]/e[2]>=c.geometry.normal_min_secondary_ratio;
   }return out;
 }
 PlaneFit fit_plane(const Points& p,const std::vector<std::size_t>& initial,const Eigen::Vector3d& up,const Config& c) {
@@ -99,15 +103,21 @@ HeightGrid height_grid(const Points& p,const Config& c) {
 }
 std::vector<Opening> find_openings(const HeightGrid& grid,double z,const Config& c) {
   std::set<CellKey> lows;
-  for(const auto& kv:grid)if(kv.second.median<z-c.roi.opening_drop_m && kv.second.hi<z+c.roi.support_band_m && kv.second.median>z-c.roi.max_opening_depth_m)lows.insert(kv.first);
+  CellKey minimum{INT_MAX,INT_MAX},maximum{INT_MIN,INT_MIN};
+  for(const auto& kv:grid)for(int axis=0;axis<2;++axis){minimum[axis]=std::min(minimum[axis],kv.first[axis]);maximum[axis]=std::max(maximum[axis],kv.first[axis]);}
+  // A high cross-member does not erase actual returns beneath it. This is a
+  // measured lower layer, never an inference of free space from an empty cell.
+  for(const auto& kv:grid)if(kv.second.lo<z-c.roi.opening_drop_m && kv.second.lo>z-c.roi.max_opening_depth_m)lows.insert(kv.first);
   std::set<CellKey> visited;std::vector<Opening> out;const int dx[]={-1,1,0,0},dy[]={0,0,-1,1};
   for(const auto& start:lows) {
     if(visited.count(start))continue;
     Opening opening;std::queue<CellKey> todo;todo.push(start);visited.insert(start);std::size_t faces=0,supported=0;
     while(!todo.empty()) {
       auto k=todo.front();todo.pop();opening.cells.push_back(k);
+      for(int axis=0;axis<2;++axis)if(k[axis]==minimum[axis] || k[axis]==maximum[axis])opening.touches_scan_boundary=true;
       for(int a=0;a<4;++a){CellKey next{k[0]+dx[a],k[1]+dy[a]};
         if(lows.count(next)){if(visited.insert(next).second)todo.push(next);continue;}
+        if(!grid.count(next))opening.touches_scan_boundary=true;
         ++faces;bool support=false;
         for(int step=1;step<=int(std::ceil(c.roi.support_search_m/c.geometry.coarse_voxel_m));++step){
           auto it=grid.find({k[0]+dx[a]*step,k[1]+dy[a]*step});
@@ -123,6 +133,17 @@ std::vector<Opening> find_openings(const HeightGrid& grid,double z,const Config&
   }return out;
 }
 double polygon_area(const std::vector<Eigen::Vector2d>& p) {double sum=0;for(std::size_t i=0;i<p.size();++i){auto& a=p[i];auto& b=p[(i+1)%p.size()];sum+=a.x()*b.y()-a.y()*b.x();}return sum*.5;}
+std::vector<Eigen::Vector2d> convex_support_hull(std::vector<Eigen::Vector2d> p) {
+  std::sort(p.begin(),p.end(),[](const auto& a,const auto& b){return a.x()<b.x()||(a.x()==b.x()&&a.y()<b.y());});
+  p.erase(std::unique(p.begin(),p.end(),[](const auto& a,const auto& b){return a==b;}),p.end());
+  if(p.size()<3)return {};
+  auto cross=[](const auto& a,const auto& b,const auto& c){const Eigen::Vector2d u=b-a,v=c-a;return u.x()*v.y()-u.y()*v.x();};
+  std::vector<Eigen::Vector2d> h;
+  for(const auto& q:p){while(h.size()>1&&cross(h[h.size()-2],h.back(),q)<=0)h.pop_back();h.push_back(q);}
+  const auto lower=h.size();
+  for(auto i=p.rbegin()+1;i!=p.rend();++i){while(h.size()>lower&&cross(h[h.size()-2],h.back(),*i)<=0)h.pop_back();h.push_back(*i);}
+  h.pop_back();return h;
+}
 bool inside(const Eigen::Vector2d& q,const std::vector<Eigen::Vector2d>& p) {
   bool result=false;if(p.empty())return false;
   for(std::size_t i=0,j=p.size()-1;i<p.size();j=i++)if((p[i].y()>q.y())!=(p[j].y()>q.y()) && q.x()<(p[j].x()-p[i].x())*(q.y()-p[i].y())/(p[j].y()-p[i].y())+p[i].x())result=!result;

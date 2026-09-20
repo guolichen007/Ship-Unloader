@@ -17,6 +17,12 @@ int main(int argc,char** argv) {try {
   if(!result.valid)return 1;
   std::cout<<"T_B_INPUT\n"<<result.cloud.T_B_input.matrix()<<"\n";
   if(argc==1) {
+    DeckPlaneCandidate a,b,duplicate;a.valid=b.valid=duplicate.valid=true;
+    a.quality_score=.8;b.quality_score=.75;duplicate.quality_score=.79;
+    a.support_region={{-5,-3,0},{5,-3,0},{5,3,0},{-5,3,0}};duplicate=a;duplicate.quality_score=.79;
+    b=a;b.quality_score=.75;b.plane.offset=1;for(auto& v:b.support_region)v.z()=-1;
+    if(select_deck_candidate({a,b,duplicate},Config{}).valid || select_deck_candidate({duplicate,b,a},Config{}).valid)throw std::runtime_error("DUPLICATE_HID_COMPETING_PLANE");
+    if(!select_deck_candidate({a,duplicate},Config{}).valid)throw std::runtime_error("EQUIVALENT_PLANE_REJECTED");
     if(std::abs(result.cloud.T_B_input.linear()(2,2)-1)>1e-5)throw std::runtime_error("UP");
     Transform rotated=Transform::Identity();rotated.linear()=(Eigen::AngleAxisd(.4,Eigen::Vector3d::UnitX())*Eigen::AngleAxisd(.2,Eigen::Vector3d::UnitY())).toRotationMatrix();
     for(auto& q:p)q=(rotated*q.cast<double>()).cast<float>();

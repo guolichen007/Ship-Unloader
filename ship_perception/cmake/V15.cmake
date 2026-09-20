@@ -6,7 +6,7 @@ execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/too
 if(NOT v15_result EQUAL 0)
   message(FATAL_ERROR "V1.5 配置校验失败")
 endif()
-add_library(ship_structure src/structure/geometry_fit.cpp src/structure/offline_ship_frame.cpp src/structure/linear_structure_detector.cpp)
+add_library(ship_structure src/structure/geometry_fit.cpp src/structure/offline_ship_frame.cpp src/structure/linear_structure_detector.cpp src/structure/topology_assembler.cpp)
 target_include_directories(ship_structure PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(ship_structure PUBLIC Eigen3::Eigen PRIVATE small_gicp_vendor)
 if(BUILD_TESTING)

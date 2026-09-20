@@ -21,8 +21,9 @@ using CellKey=std::array<int,2>;
 struct HeightCell {std::vector<std::size_t> ids;double lo=0,hi=0,median=0;Eigen::Vector2d center=Eigen::Vector2d::Zero();};
 using HeightGrid=std::map<CellKey,HeightCell>;
 HeightGrid height_grid(const Points& p,const Config& c);
-struct Opening {std::vector<CellKey> cells;std::vector<Eigen::Vector2d> boundary;double enclosure=0;};
+struct Opening {std::vector<CellKey> cells;std::vector<Eigen::Vector2d> boundary;double enclosure=0;bool touches_scan_boundary=false;};
 std::vector<Opening> find_openings(const HeightGrid& grid,double level,const Config& c);
 double polygon_area(const std::vector<Eigen::Vector2d>& p);
 bool inside(const Eigen::Vector2d& p,const std::vector<Eigen::Vector2d>& polygon);
+std::vector<Eigen::Vector2d> convex_support_hull(std::vector<Eigen::Vector2d> points);
 }} // namespace ship::v15
