@@ -1,5 +1,7 @@
 """严格的开发侧 XYZ 解码；不解析标注，不应用 VIEWPOINT。"""
 import hashlib
+import json
+import io
 import struct
 from pathlib import Path
 
@@ -8,10 +10,11 @@ class UnsupportedPCD(ValueError):
     pass
 
 
-def decode(path):
+def decode(path, *, padding_contracts=None):
     def fail(reason):
         raise UnsupportedPCD("UNSUPPORTED_PCD_FORMAT: " + reason)
-    with Path(path).open("rb") as stream:
+    file_bytes=Path(path).read_bytes()
+    with io.BytesIO(file_bytes) as stream:
         header = {}
         for _ in range(64):
             line = stream.readline(4097)
@@ -59,11 +62,23 @@ def decode(path):
         header_bytes = stream.tell()
         payload = stream.read()
         trailing = payload[n * stride:]
-        # Audited PCL mmap writer layout: allocation includes a 4096-byte header
-        # reservation, while data starts immediately after the text header.
-        padding = 4096-header_bytes
-        if len(payload) == n*stride+padding and 0 < padding < 4096 and not any(trailing):
+        if trailing:
+            # The writer signature alone is not authorization to ignore bytes.
+            # Bind the exception to a previously audited immutable file identity.
+            if padding_contracts is None:
+                manifest = Path(__file__).resolve().parents[1]/"datasets/v15_dataset_manifest.json"
+                padding_contracts = json.loads(manifest.read_text(encoding="utf-8")).get("pcd_padding_contracts", [])
+            file_hash = hashlib.sha256(file_bytes).hexdigest()
+            authorized = any(
+                item["expected_file_sha256"] == file_hash and
+                item["expected_point_payload_bytes"] == n*stride and
+                item["expected_trailing_zero_bytes"] == len(trailing)
+                for item in padding_contracts)
+            padding = 4096-header_bytes
+            if not (authorized and len(trailing) == padding and 0 < padding < 4096 and not any(trailing)):
+                fail("UNAUTHORIZED_TRAILING_BYTES")
             header["AUDITED_ZERO_TAIL_BYTES"] = [str(padding)]
+            header["AUDITED_FILE_SHA256"] = [file_hash]
             payload = payload[:n*stride]
         if len(payload) != n * stride:
             fail("PAYLOAD_LENGTH")

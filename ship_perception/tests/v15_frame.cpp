@@ -17,6 +17,14 @@ int main(int argc,char** argv) {try {
   if(!result.valid)return 1;
   std::cout<<"T_B_INPUT\n"<<result.cloud.T_B_input.matrix()<<"\n";
   if(argc==1) {
+    // A thin observed rim is still a 2D Deck support domain. Its boundary
+    // cells must not vanish merely because their centres define an ROI hull.
+    Points rim;for(int x=-44;x<=44;++x)for(int y=-24;y<=24;++y){
+      const float px=x*.1f+.05f,py=y*.1f+.05f;
+      rim.emplace_back(px,py,(std::abs(px)<4&&std::abs(py)<2)?-3.f:0.f);
+    }
+    const auto thin=OfflineShipFrameProvider{}.resolve(rim);
+    if(!thin.valid||(thin.cloud.T_B_input.linear().row(2)-Eigen::RowVector3d(0,0,1)).norm()>1e-5)throw std::runtime_error("THIN_DECK_DOMAIN_CLIPPED");
     DeckPlaneCandidate a,b,duplicate;a.valid=b.valid=duplicate.valid=true;
     a.quality_score=.8;b.quality_score=.75;duplicate.quality_score=.79;
     a.support_region={{-5,-3,0},{5,-3,0},{5,3,0},{-5,3,0}};duplicate=a;duplicate.quality_score=.79;

@@ -29,20 +29,22 @@ std::vector<std::size_t> LocalIndex::neighbors(const Eigen::Vector3d& q,int k,do
   return out;
 }
 double quantile(std::vector<double> v,double q) {
+  if(!std::isfinite(q)||q<0||q>1)throw std::invalid_argument("INVALID_QUANTILE");
   if(v.empty())return 0;
-  std::sort(v.begin(),v.end());return v[std::min(v.size()-1,std::size_t(std::ceil(q*v.size())-1))];
+  std::sort(v.begin(),v.end());return v[q==0?0:std::min(v.size()-1,std::size_t(std::ceil(q*v.size())-1))];
 }
 bool healthy(const Transform& t) {
   return t.matrix().allFinite() && (t.matrix().row(3)-Eigen::RowVector4d(0,0,0,1)).norm()<1e-9 &&
     std::abs(t.linear().determinant()-1)<1e-6 && (t.linear().transpose()*t.linear()-Eigen::Matrix3d::Identity()).norm()<1e-6;
 }
-Points voxelize(const Points& p,double size) {
-  if(!std::isfinite(size)||size<=0)throw std::invalid_argument("INVALID_VOXEL_SIZE");
+Points voxelize(const Points& p,double size,double max_extent) {
+  if(!std::isfinite(size)||size<=0||!std::isfinite(max_extent)||max_extent<=0)throw std::invalid_argument("INVALID_VOXEL_DOMAIN");
   using Key=std::array<std::int64_t,3>;
   struct Sum {Eigen::Vector3d sum=Eigen::Vector3d::Zero();std::size_t n=0;};
   std::map<Key,Sum> cells;
   for(const auto& point:p) {
-    if(!point.allFinite() || point.cwiseAbs().maxCoeff()>1000)throw std::invalid_argument("INVALID_LOCAL_POINT");
+    if(!point.allFinite() || point.cwiseAbs().maxCoeff()>max_extent)throw std::invalid_argument("INVALID_LOCAL_POINT");
+    if(double(point.cwiseAbs().maxCoeff())/size>=double(INT64_MAX)*.5)throw std::invalid_argument("VOXEL_INDEX_OVERFLOW");
     Key k;for(int a=0;a<3;++a)k[a]=std::int64_t(std::floor(double(point[a])/size));
     auto& s=cells[k];s.sum+=point.cast<double>();++s.n;
   }
@@ -64,6 +66,11 @@ std::vector<Normal> normals(const Points& p,const Config& c) {
     out[i].direction=eig.eigenvectors().col(0);out[i].planarity=1-std::max(0.,e[0])/e[1];
     out[i].spread=std::sqrt(std::max(0.,e[0])/e[1]);out[i].valid=out[i].planarity>=c.geometry.planarity_min && e[1]/e[2]>=c.geometry.normal_min_secondary_ratio;
   }return out;
+}
+Points remove_isolated(const Points& p,const Config& c){
+  LocalIndex index(p);Points clean;clean.reserve(p.size());
+  for(const auto& point:p)if(index.neighbors(point.cast<double>(),int(c.geometry.outlier_min_points),c.geometry.outlier_radius_m).size()>=std::size_t(c.geometry.outlier_min_points))clean.push_back(point);
+  return clean;
 }
 PlaneFit fit_plane(const Points& p,const std::vector<std::size_t>& initial,const Eigen::Vector3d& up,const Config& c) {
   PlaneFit out;auto ids=initial;
@@ -105,9 +112,32 @@ std::vector<Opening> find_openings(const HeightGrid& grid,double z,const Config&
   std::set<CellKey> lows;
   CellKey minimum{INT_MAX,INT_MAX},maximum{INT_MIN,INT_MIN};
   for(const auto& kv:grid)for(int axis=0;axis<2;++axis){minimum[axis]=std::min(minimum[axis],kv.first[axis]);maximum[axis]=std::max(maximum[axis],kv.first[axis]);}
+  // A missing sample inside an observed ring is UNKNOWN, not necessarily a
+  // scan/ROI cut. Only missing regions connected to the exterior establish a
+  // truncation. This classifies visibility connectivity; it never creates a
+  // lower return, free-space evidence or a measured boundary.
+  std::map<CellKey,bool> unknown_exterior;
+  auto exterior_unknown=[&](CellKey start){
+    auto known=unknown_exterior.find(start);if(known!=unknown_exterior.end())return known->second;
+    std::set<CellKey> component;std::queue<CellKey> pending;component.insert(start);pending.push(start);bool exterior=false;
+    while(!pending.empty()&&!exterior){auto key=pending.front();pending.pop();
+      if(key[0]<=minimum[0]||key[0]>=maximum[0]||key[1]<=minimum[1]||key[1]>=maximum[1]){exterior=true;break;}
+      if(component.size()>std::size_t(c.geometry.max_candidate_points)){exterior=true;break;}
+      for(const auto& delta:std::array<CellKey,4>{{{1,0},{-1,0},{0,1},{0,-1}}}){CellKey next{key[0]+delta[0],key[1]+delta[1]};
+        if(grid.count(next))continue;auto cached=unknown_exterior.find(next);
+        if(cached!=unknown_exterior.end()){if(cached->second)exterior=true;continue;}
+        if(component.insert(next).second)pending.push(next);
+      }
+    }
+    for(const auto& key:component)unknown_exterior[key]=exterior;return exterior;
+  };
   // A high cross-member does not erase actual returns beneath it. This is a
   // measured lower layer, never an inference of free space from an empty cell.
-  for(const auto& kv:grid)if(kv.second.lo<z-c.roi.opening_drop_m && kv.second.lo>z-c.roi.max_opening_depth_m)lows.insert(kv.first);
+  // A measured Deck surface is not a lower-return opening just because this
+  // cell also contains a few deep returns. Elevated beams are different:
+  // they are above the datum, so actual returns below them remain eligible.
+  for(const auto& kv:grid)if(std::abs(kv.second.median-z)>c.roi.support_band_m &&
+      kv.second.lo<z-c.roi.opening_drop_m && kv.second.lo>z-c.roi.max_opening_depth_m)lows.insert(kv.first);
   std::set<CellKey> visited;std::vector<Opening> out;const int dx[]={-1,1,0,0},dy[]={0,0,-1,1};
   for(const auto& start:lows) {
     if(visited.count(start))continue;
@@ -117,7 +147,7 @@ std::vector<Opening> find_openings(const HeightGrid& grid,double z,const Config&
       for(int axis=0;axis<2;++axis)if(k[axis]==minimum[axis] || k[axis]==maximum[axis])opening.touches_scan_boundary=true;
       for(int a=0;a<4;++a){CellKey next{k[0]+dx[a],k[1]+dy[a]};
         if(lows.count(next)){if(visited.insert(next).second)todo.push(next);continue;}
-        if(!grid.count(next))opening.touches_scan_boundary=true;
+        if(!grid.count(next)&&exterior_unknown(next))opening.touches_scan_boundary=true;
         ++faces;bool support=false;
         for(int step=1;step<=int(std::ceil(c.roi.support_search_m/c.geometry.coarse_voxel_m));++step){
           auto it=grid.find({k[0]+dx[a]*step,k[1]+dy[a]*step});

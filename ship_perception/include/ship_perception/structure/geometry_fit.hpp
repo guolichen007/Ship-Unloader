@@ -13,7 +13,8 @@ struct Normal {Eigen::Vector3d direction=Eigen::Vector3d::Zero();double planarit
 struct PlaneFit {Plane plane;double p50=0,p95=0;std::vector<std::size_t> inliers;bool valid=false;};
 double quantile(std::vector<double> values,double q);
 bool healthy(const Transform& t);
-Points voxelize(const Points& p,double size);
+Points voxelize(const Points& p,double size,double max_local_extent_m);
+Points remove_isolated(const Points& p,const Config& config);
 std::vector<Normal> normals(const Points& p,const Config& c);
 PlaneFit fit_plane(const Points& p,const std::vector<std::size_t>& ids,const Eigen::Vector3d& initial,const Config& c);
 Transform plane_frame(const Plane& plane,const Points& support);

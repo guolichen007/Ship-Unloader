@@ -18,8 +18,16 @@ bool merge_observed(BoundarySegment& prior,const BoundarySegment& other,const Co
   if(prior.side!=other.side||prior.evidence_flags!=other.evidence_flags||prior.evidence_mechanism!=other.evidence_mechanism)return false;
   const Eigen::Vector3d u=(prior.b-prior.a).normalized(),v=(other.b-other.a).normalized();
   if(std::abs(u.dot(v))<std::cos(c.boundary.merge_angle_deg*std::acos(-1.)/180.))return false;
-  const double separation=std::max((other.a-prior.a).cross(u).norm(),(other.b-prior.a).cross(u).norm());
-  if(separation>c.boundary.merge_distance_m)return false;
+  // Test the shorter measured fragment against the longer fit. Extrapolating
+  // a short fragment over the entire long edge amplifies its angular noise
+  // and makes duplicate suppression depend on sorting order.
+  const auto& reference=prior.observed_support_length>=other.observed_support_length?prior:other;
+  const auto& sample=prior.observed_support_length>=other.observed_support_length?other:prior;
+  const Eigen::Vector3d reference_direction=(reference.b-reference.a).normalized();
+  const double separation=std::max((sample.a-reference.a).cross(reference_direction).norm(),(sample.b-reference.a).cross(reference_direction).norm());
+  const double prior_proxy=std::max(prior.fit_residual_p95_m,c.geometry.refine_voxel_m*.5);
+  const double other_proxy=std::max(other.fit_residual_p95_m,c.geometry.refine_voxel_m*.5);
+  if(separation>c.boundary.merge_distance_m+prior_proxy+other_proxy)return false;
   const double p0=(other.a-prior.a).dot(u),p1=(other.b-prior.a).dot(u),length=(prior.b-prior.a).norm();
   if(std::max(p0,p1)<0 || std::min(p0,p1)>length)return false;
   BoundarySegment merged=other.observed_support_length>prior.observed_support_length?other:prior;
@@ -56,6 +64,34 @@ std::vector<HatchModelCandidate> assemble_hatches(const StructureEvidence& evide
       for(auto& prior:unique)if(merge_observed(prior,edge,c)){duplicate=true;break;}
       if(!duplicate)unique.push_back(edge);
     }hatch.boundaries=std::move(unique);
+    // A single occluded span may be inferred only from independently refined
+    // short boundary fragments at BOTH corners and their observed neighbours.
+    // This uses neither an L0 grid line nor a rectangular/parallel template.
+    std::vector<std::size_t> sparse;
+    for(std::size_t i=0;i<hatch.boundaries.size();++i){const auto& e=hatch.boundaries[i];
+      if((e.evidence_flags&OBSERVED_3D)&&e.observed_support_length<std::max(c.geometry.refine_voxel_m,(e.b-e.a).norm())*c.boundary.min_edge_coverage)sparse.push_back(i);
+    }
+    if(c.boundary.max_inferred_edges>=1&&sparse.size()==1&&hatch.boundaries.size()>=3){
+      const auto i=sparse.front(),n=hatch.boundaries.size();auto& e=hatch.boundaries[i];const auto& previous=hatch.boundaries[(i+n-1)%n];const auto& next=hatch.boundaries[(i+1)%n];
+      Eigen::Vector2d a,b;double ca=0,cb=0;
+      bool justified=e.side==Side::INNER_OPENING_FACE&&previous.side==Side::INNER_OPENING_FACE&&next.side==Side::INNER_OPENING_FACE&&
+        (previous.evidence_flags&OBSERVED_3D)&&(next.evidence_flags&OBSERVED_3D)&&e.support_intervals.size()==2&&
+        intersect(previous,e,a,ca,c)&&intersect(e,next,b,cb,c);
+      if(justified){
+        const Eigen::Vector2d direction=(e.b-e.a).head<2>().normalized();const double length=(e.b-e.a).norm();
+        const double ta=(a-e.a.head<2>()).dot(direction),tb=(b-e.a.head<2>()).dot(direction);
+        auto supported_corner=[&](double t){for(const auto& interval:e.support_intervals)if(t>=interval.first-c.boundary.corner_join_m&&t<=interval.second+c.boundary.corner_join_m)return true;return false;};
+        justified=std::abs(std::min(ta,tb))<=c.boundary.corner_join_m&&std::abs(std::max(ta,tb)-length)<=c.boundary.corner_join_m&&
+          supported_corner(ta)&&supported_corner(tb)&&
+          e.support_intervals.front().second-e.support_intervals.front().first>=c.boundary.profile_step_m*c.boundary.profile_min_sections&&
+          e.support_intervals.back().second-e.support_intervals.back().first>=c.boundary.profile_step_m*c.boundary.profile_min_sections&&
+          std::min((previous.a.head<2>()-a).norm(),(previous.b.head<2>()-a).norm())<=c.boundary.corner_join_m&&
+          std::min((next.a.head<2>()-b).norm(),(next.b.head<2>()-b).norm())<=c.boundary.corner_join_m;
+      }
+      if(justified){e.evidence_flags=INFERRED_TOPOLOGY;e.visibility=Visibility::UNCERTAIN;e.evidence_mechanism="TWO_OBSERVED_CORNER_FRAGMENTS";
+        e.extrapolation_length=(e.b-e.a).norm()-e.observed_support_length;e.quality_score*=e.observed_support_length/(e.b-e.a).norm();
+        hatch.warnings.push_back("ONE_OCCLUDED_SPAN_INFERRED_FROM_TWO_REFINED_CORNERS");}
+    }
     const auto n=hatch.boundaries.size();bool closed=n>=3;Polygon vertices(n);std::vector<double> conditions(n,0);
     for(std::size_t i=0;i<n;++i){auto& edge=hatch.boundaries[i];
       if(edge.side!=Side::INNER_OPENING_FACE){closed=false;hatch.warnings.push_back("BOUNDARY_SIDE_UNRESOLVED");}
@@ -98,7 +134,7 @@ std::vector<HatchModelCandidate> assemble_hatches(const StructureEvidence& evide
       for(std::size_t i=0;i<n;++i){auto& edge=hatch.boundaries[i];
         const Eigen::Vector3d start=vertices[(i+n-1)%n],end=vertices[i];
         const double start_extension=std::min((edge.a-start).norm(),(edge.b-start).norm()),end_extension=std::min((edge.a-end).norm(),(edge.b-end).norm());
-        edge.extrapolation_length=start_extension+end_extension;
+        edge.extrapolation_length=start_extension+end_extension+((edge.evidence_flags&(INFERRED_PARALLEL|INFERRED_TOPOLOGY))?std::max(0.,(edge.b-edge.a).norm()-edge.observed_support_length):0.);
       }
     }else{hatch.status=HatchStatus::PARTIAL;hatch.nominal_polygon.reset();hatch.warnings.push_back("INSUFFICIENT_UNIQUE_CLOSURE_EVIDENCE");}
     Eigen::Vector3d lo=Eigen::Vector3d::Constant(1e20),hi=-lo;

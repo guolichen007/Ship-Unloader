@@ -41,7 +41,9 @@
         "max_candidate_points",
         "grid_phase_x_m",
         "grid_phase_y_m",
-        "normal_min_secondary_ratio"
+        "normal_min_secondary_ratio",
+        "outlier_radius_m",
+        "outlier_min_points"
       ],
       "properties": {
         "coarse_voxel_m": {
@@ -133,6 +135,16 @@
           "type": "number",
           "minimum": 0.001,
           "maximum": 0.5
+        },
+        "outlier_radius_m": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 3.0
+        },
+        "outlier_min_points": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 32
         }
       }
     },
@@ -210,7 +222,9 @@
         "support_connectivity_m",
         "deck_normal_mode_support_ratio",
         "deck_normal_mode_angle_deg",
-        "deck_min_enclosure_ratio"
+        "deck_min_enclosure_ratio",
+        "deck_patch_width_m",
+        "deck_patch_fill_min"
       ],
       "properties": {
         "opening_drop_m": {
@@ -317,6 +331,16 @@
           "type": "number",
           "minimum": 0.1,
           "maximum": 1.0
+        },
+        "deck_patch_width_m": {
+          "type": "number",
+          "minimum": 0.3,
+          "maximum": 3.0
+        },
+        "deck_patch_fill_min": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 1.0
         }
       }
     },
@@ -346,14 +370,14 @@
         "side_probe_m",
         "beam_max_width_m",
         "beam_min_length_m",
-        "coarse_min_points",
         "side_inner_gap_max_m",
         "beam_min_aspect_ratio",
         "profile_deck_support_span_m",
         "profile_lower_quantile",
         "face_vertical_span_min_m",
         "profile_deck_slope_max_deg",
-        "profile_step_slope_min"
+        "profile_step_slope_min",
+        "profile_breakpoint_stability_m"
       ],
       "properties": {
         "profile_half_length_m": {
@@ -466,11 +490,6 @@
           "minimum": 0,
           "maximum": 10.0
         },
-        "coarse_min_points": {
-          "type": "integer",
-          "minimum": 3,
-          "maximum": 100
-        },
         "side_inner_gap_max_m": {
           "type": "number",
           "minimum": 0.01,
@@ -505,6 +524,11 @@
           "type": "number",
           "minimum": 0.2,
           "maximum": 20.0
+        },
+        "profile_breakpoint_stability_m": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 0.15
         }
       }
     },

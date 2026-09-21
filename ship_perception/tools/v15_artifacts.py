@@ -5,6 +5,8 @@ import json
 import math
 from pathlib import Path
 import re
+import struct
+from datetime import datetime,timezone
 import numpy as np
 
 SOURCE = Path(__file__).resolve().parents[1]
@@ -111,12 +113,59 @@ def write_csv(path, columns, rows):
         writer=csv.writer(stream);writer.writerow(columns);writer.writerows(rows)
 
 
-def write_artifacts(model_path, input_path, mode, expected_config_hash=None):
+def write_debug_cloud(path,input_path,model,radius_m=.1):
+    """Colour actual runtime points by model proximity, never scorer labels."""
+    input_path=Path(input_path)
+    with input_path.open('rb') as stream:
+        if stream.read(8)!=b'SXYZV15\0':raise ValueError('DEBUG_CLOUD_CACHE_MAGIC')
+        header=stream.read(8)
+        if len(header)!=8:raise ValueError('DEBUG_CLOUD_CACHE_HEADER')
+        count=struct.unpack('<Q',header)[0]
+    if count>12000000 or input_path.stat().st_size!=16+count*12:raise ValueError('DEBUG_CLOUD_CACHE_SIZE')
+    source=np.memmap(input_path,dtype='<f4',mode='r',offset=16,shape=(count,3)) if count else np.empty((0,3))
+    dtype=np.dtype([('x','<f8'),('y','<f8'),('z','<f8'),('red','u1'),('green','u1'),('blue','u1')])
+    edges=[]
+    for hatch in model['hatches']:
+        for edge in hatch['boundaries']:
+            a,b=np.array(edge['a']),np.array(edge['b']);length=np.linalg.norm(b-a)
+            if length<=0:continue
+            if edge['evidence_flags']&1:
+                for lo,hi in edge['support_intervals']:edges.append((a+(b-a)*lo/length,a+(b-a)*hi/length,(40,180,80)))
+            elif edge['evidence_flags']&6:edges.append((a,b,(240,160,30)))
+    with Path(path).open('wb') as stream:
+        frame='SHIP_FRAME' if model['frame_resolved'] else 'INPUT_FRAME_UNRESOLVED'
+        stream.write(('ply\nformat binary_little_endian 1.0\ncomment RUNTIME_POINTS_MODEL_PROXIMITY_NOT_SEMANTIC_GROUND_TRUTH\ncomment '+frame+'\nelement vertex '+str(count)+'\nproperty double x\nproperty double y\nproperty double z\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nend_header\n').encode('ascii'))
+        for start in range(0,count,65536):
+            xyz=np.array(source[start:start+65536],dtype=float)
+            if not np.isfinite(xyz).all():raise ValueError('DEBUG_CLOUD_NONFINITE_INPUT')
+            if model['frame_resolved']:
+                t=np.array(model['T_B_input']);xyz=xyz@t[:3,:3].T+t[:3,3]
+            colors=np.tile(np.array([140,140,140],dtype='u1'),(len(xyz),1))
+            for a,b,color in edges:
+                d=b-a;u=np.clip((xyz-a)@d/max(float(d@d),1e-20),0,1)
+                near=np.linalg.norm(xyz-a-u[:,None]*d,axis=1)<=radius_m
+                colors[near]=color
+            output=np.empty(len(xyz),dtype=dtype)
+            for axis,key in enumerate(('x','y','z')):output[key]=xyz[:,axis]
+            for axis,key in enumerate(('red','green','blue')):output[key]=colors[:,axis]
+            stream.write(output.tobytes())
+    return dict(point_count=count,coordinate_frame=frame,radius_m=radius_m,
+                semantics='RUNTIME_POINTS_MODEL_PROXIMITY_NOT_POINTWISE_CLASSIFICATION')
+
+
+def write_artifacts(model_path, input_path, mode, expected_config_hash=None,product_trace=None):
     model_path, input_path = Path(model_path), Path(input_path)
     directory = model_path.parent
     model = json.loads(model_path.read_text(encoding="utf-8"))
     audit = validate_model(model, expected_config_hash)
+    trace=dict(source_dataset_id=None,dataset_manifest_hash=None,input_pcd_sha256=None)
+    if product_trace:
+        if set(product_trace)-set(trace):raise ValueError('SCORING_OR_UNKNOWN_FIELD_IN_PRODUCT_TRACE')
+        trace.update(product_trace)
+    dump(directory/"structural_model_candidate.json",model)
     dump(directory/"deck.json", model["deck"])
+    dump(directory/"hatch_polygons.json",[dict(candidate_id=h['candidate_id'],status=h['status'],nominal_polygon=h['nominal_polygon']) for h in model['hatches']])
+    dump(directory/"primitives.json",model['structures'])
     write_csv(directory/"polygon.csv", ["candidate_id","status","vertex","x_B","y_B","z_B"],
               [[h["candidate_id"],h["status"],i,*p] for h in model["hatches"] for i,p in enumerate(h["nominal_polygon"] or [])])
     records = [(h["candidate_id"],str(i),e) for h in model["hatches"] for i,e in enumerate(h["boundaries"])]
@@ -139,16 +188,22 @@ def write_artifacts(model_path, input_path, mode, expected_config_hash=None):
     timing_file=Path(str(model_path)+".timing.json")
     timing=json.loads(timing_file.read_text()) if timing_file.exists() else {"stage_timing_status":"NOT_RECORDED_IN_THIS_PRODUCER"}
     dump(directory/"timing.json",timing)
+    write_csv(directory/'timing.csv',['stage','milliseconds','status'],
+              [[name,value if isinstance(value,(int,float)) else None,'MEASURED' if isinstance(value,(int,float)) else value] for name,value in timing.items()])
+    cloud=write_debug_cloud(directory/'colored_debug_cloud.ply',input_path,model)
     metadata=dict(schema="ship_perception.v15.product_artifacts.1",software_git_sha=model["software_git_sha"],
                   config_hash=model["config_hash"],input_sha256=file_hash(input_path),input_mode=mode,
-                  annotation_access=False,debug_semantics="MODEL_PRIMITIVES_NOT_POINTWISE_LABELS",
+                  annotation_access=False,debug_semantics="MODEL_PRIMITIVES_NOT_POINTWISE_LABELS",debug_cloud=cloud,
+                  timestamp=datetime.now(timezone.utc).isoformat(),
+                  **trace,
                   review_status="UNREVIEWED",control_ready=False,canonical=False,real_formal_15cm="PENDING_GOLDEN",site_accuracy="SITE_PENDING")
     dump(directory/"metadata.json",metadata)
     dump(directory/"artifact_audit.json",audit)
+    dump(directory/"report.json",dict(status='CANDIDATE_OUTPUT_NOT_VERSION_ACCEPTANCE',frame_resolved=model['frame_resolved'],deck_resolved=model['deck']['valid'],hatch_count=len(model['hatches']),audit=audit))
     (directory/"report.md").write_text("# 结构候选输出\n\n"+
         f"坐标解析：{model['frame_resolved']}；Deck：{model['deck']['valid']}；Hatch 候选：{len(model['hatches'])}。\n\n"+
         "模型未审查，不能用于控制，也未成为 Canonical Model。真实 15 cm 精度等待 Golden Final；现场状态为 SITE_PENDING。\n\n"+
         "debug_semantics.ply 仅显示候选边界的实际支持区间及推断段，不是逐点语义真值。评估数据与本产品元数据分离。\n",encoding="utf-8")
-    names=[model_path.name,"deck.json","polygon.csv","boundaries.csv","primitives.csv","debug_semantics.ply","timing.json","metadata.json","artifact_audit.json","report.md"]
+    names=[model_path.name,"structural_model_candidate.json","deck.json","hatch_polygons.json","primitives.json","polygon.csv","boundaries.csv","primitives.csv","debug_semantics.ply","colored_debug_cloud.ply","timing.json","timing.csv","metadata.json","artifact_audit.json","report.json","report.md"]
     dump(directory/"artifact_index.json",{name:file_hash(directory/name) for name in names})
     return audit

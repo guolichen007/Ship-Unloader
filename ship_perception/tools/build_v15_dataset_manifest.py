@@ -15,12 +15,22 @@ def sha(path):
 
 def build(root):
     root = Path(root)
+    contracts = {}
+    def decoded(path):
+        xyz, header = decode(path)
+        if "AUDITED_ZERO_TAIL_BYTES" in header:
+            identity = header["AUDITED_FILE_SHA256"][0]
+            contracts[identity] = dict(expected_file_sha256=identity,
+                expected_point_payload_bytes=int(header["POINTS"][0])*sum(int(a)*int(b) for a,b in zip(header["SIZE"],header["COUNT"])),
+                expected_trailing_zero_bytes=int(header["AUDITED_ZERO_TAIL_BYTES"][0]),
+                audit_basis="EXISTING_MANIFEST_FILE_HASH_AND_ZERO_TAIL_VERIFIED")
+        return xyz, header
     scans = []
     xyz_to_scan = {}
     for p in sorted((root / "detect/test").glob("*.pcd")):
         if "_hatch_red" in p.stem:
             continue
-        xyz, header = decode(p)
+        xyz, header = decoded(p)
         info = digest(xyz)
         if info["ordered_xyz_sha256"] in xyz_to_scan:
             raise ValueError("规范扫描重复")
@@ -42,7 +52,7 @@ def build(root):
     for p in sorted((root / "detect/pcd").glob("*.pcd")):
         h = sha(p)
         if h not in file_cache:
-            xyz, _ = decode(p)
+            xyz, _ = decoded(p)
             file_cache[h] = hashlib.sha256(xyz.tobytes()).hexdigest()
         record = xyz_to_scan[file_cache[h]]
         record["aliases"].append(dict(path=p.relative_to(root).as_posix(), sha256=h))
@@ -54,7 +64,7 @@ def build(root):
             record["annotation_files"].append(annotation.relative_to(root).as_posix())
             record["annotation_sha256"].append(sha(annotation))
     variant = root / "annotator/build/pcd/2026-08-08-02-33-57.pcd"
-    xyz, _ = decode(variant)
+    xyz, _ = decoded(variant)
     rec = xyz_to_scan[hashlib.sha256(xyz.tobytes()).hexdigest()]
     rec["aliases"].append(dict(path=variant.relative_to(root).as_posix(), sha256=sha(variant)))
     for r in scans:
@@ -66,7 +76,8 @@ def build(root):
         raise ValueError("13/12/23/11 数据契约冲突")
     return dict(schema_version="ship_perception.v15.dataset.1", independent_scans=13,
                 labeled_scans=12, annotation_count=23, extra_annotations=11,
-                audit_purpose="FILE_AND_DUPLICATE_AUDIT_NOT_ALGORITHM_SCORING", scans=scans)
+                audit_purpose="FILE_AND_DUPLICATE_AUDIT_NOT_ALGORITHM_SCORING", scans=scans,
+                pcd_padding_contracts=sorted(contracts.values(),key=lambda x:x["expected_file_sha256"]))
 
 
 if __name__ == "__main__":

@@ -19,7 +19,9 @@
     "max_candidate_points": 1500000,
     "grid_phase_x_m": 0.0,
     "grid_phase_y_m": 0.0,
-    "normal_min_secondary_ratio": 0.02
+    "normal_min_secondary_ratio": 0.02,
+    "outlier_radius_m": 0.3,
+    "outlier_min_points": 3
   },
   "frame": {
     "aligned_angle_max_deg": 0.5,
@@ -51,7 +53,9 @@
     "support_connectivity_m": 1.0,
     "deck_normal_mode_support_ratio": 0.25,
     "deck_normal_mode_angle_deg": 1.0,
-    "deck_min_enclosure_ratio": 0.75
+    "deck_min_enclosure_ratio": 0.75,
+    "deck_patch_width_m": 0.4,
+    "deck_patch_fill_min": 0.9
   },
   "boundary": {
     "profile_half_length_m": 1.5,
@@ -65,10 +69,9 @@
     "line_inlier_m": 0.1,
     "line_min_length_m": 0.6,
     "line_min_points": 6,
-    "coarse_min_points": 3,
     "merge_angle_deg": 5.0,
     "merge_distance_m": 0.1,
-    "corner_join_m": 0.2,
+    "corner_join_m": 0.3,
     "max_support_gap_m": 0.3,
     "min_edge_coverage": 0.8,
     "min_intersection_angle_deg": 20.0,
@@ -83,7 +86,8 @@
     "profile_lower_quantile": 0.1,
     "face_vertical_span_min_m": 0.3,
     "profile_deck_slope_max_deg": 3.0,
-    "profile_step_slope_min": 1.5
+    "profile_step_slope_min": 1.5,
+    "profile_breakpoint_stability_m": 0.05
   },
   "evaluation": {
     "local_annotation_margin_m": 1.5,

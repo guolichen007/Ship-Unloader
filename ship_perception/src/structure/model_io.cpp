@@ -34,6 +34,12 @@ Points read_xyz_cache(const std::string& path,const Config& c){
   if(f.peek()!=std::char_traits<char>::eof())throw std::runtime_error("XYZ_CACHE_TRAILING_BYTES");return p;
 }
 void write_xyz_cache(const Points& p,const std::string& path){std::ofstream f(path,std::ios::binary);f.write("SXYZV15\0",8);const std::uint64_t n=p.size();f.write(reinterpret_cast<const char*>(&n),8);for(const auto& q:p){if(!q.allFinite())throw std::runtime_error("NONFINITE_PCD");float v[3]={q.x()==0?0:q.x(),q.y()==0?0:q.y(),q.z()==0?0:q.z()};f.write(reinterpret_cast<const char*>(v),12);}if(!f)throw std::runtime_error("CACHE_WRITE_FAILED");}
+void write_xyz_pcd(const Points& p,const std::string& path){
+  std::ofstream out(path,std::ios::binary);
+  out<<"# Ship Frame accumulated observations; dynamic points retained\nVERSION .7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nCOUNT 1 1 1\nWIDTH "<<p.size()<<"\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\nPOINTS "<<p.size()<<"\nDATA binary\n";
+  for(const auto& q:p){if(!q.allFinite())throw std::runtime_error("NONFINITE_PCD");const float v[3]={q.x()==0?0:q.x(),q.y()==0?0:q.y(),q.z()==0?0:q.z()};out.write(reinterpret_cast<const char*>(v),12);}
+  if(!out)throw std::runtime_error("PCD_WRITE_FAILED");
+}
 void write_model(std::ostream& out,const StructuralModelCandidate& m){
   out<<"{\"schema_version\":";string(out,m.schema_version);out<<",\"software_git_sha\":";string(out,ship::cfg::git_sha);
   out<<",\"config_hash\":";string(out,config_hash);out<<",\"review_status\":\"UNREVIEWED\",\"control_ready\":false,\"canonical\":false,\"heading_semantics\":\"UNRESOLVED\",\"candidate_id_semantics\":\"LOCAL_TO_THIS_MODEL\"";

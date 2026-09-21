@@ -724,5 +724,43 @@
       "vessel_relationship": "UNKNOWN",
       "notes": "静态XYZ；无可信射线轨迹；文件名和标注不得参与产品几何判定"
     }
+  ],
+  "pcd_padding_contracts": [
+    {
+      "expected_file_sha256": "0c5ff3186a01093e1b01e035e3ad415b1b1bd906e09bf11c50e1ef76b8986210",
+      "expected_point_payload_bytes": 13931808,
+      "expected_trailing_zero_bytes": 3914,
+      "audit_basis": "EXISTING_MANIFEST_FILE_HASH_AND_ZERO_TAIL_VERIFIED"
+    },
+    {
+      "expected_file_sha256": "28ab75a172a6e0d270e822cb66225c7fe09e8fbe8ecc39513cbeb3608d129c2f",
+      "expected_point_payload_bytes": 5234624,
+      "expected_trailing_zero_bytes": 3889,
+      "audit_basis": "EXISTING_MANIFEST_FILE_HASH_AND_ZERO_TAIL_VERIFIED"
+    },
+    {
+      "expected_file_sha256": "3b5e29617b2adfc691b968abf4f82139672163e35d4cd7e072416baf10abf5a8",
+      "expected_point_payload_bytes": 13408256,
+      "expected_trailing_zero_bytes": 3914,
+      "audit_basis": "EXISTING_MANIFEST_FILE_HASH_AND_ZERO_TAIL_VERIFIED"
+    },
+    {
+      "expected_file_sha256": "5dbe0aec890a976552f60c596d1a11682dcd712f4c22f9a3ecefc73bbf1bff98",
+      "expected_point_payload_bytes": 16440512,
+      "expected_trailing_zero_bytes": 3912,
+      "audit_basis": "EXISTING_MANIFEST_FILE_HASH_AND_ZERO_TAIL_VERIFIED"
+    },
+    {
+      "expected_file_sha256": "669e402089c55b08cd565d07035312ca82a17463ad5af9ba0dab465295b137c0",
+      "expected_point_payload_bytes": 2617312,
+      "expected_trailing_zero_bytes": 3899,
+      "audit_basis": "EXISTING_MANIFEST_FILE_HASH_AND_ZERO_TAIL_VERIFIED"
+    },
+    {
+      "expected_file_sha256": "ea736584c7d3815fec90a2bb6d7f1fd615c016452afaba083a75a4057c1cffb2",
+      "expected_point_payload_bytes": 8416592,
+      "expected_trailing_zero_bytes": 3914,
+      "audit_basis": "EXISTING_MANIFEST_FILE_HASH_AND_ZERO_TAIL_VERIFIED"
+    }
   ]
 }
