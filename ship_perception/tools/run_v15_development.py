@@ -46,6 +46,58 @@ def operational(records, config):
                 REAL_FORMAL_15CM="PENDING_GOLDEN", SITE_ACCURACY="SITE_PENDING")
 
 
+def write_forensic(directory, model, annotations, evaluations, points):
+    """只读法证输出：不改任何 association 阈值，不改 evaluator 逻辑。
+    用于区分“坐标系错误”与“识别到错误舱口”：candidate center 与 annotation
+    center 在输入坐标中的距离，加上 T_B_input round-trip 自检。"""
+    import numpy as np
+    T = model.get("T_B_input")
+    roundtrip = None
+    if T is not None and points is not None and len(points):
+        t = np.asarray(T, float)
+        tinv = np.linalg.inv(t)
+        n = len(points)
+        sample = points[np.linspace(0, n - 1, min(n, 512)).astype(int)]
+        pB = (t @ np.c_[sample, np.ones(len(sample))].T).T[:, :3]
+        pback = (tinv @ np.c_[pB, np.ones(len(pB))].T).T[:, :3]
+        roundtrip = float(np.abs(sample - pback).max())
+    rows = []
+    for annotation, evaluation in zip(annotations, evaluations):
+        poly = np.asarray(annotation["corners"], float)
+        ann_center = poly.mean(axis=0)
+        scores = sorted((float(c["association_score"]) for c in evaluation["candidates"]), reverse=True)
+        top1 = scores[0] if scores else 0.0
+        top2 = scores[1] if len(scores) > 1 else None
+        gap = (top1 - top2) if top2 is not None else None
+        candidates = []
+        for c in evaluation["candidates"]:
+            hatch = next((h for h in model["hatches"] if h["candidate_id"] == c["candidate_id"]), None)
+            center_input = None
+            dist = None
+            if hatch is not None and T is not None:
+                center_B = np.asarray(hatch["center"], float)
+                center_input = (np.linalg.inv(np.asarray(T, float)) @ np.r_[center_B, 1.0])[:2]
+                dist = float(np.linalg.norm(center_input - ann_center))
+            observed = c.get("observed_error", {}) or {}
+            candidates.append(dict(candidate_id=c["candidate_id"],
+                                   candidate_center_input_xy=center_input.tolist() if center_input is not None else None,
+                                   candidate_to_annotation_center_distance_m=dist,
+                                   association_score=float(c["association_score"]),
+                                   status=c["status"],
+                                   observed_P95_m=(float(observed["P95"]) if observed.get("P95") is not None else None)))
+        rows.append(dict(annotation_path=evaluation.get("annotation_path"),
+                         annotation_center_input_xy=ann_center.tolist(),
+                         top1_score=top1,
+                         top2_score=top2,
+                         top2_gap=gap,
+                         candidates=candidates))
+    write(directory / "forensic.json", dict(frame_resolved=bool(model.get("frame_resolved")),
+                                             deck_resolved=bool((model.get("deck") or {}).get("valid")),
+                                             hatch_count=len(model.get("hatches", [])),
+                                             transform_roundtrip_max_error_m=roundtrip,
+                                             annotations=rows))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
@@ -137,6 +189,7 @@ def main():
                 annotations.append(annotation)
                 evaluations.append(result)
             write(directory/"evaluation.json", evaluations)
+            write_forensic(directory, model, annotations, evaluations, points)
             differences=[dict(a=i,b=j,**disagreement(annotations[i],annotations[j])) for i,j in itertools.combinations(range(len(annotations)),2)]
             write(directory/"disagreement.json",differences)
             write_csv(directory/"evaluation.csv",['annotation_path','annotation_sha256','annotation_status','candidate_id','candidate_status','association_score','observed_P95_m','inferred_P95_m'],

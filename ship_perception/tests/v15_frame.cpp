@@ -49,11 +49,22 @@ int main(int argc,char** argv) {try {
       for(double x=40;x<=45;x+=.25)for(double y=40;y<=45;y+=.25)with_wharf.emplace_back(float(x),float(y),0.f);
       const auto shifted=OfflineShipFrameProvider{}.resolve(with_wharf);
       if(!shifted.valid)throw std::runtime_error("COPLANAR_BG_WHARF_UNRESOLVED");
-      const double origin_drift=(base.cloud.T_B_input.translation()-shifted.cloud.T_B_input.translation()).norm();
-      const double axis_drift=(base.cloud.T_B_input.linear().row(2)-shifted.cloud.T_B_input.linear().row(2)).norm();
-      std::cout<<"COPLANAR_BG_ORIGIN_DRIFT="<<origin_drift<<" AXIS_DRIFT="<<axis_drift<<"\n";
+      // Physical Ship Frame origin in INPUT coordinates (B origin = centroid of
+      // owned support). T_B_input.translation() is the input origin in B, which
+      // is not the quantity the coaming patch could shift.
+      const Eigen::Vector3d origin_base=base.cloud.T_B_input.inverse().translation();
+      const Eigen::Vector3d origin_shifted=shifted.cloud.T_B_input.inverse().translation();
+      const double origin_drift=(origin_base-origin_shifted).norm();
+      // Longitudinal axis: B.X expressed in input = row(0). Compare axes with an
+      // absolute dot product so a 180° heading is treated as equivalent; row(2)
+      // is only the Deck Z and cannot catch a long-axis rotation.
+      const Eigen::Vector3d X_base=base.cloud.T_B_input.linear().row(0).transpose();
+      const Eigen::Vector3d X_shifted=shifted.cloud.T_B_input.linear().row(0).transpose();
+      const double long_axis_cos=std::abs(X_base.dot(X_shifted));
+      const double z_drift=(base.cloud.T_B_input.linear().row(2)-shifted.cloud.T_B_input.linear().row(2)).norm();
+      std::cout<<"COPLANAR_BG_ORIGIN_DRIFT="<<origin_drift<<" LONG_AXIS_COS="<<long_axis_cos<<" Z_DRIFT="<<z_drift<<"\n";
       if(origin_drift>0.5)throw std::runtime_error("COPLANAR_BACKGROUND_MOVED_ORIGIN");
-      if(axis_drift>1e-3)throw std::runtime_error("COPLANAR_BACKGROUND_ROTATED_AXIS");}
+      if(long_axis_cos<0.9999)throw std::runtime_error("COPLANAR_BACKGROUND_ROTATED_LONG_AXIS");}
     // STRUCTURAL_DATUM_PRESERVES_SHIP_AXIS:
     // The structure datum XY must come from the Ship Frame X projected onto
     // the Deck plane, never from the point cloud. A tilted Deck only tilts Z;
@@ -76,5 +87,14 @@ int main(int argc,char** argv) {try {
       if((Y-Z.cross(X)).norm()>1e-9)throw std::runtime_error("DATUM_Y_NOT_CROSS");
       if((d1.translation()-Eigen::Vector3d(0,0,0.5)).norm()>1e-9)throw std::runtime_error("DATUM_ORIGIN_NOT_SHIP_PROJECTION");
       std::cout<<"STRUCTURAL_DATUM_PRESERVES_SHIP_AXIS=PASS\n";}
+    // DATUM degenerate: Deck normal parallel to Ship X must fail closed. The
+    // ship X projection collapses, ship_datum_frame yields NaN, and the
+    // recognizer's healthy() check reports DATUM_AXIS_UNRESOLVED — never a
+    // full-cloud PCA fallback.
+    {const Plane parallel{Eigen::Vector3d::UnitX(),0.0};
+      if(healthy(ship_datum_frame(parallel)))throw std::runtime_error("DATUM_PARALLEL_SHIP_X_NOT_REJECTED");
+      const Plane antiparallel{-Eigen::Vector3d::UnitX(),0.0};
+      if(healthy(ship_datum_frame(antiparallel)))throw std::runtime_error("DATUM_ANTIPARALLEL_SHIP_X_NOT_REJECTED");
+      std::cout<<"DATUM_DEGENERACY=PASS\n";}
   }return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}}
