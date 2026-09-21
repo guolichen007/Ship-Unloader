@@ -41,30 +41,50 @@ int main(int argc,char** argv) {try {
     // A far-away coplanar wharf patch must not move the offline Ship Frame
     // origin or long axis — only the connected owned support may define them
     // (not a re-scan of every coplanar point). This regression pins P0-1.
-    {Points deck_only;
-      for(double x=-8;x<=8;x+=.25)for(double y=-6;y<=6;y+=.25)deck_only.emplace_back(float(x),float(y),(std::abs(x)<5&&std::abs(y)<3)?-4.f:0.f);
-      const auto base=OfflineShipFrameProvider{}.resolve(deck_only);
+    {Config config;
+      // Fixture 2D sampling is derived from the current candidate voxel so the
+      // synthetic deck always satisfies the measured Deck-patch definition; a
+      // hardcoded step could silently outlive a candidate_voxel_m change.
+      const double fixture_step=config.geometry.candidate_voxel_m*0.5;
+      std::cout<<"FIXTURE_STEP_M="<<fixture_step<<"\n";
+      Points deck_only;
+      for(double x=-8;x<=8;x+=fixture_step)for(double y=-6;y<=6;y+=fixture_step)deck_only.emplace_back(float(x),float(y),(std::abs(x)<5&&std::abs(y)<3)?-4.f:0.f);
+      const auto base=OfflineShipFrameProvider{config}.resolve(deck_only);
       if(!base.valid)throw std::runtime_error("COPLANAR_BG_BASE_UNRESOLVED");
       Points with_wharf=deck_only;
-      for(double x=40;x<=45;x+=.25)for(double y=40;y<=45;y+=.25)with_wharf.emplace_back(float(x),float(y),0.f);
-      const auto shifted=OfflineShipFrameProvider{}.resolve(with_wharf);
+      for(double x=40;x<=45;x+=fixture_step)for(double y=40;y<=45;y+=fixture_step)with_wharf.emplace_back(float(x),float(y),0.f);
+      const auto shifted=OfflineShipFrameProvider{config}.resolve(with_wharf);
       if(!shifted.valid)throw std::runtime_error("COPLANAR_BG_WHARF_UNRESOLVED");
       // Physical Ship Frame origin in INPUT coordinates (B origin = centroid of
-      // owned support). T_B_input.translation() is the input origin in B, which
-      // is not the quantity the coaming patch could shift.
+      // owned support). T_B_input.translation() is the input origin in B.
       const Eigen::Vector3d origin_base=base.cloud.T_B_input.inverse().translation();
       const Eigen::Vector3d origin_shifted=shifted.cloud.T_B_input.inverse().translation();
-      const double origin_drift=(origin_base-origin_shifted).norm();
+      const double owned_origin_drift=(origin_base-origin_shifted).norm();
       // Longitudinal axis: B.X expressed in input = row(0). Compare axes with an
-      // absolute dot product so a 180° heading is treated as equivalent; row(2)
-      // is only the Deck Z and cannot catch a long-axis rotation.
+      // absolute dot product so a 180° heading is treated as equivalent.
       const Eigen::Vector3d X_base=base.cloud.T_B_input.linear().row(0).transpose();
       const Eigen::Vector3d X_shifted=shifted.cloud.T_B_input.linear().row(0).transpose();
-      const double long_axis_cos=std::abs(X_base.dot(X_shifted));
-      const double z_drift=(base.cloud.T_B_input.linear().row(2)-shifted.cloud.T_B_input.linear().row(2)).norm();
-      std::cout<<"COPLANAR_BG_ORIGIN_DRIFT="<<origin_drift<<" LONG_AXIS_COS="<<long_axis_cos<<" Z_DRIFT="<<z_drift<<"\n";
-      if(origin_drift>0.5)throw std::runtime_error("COPLANAR_BACKGROUND_MOVED_ORIGIN");
-      if(long_axis_cos<0.9999)throw std::runtime_error("COPLANAR_BACKGROUND_ROTATED_LONG_AXIS");}
+      const double owned_long_axis_cos=std::abs(X_base.dot(X_shifted));
+      const double owned_z_drift=(base.cloud.T_B_input.linear().row(2)-shifted.cloud.T_B_input.linear().row(2)).norm();
+      std::cout<<"OWNED_ORIGIN_DRIFT="<<owned_origin_drift<<" OWNED_LONG_AXIS_COS="<<owned_long_axis_cos<<" OWNED_Z_DRIFT="<<owned_z_drift<<"\n";
+      if(owned_origin_drift>0.5)throw std::runtime_error("COPLANAR_BACKGROUND_MOVED_ORIGIN");
+      if(owned_long_axis_cos<0.9999)throw std::runtime_error("COPLANAR_BACKGROUND_ROTATED_LONG_AXIS");
+      // Legacy sensitivity negative control: reproduce the pre-fix "collect
+      // every coplanar point then plane_frame" behaviour in test code only.
+      // The fixture must visibly move the legacy frame, otherwise a PASS here
+      // could just mean the wharf patch is too weak to expose the old bug.
+      auto legacy_frame=[&](const Points& pts){
+        const auto deck=detect_deck(pts,config);
+        if(!deck.valid)throw std::runtime_error("LEGACY_DECK_UNRESOLVED");
+        Points support;for(const auto& v:pts)if(std::abs(deck.plane.distance(v.cast<double>()))<=config.geometry.plane_inlier_m)support.push_back(v);
+        return plane_frame(deck.plane,support);
+      };
+      const auto legacy_base=legacy_frame(deck_only),legacy_shifted=legacy_frame(with_wharf);
+      const double legacy_origin_drift=(legacy_base.inverse().translation()-legacy_shifted.inverse().translation()).norm();
+      const double legacy_long_axis_cos=std::abs(legacy_base.linear().row(0).dot(legacy_shifted.linear().row(0)));
+      std::cout<<"LEGACY_COPLANAR_ORIGIN_DRIFT="<<legacy_origin_drift<<" LEGACY_LONG_AXIS_COS="<<legacy_long_axis_cos<<"\n";
+      if(legacy_origin_drift<1.0)throw std::runtime_error("FIXTURE_LACKS_LEGACY_ATTACK_CAPABILITY");
+      std::cout<<"OFFLINE_FRAME_COPLANAR_BACKGROUND_INVARIANCE=PASS\n";}
     // STRUCTURAL_DATUM_PRESERVES_SHIP_AXIS:
     // The structure datum XY must come from the Ship Frame X projected onto
     // the Deck plane, never from the point cloud. A tilted Deck only tilts Z;
