@@ -21,7 +21,12 @@ StructuralModelCandidate StructuralRecognizer::run(const ShipFrameCloud& input,c
   if(!deck.valid){out.warnings.push_back("DECK_UNRESOLVED");return out;}
   out.frame_resolved=true;
   // This is only an auxiliary datum. Production B remains unchanged.
-  const auto T_D_B=plane_frame(deck.plane,input.points);Points datum;datum.reserve(input.points.size());
+  // Its Z is the Deck normal and its X/Y preserve the Ship Frame longitudinal
+  // axis; it must NOT re-derive XY from a full-cloud PCA, which would let
+  // cargo/background rotate the structure coordinate frame.
+  const auto T_D_B=ship_datum_frame(deck.plane);
+  if(!healthy(T_D_B)){out.frame_resolved=false;out.warnings.push_back("DATUM_AXIS_UNRESOLVED");return out;}
+  Points datum;datum.reserve(input.points.size());
   std::vector<Eigen::Vector2d> roi;for(const auto& vertex:deck.support_region)roi.push_back((T_D_B*vertex).head<2>());
   if(roi.size()<3){out.frame_resolved=false;out.warnings.push_back("STRUCTURE_ROI_UNRESOLVED");return out;}
   for(const auto& p:input.points){const Eigen::Vector3d q=T_D_B*p.cast<double>();

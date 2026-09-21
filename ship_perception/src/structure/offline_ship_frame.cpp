@@ -42,7 +42,17 @@ struct DeckAudit {
   }
 };
 }
-DeckPlaneCandidate detect_deck(const Points& raw,const Config& c,bool fixed_ship_frame) {
+namespace {
+// Implementation-private support ownership. The selected Deck is qualified by
+// ONE connected support component; only that component may later define the
+// offline Ship Frame origin and long axis. Re-scanning every coplanar point
+// would pull wharf/cargo/background back in (the 40–52 m weak-label offset).
+// Not serialized into the public model schema.
+struct DeckSupportContext { Points owned_support; };
+DeckPlaneCandidate select_deck_candidate_owned(std::vector<DeckPlaneCandidate> candidates,
+                                               std::vector<Points> owned,
+                                               const Config& c, Points* out_owned);
+DeckPlaneCandidate detect_deck_impl(const Points& raw,const Config& c,bool fixed_ship_frame,DeckSupportContext* ctx) {
   DeckPlaneCandidate best;
   if(raw.size()<std::size_t(c.geometry.min_plane_points))return best;
   const auto p=voxelize(raw,c.geometry.candidate_voxel_m,c.geometry.max_local_extent_m);
@@ -128,6 +138,7 @@ DeckPlaneCandidate detect_deck(const Points& raw,const Config& c,bool fixed_ship
   std::size_t max_orientation_support=1;
   for(const auto& fit:hypotheses){std::size_t count=0;for(const auto& n:ns)if(n.valid&&std::abs(n.direction.dot(fit.plane.normal))>consensus_cosine)++count;max_orientation_support=std::max(max_orientation_support,count);}
   std::vector<DeckPlaneCandidate> scored;
+  std::vector<Points> owned_supports;
   std::size_t audit_id=0;
   for(auto fit:hypotheses)for(double sign:{1.,-1.}) {
       fit.plane.normal*=sign;fit.plane.offset*=sign;
@@ -244,22 +255,44 @@ DeckPlaneCandidate detect_deck(const Points& raw,const Config& c,bool fixed_ship
         // Deck. An AABB over all coplanar inliers can reintroduce the wharf or
         // detached background after candidate selection.
         best.support_region.clear();for(const auto& v:hull)best.support_region.push_back(frame.inverse()*Eigen::Vector3d(v.x(),v.y(),0));
+        // Owned support = raw points inside the connected component that
+        // qualified this Deck. Only these may define the frame origin/axis;
+        // the convex hull is not ownership (it re-includes unobserved area).
+        Points owned;
+        if(ctx){std::set<CellKey> largest_set(largest.begin(),largest.end());
+          for(std::size_t i=0;i<aligned.size();++i){
+            const CellKey k{int(std::floor((aligned[i].x()-c.geometry.grid_phase_x_m)/c.geometry.coarse_voxel_m)),
+                            int(std::floor((aligned[i].y()-c.geometry.grid_phase_y_m)/c.geometry.coarse_voxel_m))};
+            if(!largest_set.count(k))continue;
+            if(std::abs(aligned[i].z())>=c.roi.support_band_m)continue;
+            if(!ns[i].valid||std::abs(ns[i].direction.dot(fit.plane.normal))<=cosine)continue;
+            owned.push_back(p[i]);
+          }}
         scored.push_back(best);
+        owned_supports.push_back(std::move(owned));
       }
   }
-  const auto selected=select_deck_candidate(std::move(scored),c);
+  Points selected_owned;
+  const auto selected=select_deck_candidate_owned(std::move(scored),std::move(owned_supports),c,ctx?&selected_owned:nullptr);
+  if(ctx)ctx->owned_support=std::move(selected_owned);
   if(std::getenv("SHIP_V15_DIAGNOSTICS"))std::cerr<<std::setprecision(17)
     <<"DECK_SELECTION {\"candidate_count\":"<<audit_id<<",\"valid\":"<<(selected.valid?"true":"false")
     <<",\"normal\":["<<selected.plane.normal.x()<<","<<selected.plane.normal.y()<<","<<selected.plane.normal.z()
     <<"],\"offset\":"<<selected.plane.offset<<",\"score\":"<<selected.quality_score<<"}\n";
   return selected;
 }
-DeckPlaneCandidate select_deck_candidate(std::vector<DeckPlaneCandidate> candidates,const Config& c){
-  candidates.erase(std::remove_if(candidates.begin(),candidates.end(),[](const auto& x){return !x.valid||!std::isfinite(x.quality_score);}),candidates.end());
-  if(candidates.empty())return {};
-  std::stable_sort(candidates.begin(),candidates.end(),[](const auto& a,const auto& b){return a.quality_score>b.quality_score;});
-  auto best=candidates.front();
-  for(std::size_t i=1;i<candidates.size();++i){const auto& alternative=candidates[i];
+DeckPlaneCandidate select_deck_candidate_owned(std::vector<DeckPlaneCandidate> candidates,
+                                               std::vector<Points> owned,
+                                               const Config& c, Points* out_owned){
+  // Filter and sort by index so the parallel ownership vector stays bound to
+  // the exact candidate that wins the ambiguity rule below.
+  std::vector<std::size_t> keep;keep.reserve(candidates.size());
+  for(std::size_t i=0;i<candidates.size();++i)if(candidates[i].valid&&std::isfinite(candidates[i].quality_score))keep.push_back(i);
+  std::stable_sort(keep.begin(),keep.end(),[&](std::size_t a,std::size_t b){return candidates[a].quality_score>candidates[b].quality_score;});
+  if(keep.empty())return {};
+  const std::size_t best_index=keep.front();
+  auto best=candidates[best_index];
+  for(std::size_t k=1;k<keep.size();++k){const auto& alternative=candidates[keep[k]];
     const double relative_gap=(best.quality_score-alternative.quality_score)/std::max(1e-12,best.quality_score);
     if(relative_gap>=c.frame.candidate_score_gap)break;
     bool equivalent=best.plane.normal.dot(alternative.plane.normal)>std::cos(c.frame.normal_refine_deg*std::acos(-1.)/180.);
@@ -267,14 +300,27 @@ DeckPlaneCandidate select_deck_candidate(std::vector<DeckPlaneCandidate> candida
     for(const auto& q:alternative.support_region)if(std::abs(best.plane.distance(q))>c.roi.support_band_m)equivalent=false;
     if(!equivalent){best.valid=false;break;}
   }
+  if(out_owned&&best_index<owned.size())*out_owned=std::move(owned[best_index]);
   return best;
+}
+} // anonymous namespace
+DeckPlaneCandidate detect_deck(const Points& raw,const Config& c,bool fixed_ship_frame){
+  return detect_deck_impl(raw,c,fixed_ship_frame,nullptr);
+}
+DeckPlaneCandidate select_deck_candidate(std::vector<DeckPlaneCandidate> candidates,const Config& c){
+  return select_deck_candidate_owned(std::move(candidates),{},c,nullptr);
 }
 FrameResult OfflineShipFrameProvider::resolve(const Points& p) const {
   FrameResult out;
   if(p.empty()||p.size()>std::size_t(config_.geometry.max_input_points)){out.reason="INVALID_INPUT_SIZE";return out;}
   for(const auto& v:p)if(!v.allFinite()||v.cwiseAbs().maxCoeff()>config_.geometry.max_local_extent_m){out.reason="INVALID_LOCAL_POINT";return out;}
-  out.deck=detect_deck(p,config_);if(!out.deck.valid){out.reason="FRAME_UNRESOLVED";return out;}
-  Points support;for(const auto& v:p)if(std::abs(out.deck.plane.distance(v.cast<double>()))<=config_.geometry.plane_inlier_m)support.push_back(v);
+  DeckSupportContext context;
+  out.deck=detect_deck_impl(p,config_,false,&context);if(!out.deck.valid){out.reason="FRAME_UNRESOLVED";return out;}
+  // Only the connected owned support may define the offline frame origin and
+  // long axis. Re-scanning every coplanar point pulls wharf/cargo/background
+  // back in and shifts the origin by tens of metres.
+  const Points& support=context.owned_support;
+  if(support.empty()){out.reason="INVALID_FRAME";return out;}
   const auto t=plane_frame(out.deck.plane,support);if(!healthy(t)){out.reason="INVALID_FRAME";return out;}
   Eigen::Vector2d mean=Eigen::Vector2d::Zero();for(const auto& q:support)mean+=(t*q.cast<double>()).head<2>();mean/=double(support.size());
   Eigen::Matrix2d axis_cov=Eigen::Matrix2d::Zero();for(const auto& q:support){const Eigen::Vector2d d=(t*q.cast<double>()).head<2>()-mean;axis_cov+=d*d.transpose();}

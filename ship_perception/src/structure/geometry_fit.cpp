@@ -99,6 +99,16 @@ Transform plane_frame(const Plane& plane,const Points& p) {
   Eigen::Matrix3d R;R.col(0)=x;R.col(1)=plane.normal.cross(x);R.col(2)=plane.normal;
   Transform t=Transform::Identity();t.linear()=R.transpose();t.translation()=-R.transpose()*mean;return t;
 }
+Transform ship_datum_frame(const Plane& plane) {
+  const Eigen::Vector3d z=plane.normal.normalized();
+  // Ship longitudinal axis projected onto the Deck plane. Degenerates (NaN,
+  // caught by healthy()) when the ship X is nearly parallel to the Deck normal.
+  const Eigen::Vector3d x=(Eigen::Vector3d::UnitX()-Eigen::Vector3d::UnitX().dot(z)*z).normalized();
+  const Eigen::Vector3d y=z.cross(x);
+  Eigen::Matrix3d R;R.col(0)=x;R.col(1)=y;R.col(2)=z;
+  const Eigen::Vector3d origin=-plane.offset*z; // ship origin projected onto the Deck plane
+  Transform t=Transform::Identity();t.linear()=R.transpose();t.translation()=-R.transpose()*origin;return t;
+}
 HeightGrid height_grid(const Points& p,const Config& c) {
   HeightGrid grid;const double s=c.geometry.coarse_voxel_m;
   for(std::size_t i=0;i<p.size();++i) {
