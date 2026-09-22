@@ -117,11 +117,12 @@ class OracleTests(unittest.TestCase):
                        "visibility": "VISIBLE", "evidence_flags": 1}
                       for a, b in zip(corners, corners[1:]+corners[:1])]
         model = {"hatches": [{"boundaries": boundaries}]}
-        self.assertTrue(score_physical_edges(hatch, model, 0.15)["success"])
+        eligible = {f"scene/hatch/{i}": {"status": "SCORABLE"} for i in range(4)}
+        self.assertTrue(score_physical_edges(hatch, model, 0.15, eligible, "scene/hatch/")["success"])
         model["hatches"][0]["boundaries"][0] = dict(boundaries[0], a=[0, 0.3, 0], b=[10, 0.3, 0])
-        self.assertFalse(score_physical_edges(hatch, model, 0.15)["success"])
+        self.assertFalse(score_physical_edges(hatch, model, 0.15, eligible, "scene/hatch/")["success"])
         hatch["edges"] = []
-        self.assertIsNone(score_physical_edges(hatch, model, 0.15)["success"])
+        self.assertIsNone(score_physical_edges(hatch, model, 0.15, eligible, "scene/hatch/")["success"])
 
 
 if __name__ == "__main__":

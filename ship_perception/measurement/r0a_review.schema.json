@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ship_perception.r0a.human_review.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "review_status", "scan_id", "source_pcd_sha256", "blind_pack_index_sha256", "reviewer_role", "reviewer_id", "repo_access", "review_a_prior_access", "algorithm_output_access", "raw_render_only", "vessel_roi_raw_xy", "fov_coverage", "visible_in_fov_hatch_count", "whole_vessel_hatch_count", "hatches", "reason"],
+  "properties": {
+    "schema": {"const": "ship_perception.r0a.human_review.1"},
+    "review_status": {"enum": ["DRAFT", "COMPLETE"]},
+    "scan_id": {"type": "string"},
+    "source_pcd_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "blind_pack_index_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reviewer_role": {"enum": ["A", "B"]},
+    "reviewer_id": {"type": ["string", "null"]},
+    "repo_access": {"type": ["boolean", "null"]},
+    "review_a_prior_access": {"type": ["boolean", "null"]},
+    "algorithm_output_access": {"type": ["boolean", "null"]},
+    "raw_render_only": {"type": ["boolean", "null"]},
+    "vessel_roi_raw_xy": {"anyOf": [{"$ref": "#/$defs/polygon"}, {"type": "null"}]},
+    "fov_coverage": {"enum": ["WHOLE_VESSEL_VISIBLE", "PARTIAL_FOV", "UNKNOWN"]},
+    "visible_in_fov_hatch_count": {"type": ["integer", "null"], "minimum": 0},
+    "whole_vessel_hatch_count": {"type": ["integer", "null"], "minimum": 1},
+    "hatches": {"type": "array", "items": {"$ref": "#/$defs/hatch"}},
+    "reason": {"type": "string"}
+  },
+  "$defs": {
+    "point": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+    "polygon": {"type": "array", "items": {"$ref": "#/$defs/point"}, "minItems": 3},
+    "edge": {
+      "type": "object", "additionalProperties": false,
+      "required": ["edge_local_id", "visibility", "opening_side_status", "observed_support", "reason"],
+      "properties": {
+        "edge_local_id": {"type": "string", "minLength": 1},
+        "visibility": {"enum": ["VISIBLE", "PARTIAL", "UNCERTAIN", "NOT_IN_FOV"]},
+        "opening_side_status": {"enum": ["OBSERVABLE", "AMBIGUOUS_TRANSITION", "NOT_OBSERVABLE"]},
+        "observed_support": {"anyOf": [{"type": "array", "items": {"$ref": "#/$defs/point"}, "minItems": 2}, {"type": "null"}]},
+        "reason": {"type": "string"}
+      }
+    },
+    "hatch": {
+      "type": "object", "additionalProperties": false,
+      "required": ["local_id", "rough_polygon_raw_xy", "observation_status", "edges", "reason"],
+      "properties": {
+        "local_id": {"type": "string", "minLength": 1},
+        "rough_polygon_raw_xy": {"$ref": "#/$defs/polygon"},
+        "observation_status": {"enum": ["VISIBLE", "PARTIAL", "UNRESOLVED"]},
+        "edges": {"type": "array", "items": {"$ref": "#/$defs/edge"}},
+        "reason": {"type": "string"}
+      }
+    }
+  }
+}

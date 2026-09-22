@@ -16,6 +16,7 @@ import numpy as np
 
 from ship_perception.measurement.oracle_local_geometry import diagnose, distance_to_edges, inside_xy
 from ship_perception.measurement.run_proposals import NORMAL, EXPECTED_HATCHES, scoring_rois
+from ship_perception.measurement.adjudicate_scene_manifest import require_audit
 from ship_perception.tools.v15_pcd import decode
 from ship_perception.tools.validate_v15r_scene_manifest import read_json, DATASET
 
@@ -53,17 +54,22 @@ def classify(local, model):
     return None
 
 
-def score_physical_edges(hatch, model, tolerance_m):
+def score_physical_edges(hatch, model, tolerance_m, eligibility=None, prefix=""):
     """GT_SCORER lane only. Rough ROI is never substituted for an observed edge."""
     gt_all = hatch.get("edges", [])
-    gt = [e for e in gt_all if e["visibility"] == "VISIBLE" and
+    eligible_ids = {key.rsplit("/", 1)[-1] for key, value in (eligibility or {}).items()
+                    if key.startswith(prefix) and value["status"] == "SCORABLE"}
+    gt = [e for e in gt_all if e["edge_local_id"] in eligible_ids and e["visibility"] == "VISIBLE" and
           e["opening_side_status"] == "OBSERVABLE" and e["observed_support"] is not None]
     predicted = [e for h in model.get("hatches", []) for e in h.get("boundaries", [])
                  if e.get("side") == "INNER_OPENING_FACE" and
                  e.get("visibility") == "VISIBLE" and (e.get("evidence_flags", 0) & 1)]
     if not gt:
-        return {"status": "NO_ADJUDICATED_OBSERVED_EDGE_SUPPORT", "success": None,
-                "edges": [], "predicted_observed_inner_edge_count": len(predicted)}
+        return {"status": "PHYSICAL_EDGE_UNSCORED", "success": None,
+                "edges": [], "observed_edge_total": 0, "observed_edge_matched": 0,
+                "edge_error_p50_m": None, "edge_error_p95_m": None,
+                "hallucinated_observed_edge_count": None,
+                "predicted_observed_inner_edge_count": len(predicted)}
 
     def samples(polyline):
         chain = np.asarray(polyline, dtype=float)
@@ -79,16 +85,16 @@ def score_physical_edges(hatch, model, tolerance_m):
             raise ValueError("ZERO_LENGTH_PHYSICAL_EDGE_SUPPORT")
         return np.concatenate(pieces)
 
-    def p95_to_segment(polyline, pred):
+    def distances_to_segment(polyline, pred):
         q = samples(polyline)
         a, b = np.asarray(pred["a"][:2]), np.asarray(pred["b"][:2])
         d = b-a
         if d @ d < 1e-12:
-            return float("inf")
+            return np.full(len(q), np.inf)
         t = np.clip(((q-a) @ d)/(d @ d), 0, 1)
-        return float(np.percentile(np.linalg.norm(q-(a+t[:, None]*d), axis=1), 95))
+        return np.linalg.norm(q-(a+t[:, None]*d), axis=1)
 
-    pairs = sorted((p95_to_segment(edge["observed_support"], pred), gi, pi)
+    pairs = sorted((float(np.percentile(distances_to_segment(edge["observed_support"], pred), 95)), gi, pi)
                    for gi, edge in enumerate(gt) for pi, pred in enumerate(predicted))
     assigned_gt, assigned_pred = {}, set()
     for dist, gi, pi in pairs:
@@ -100,22 +106,36 @@ def score_physical_edges(hatch, model, tolerance_m):
              "observed_support_to_predicted_p95_m": assigned_gt[i][1] if i in assigned_gt else None,
              "within_15cm": assigned_gt[i][1] <= tolerance_m if i in assigned_gt else False}
             for i, edge in enumerate(gt)]
-    full_physical_label = len(gt_all) >= 3 and len(gt) == len(gt_all)
-    success = (all(row["within_15cm"] for row in rows) and len(predicted) == len(gt)) if full_physical_label else None
-    return {"status": "FULL_EDGE_SUPPORT" if full_physical_label else "PARTIAL_EDGE_SUPPORT_ONLY",
-            "success": success, "edges": rows,
+    matched = [distances_to_segment(gt[i]["observed_support"], predicted[value[0]])
+               for i, value in assigned_gt.items()]
+    # Unscorable GT edges could explain extra predictions; do not label those
+    # predictions hallucinations until the entire visible GT region is resolved.
+    all_visible = [e for e in gt_all if e["visibility"] == "VISIBLE" and
+                   e["opening_side_status"] == "OBSERVABLE" and e["observed_support"] is not None]
+    hallucinated = len(predicted)-len(assigned_pred) if len(gt) == len(all_visible) else None
+    success = all(row["within_15cm"] for row in rows) and (hallucinated in (None, 0))
+    return {"status": "SCORABLE_OBSERVED_SUPPORT", "success": success, "edges": rows,
+            "observed_edge_total": len(gt), "observed_edge_matched": len(matched),
+            "edge_error_p50_m": float(np.percentile(np.concatenate(matched), 50)) if matched else None,
+            "edge_error_p95_m": float(np.percentile(np.concatenate(matched), 95)) if matched else None,
+            "_matched_sample_distances_m": np.concatenate(matched).tolist() if matched else [],
+            "hallucinated_observed_edge_count": hallucinated,
             "predicted_observed_inner_edge_count": len(predicted)}
 
 
 def run(data_root: Path, out_dir: Path, report_path: Path, manifest_path: Path | None,
         recognizer: Path | None):
     rois, annotation_status = scoring_rois(manifest_path)
+    audit = require_audit(manifest_path) if manifest_path else None
     report = {"schema": "ship_perception.r0.oracle_local_geometry.1",
               "oracle_isolation": "EVALUATION_ONLY_NOT_PRODUCT_CONFIG",
               "annotation_status": annotation_status,
               "status": "NOT_MEASURABLE_NO_ADJUDICATED_ROI" if not rois else "RUNNING",
               "physical_edge_success_count": None,
               "physical_edge_success_total": None,
+              "observed_edge_total": None, "observed_edge_matched": None,
+              "edge_error_p50_m": None, "edge_error_p95_m": None,
+              "hallucinated_observed_edge_count": None,
               "warning": "Rough ROI cannot establish true opening-side steel-edge accuracy without adjudicated observed edge support",
               "hatches": []}
     if not rois:
@@ -127,6 +147,7 @@ def run(data_root: Path, out_dir: Path, report_path: Path, manifest_path: Path |
     config = read_json(Path("ship_perception/config/v15.json"))
     sources = {s["scan_id"]: s for s in read_json(DATASET)["scans"]}
     scenes = {s["scan_id"]: s for s in read_json(manifest_path)["scans"]}
+    all_edge_distances = []
     out_dir.mkdir(parents=True, exist_ok=True)
     for sid in NORMAL:
         source = sources[sid]
@@ -159,7 +180,9 @@ def run(data_root: Path, out_dir: Path, report_path: Path, manifest_path: Path |
             else:
                 model = read_json(model_path)
             local = diagnose(cropped, hpoly, vpoly, config, other)
-            physical = score_physical_edges(hatch, model, config["evaluation"]["boundary_p95_m"])
+            physical = score_physical_edges(hatch, model, config["evaluation"]["boundary_p95_m"],
+                                            audit["physical_edges"], f"{sid}/{hatch['local_id']}/")
+            all_edge_distances.extend(physical.pop("_matched_sample_distances_m", []))
             (directory / "profile_audit.json").write_text(json.dumps(local, allow_nan=False, indent=2), encoding="utf-8")
             report["hatches"].append({"scan_id": sid, "vessel_id": vessel_id,
                                       "hatch_id": hatch["local_id"],
@@ -179,6 +202,13 @@ def run(data_root: Path, out_dir: Path, report_path: Path, manifest_path: Path |
     scored = [h for h in report["hatches"] if h["physical_edge_success"] is not None]
     report["physical_edge_success_count"] = sum(h["physical_edge_success"] for h in scored) if scored else None
     report["physical_edge_success_total"] = len(scored) if scored else None
+    if scored:
+        report["observed_edge_total"] = sum(h["physical_edge_scoring"]["observed_edge_total"] for h in scored)
+        report["observed_edge_matched"] = sum(h["physical_edge_scoring"]["observed_edge_matched"] for h in scored)
+        report["edge_error_p50_m"] = float(np.percentile(all_edge_distances, 50)) if all_edge_distances else None
+        report["edge_error_p95_m"] = float(np.percentile(all_edge_distances, 95)) if all_edge_distances else None
+        extras = [h["physical_edge_scoring"]["hallucinated_observed_edge_count"] for h in scored]
+        report["hallucinated_observed_edge_count"] = sum(extras) if all(x is not None for x in extras) else None
     report["status"] = "PHYSICAL_EDGE_SCORED" if len(scored) == len(report["hatches"]) else "DIAGNOSTIC_COMPLETE_PHYSICAL_EDGE_PARTLY_OR_UNSCORED"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, ensure_ascii=False, allow_nan=False, indent=2), encoding="utf-8")

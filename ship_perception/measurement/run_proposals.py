@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from ship_perception.measurement.proposal import Candidate, evaluate_instances, nms
+from ship_perception.measurement.adjudicate_scene_manifest import require_audit
 from ship_perception.tools.validate_v15r_scene_manifest import read_json, validate, DATASET, SCHEMA
 
 NORMAL = ("2026-08-01-05-09-32", "2026-08-08-02-33-57",
@@ -28,6 +29,7 @@ def candidate(row):
 def scoring_rois(manifest_path):
     if manifest_path is None:
         return {}, "NO_ADJUDICATED_SCENE_MANIFEST"
+    require_audit(Path(manifest_path))
     manifest = read_json(manifest_path)
     errors, ready = validate(manifest, read_json(DATASET), read_json(SCHEMA), True)
     if errors:
@@ -110,6 +112,16 @@ def run(data_root: Path, out_dir: Path, report_path: Path, manifest_path=None):
                                    "geometry provider is minimal diagnostic, not product detector"],
               "recall": {k: v[0]/v[1] if v[1] else None for k, v in aggregate.items()},
               "recall_counts": {k: {"matched": v[0], "total": v[1]} for k, v in aggregate.items()},
+              "failure_analysis": {k: {"missed_hatches": [f"{row['scan_id']}/{h['hatch_id']}"
+                                                           for row in rows if k in row for h in row[k]["hatches"]
+                                                           if not h["matched"]],
+                                       "merged_candidate_ids": [f"{row['scan_id']}/{cid}"
+                                                                for row in rows if k in row
+                                                                for cid in row[k]["merged_candidate_ids"]],
+                                       "duplicate_candidate_ids": [f"{row['scan_id']}/{cid}"
+                                                                   for row in rows if k in row
+                                                                   for cid in row[k]["duplicate_candidate_ids"]]}
+                                   for k in aggregate},
               "scans": rows}
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, ensure_ascii=False, allow_nan=False, indent=2), encoding="utf-8")

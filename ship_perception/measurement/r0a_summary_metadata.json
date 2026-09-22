@@ -1,0 +1,16 @@
+{
+  "schema": "ship_perception.r0a.summary_metadata.1",
+  "base_sha": "58da06775c696d79d418b115264418a66a33f86c",
+  "normal_scene_count": 6,
+  "blind_raw_render_count": 54,
+  "independent_review_template_count": 12,
+  "adjudicated_hatch_count": null,
+  "review_provenance": "PENDING_HUMAN_A_AND_B",
+  "proposal_recall": null,
+  "physical_gt_edge_total": null,
+  "physical_gt_edge_scorable": null,
+  "gt_inter_review_p95_m": null,
+  "oracle_edge_error_p95_m": null,
+  "next_primary_blocker": "PENDING_ADJUDICATED_GT",
+  "raw_images_or_coordinates_in_git": false
+}
