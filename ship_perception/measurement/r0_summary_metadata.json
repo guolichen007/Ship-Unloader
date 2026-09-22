@@ -1,0 +1,37 @@
+{
+  "schema": "ship_perception.r0.measurement_summary.1",
+  "base_sha": "c2e57465f689a0c70399b722afc77fb6b72ee1ae",
+  "normal_scene_count": 6,
+  "normal_expected_hatch_count_from_review_a": 9,
+  "stress_scene_count": 3,
+  "normal_candidate_totals": {
+    "legacy_cnn_pre_nms": 42697,
+    "legacy_cnn_post_nms_top5": 21,
+    "geometry_minimal_raw": 125,
+    "geometry_minimal_post_nms_top50": 90,
+    "union_post_nms": 101
+  },
+  "stress_candidate_totals": {
+    "legacy_cnn_pre_nms": 13361,
+    "legacy_cnn_post_nms_top5": 6,
+    "geometry_minimal_raw": 47,
+    "geometry_minimal_post_nms_top50": 31,
+    "union_post_nms": 36
+  },
+  "instance_recall": null,
+  "oracle_physical_edge_success": null,
+  "blocker_attribution": "UNDETERMINED_NO_ADJUDICATED_INSTANCE_ROI_OR_PHYSICAL_EDGE_SUPPORT",
+  "windows_pcl_off_regression": {
+    "non_quick_ctest": "25/25 PASS",
+    "v15_quick_synthetic": "PASS",
+    "v15_quick_real_smoke": "FAIL_BASELINE_PRODUCT_BEHAVIOR",
+    "v15_quick_integration": "FAIL_BASELINE_PRODUCT_BEHAVIOR",
+    "v14_frozen_paths": "PASS"
+  },
+  "raw_artifacts": "Ship-Unloader-Work (git-ignored)",
+  "caveats": [
+    "Candidate counts do not establish recall or opening-side edge accuracy.",
+    "Legacy CNN was trained on partial weak labels and may have seen these Development scans.",
+    "Geometry provider is an intentionally minimal diagnostic, not the R1 detector."
+  ]
+}
