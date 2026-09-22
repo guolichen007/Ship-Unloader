@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ship_perception.v15r.scene_manifest.2",
+  "title": "V1.5-R scene manifest：多船场景、视野内舱数/整船舱数分离、分舱证据",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "annotation_status", "scans"],
+  "properties": {
+    "schema_version": {"const": "ship_perception.v15r.scene_manifest.2"},
+    "annotation_status": {"enum": ["DRAFT", "INDEPENDENT_REVIEW", "ADJUDICATED"]},
+    "scans": {"type": "array", "items": {"$ref": "#/$defs/scan"}}
+  },
+  "$defs": {
+    "point2": {
+      "type": "array",
+      "prefixItems": [{"type": "number"}, {"type": "number"}],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "polygon2": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/point2"},
+      "minItems": 3
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["edge_local_id", "visibility", "evidence_type", "opening_side_status", "observed_support", "reason"],
+      "properties": {
+        "edge_local_id": {"type": "string", "minLength": 1},
+        "visibility": {"enum": ["VISIBLE", "PARTIAL", "UNCERTAIN", "NOT_IN_FOV"]},
+        "evidence_type": {"enum": ["OBSERVED_PROFILE_BREAK", "OBSERVED_3D_FACE", "INFERRED", "HISTORICAL", "UNKNOWN"]},
+        "opening_side_status": {"enum": ["OBSERVABLE", "AMBIGUOUS_TRANSITION", "NOT_OBSERVABLE"]},
+        "observed_support": {"type": ["array", "null"], "items": {"$ref": "#/$defs/point2"}, "minItems": 2},
+        "reason": {"type": "string"}
+      }
+    },
+    "hatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local_id", "rough_polygon_raw_xy", "observation_status", "edges", "partition_relation", "reason"],
+      "properties": {
+        "local_id": {"type": "string", "minLength": 1},
+        "rough_polygon_raw_xy": {"anyOf": [{"$ref": "#/$defs/polygon2"}, {"type": "null"}]},
+        "observation_status": {"enum": ["VISIBLE", "PARTIAL", "UNRESOLVED"]},
+        "edges": {"type": "array", "items": {"$ref": "#/$defs/edge"}},
+        "partition_relation": {"enum": ["OBSERVED_PARTITION", "POSSIBLE_PARTITION", "NO_PARTITION_EVIDENCE", "UNKNOWN"]},
+        "reason": {"type": "string"}
+      }
+    },
+    "vessel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vessel_local_id", "vessel_role", "fov_coverage", "visible_in_fov_hatch_count", "whole_vessel_hatch_count", "count_certainty", "subdivision_evidence", "hatches", "reason"],
+      "properties": {
+        "vessel_local_id": {"type": "string", "minLength": 1},
+        "roi_raw_xy": {"anyOf": [{"$ref": "#/$defs/polygon2"}, {"type": "null"}]},
+        "vessel_role": {"enum": ["PRIMARY_DEVELOPMENT", "MULTI_VESSEL_STRESS", "PARTIAL_FOV", "UNRESOLVED"]},
+        "fov_coverage": {"enum": ["WHOLE_VESSEL_VISIBLE", "PARTIAL_FOV", "UNKNOWN"]},
+        "visible_in_fov_hatch_count": {"type": ["integer", "null"], "minimum": 0},
+        "whole_vessel_hatch_count": {"type": ["integer", "null"], "minimum": 1},
+        "count_certainty": {"enum": ["CONFIRMED", "AMBIGUOUS", "UNREVIEWED", "OUT_OF_SCOPE"]},
+        "subdivision_evidence": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/subdivision"}
+        },
+        "hatches": {"type": "array", "items": {"$ref": "#/$defs/hatch"}},
+        "reason": {"type": "string"}
+      }
+    },
+    "subdivision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "physical_partition_confirmed", "reason"],
+      "properties": {
+        "status": {"enum": ["CONFIRMED_PARTITION", "TRACE_ONLY", "NO_PARTITION_EVIDENCE", "UNKNOWN"]},
+        "physical_partition_confirmed": {"type": "boolean"},
+        "operational_hatch_count": {"type": "integer", "minimum": 1},
+        "reason": {"type": "string"}
+      }
+    },
+    "scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scan_id", "source_pcd_sha256", "split_role", "scene_review_status", "vessels", "reason"],
+      "properties": {
+        "scan_id": {"type": "string", "minLength": 1},
+        "source_pcd_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "split_role": {"enum": ["DEVELOPMENT", "SEALED_WEAK_HOLDOUT", "NEW_GOLDEN"]},
+        "scene_review_status": {"enum": ["NEEDS_REVIEW", "INDEPENDENT_REVIEWED", "ADJUDICATED"]},
+        "operational_target_vessel_id": {"type": ["string", "null"]},
+        "vessels": {"type": "array", "items": {"$ref": "#/$defs/vessel"}, "minItems": 1},
+        "reviewers": {"type": "array", "items": {"type": "string"}},
+        "independent_reviews": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reviewer_id", "review_file_sha256"],
+            "properties": {
+              "reviewer_id": {"type": "string", "minLength": 1},
+              "review_file_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        },
+        "reason": {"type": "string"}
+      }
+    }
+  }
+}

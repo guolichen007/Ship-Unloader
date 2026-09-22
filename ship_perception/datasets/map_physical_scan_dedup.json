@@ -1,0 +1,148 @@
+{
+  "schema": "ship_perception.v15r.physical_scan_dedup.1",
+  "map_zip_sha256": "24f0c5dcf498c8b9a7b085df98bae4a7236a95bde92c14d6c8c8600e2f682bff",
+  "map_zip_file_count": 13,
+  "physical_scan_count": 13,
+  "summary": "13 个物理扫描。map.zip 内 8 个 PCD 与 hold_detector 同名 PCD 字节级相同；5 个 PLY 为另 5 个扫描的 ascii clean/aligned 版（点数与 hold_detector PCD 一致）。hold_detector 内编号(1~12)与命名(final_map_*)及 test 副本为同一份的重复。去重后物理样本=13，不因文件名/编码重复而增加。",
+  "physical_scans": [
+    {
+      "physical_scan_id": "huangshi_2026-08-02",
+      "map_zip_file": "2026-08-02-13-10-59_clean_005_aligned_jiuzheng_005_2d - Cloud_cut.ply",
+      "map_zip_sha256": "80e3c3a87dac7510b98e7f2f4d7b054f0511c5116f2f3c0ef4ab5cb188181779",
+      "map_zip_ext": ".ply",
+      "encoding_equivalence": "PLY_ASCII_CLEAN_ALIGNED_VS_HOLD_DETECTOR_PCD",
+      "hold_detector_files": "见 hold_detector_orig_pcd（点数一致，编码不同）"
+    },
+    {
+      "physical_scan_id": "final_8_17_005",
+      "map_zip_file": "final_8_17_005_2d_cat.ply",
+      "map_zip_sha256": "0f6b50706dfdcb5b5ed42cc6f59d630f4e5e657c7cce1029101a007ca063b2fa",
+      "map_zip_ext": ".ply",
+      "encoding_equivalence": "PLY_ASCII_CLEAN_ALIGNED_VS_HOLD_DETECTOR_PCD",
+      "hold_detector_files": "见 hold_detector_orig_pcd（点数一致，编码不同）"
+    },
+    {
+      "physical_scan_id": "final_map_4_16_2d_005",
+      "map_zip_file": "final_map_4_16_2d_005.pcd",
+      "map_zip_sha256": "92bc204d6563a685bdfe12937dd86cc7afaf5f16219a28c9945035703dea5ec1",
+      "map_zip_ext": ".pcd",
+      "encoding_equivalence": "BYTE_IDENTICAL_WITH_HOLD_DETECTOR",
+      "hold_detector_files": [
+        "hold_detector/detect/pcd/1.pcd",
+        "hold_detector/detect/pcd/2.pcd",
+        "hold_detector/detect/pcd/final_map_4_16_2d_005.pcd",
+        "hold_detector/detect/test/final_map_4_16_2d_005.pcd"
+      ]
+    },
+    {
+      "physical_scan_id": "final_map_4_22_2d_005",
+      "map_zip_file": "final_map_4_22_2d_005.pcd",
+      "map_zip_sha256": "3f2d2689653b93ea6e5d805cb7eecca11570d8bfa618c92fe7c60e49537f4969",
+      "map_zip_ext": ".pcd",
+      "encoding_equivalence": "BYTE_IDENTICAL_WITH_HOLD_DETECTOR",
+      "hold_detector_files": [
+        "hold_detector/detect/pcd/7.pcd",
+        "hold_detector/detect/pcd/8.pcd",
+        "hold_detector/detect/pcd/final_map_4_22_2d_005.pcd",
+        "hold_detector/detect/test/final_map_4_22_2d_005.pcd"
+      ]
+    },
+    {
+      "physical_scan_id": "final_map_5_21_empty_boat",
+      "map_zip_file": "final_map_5_21_empty_boat.pcd",
+      "map_zip_sha256": "6ebcd91a74a03b09b3315362d4db44891bd2ec84cb66f498083f40ea19f84aab",
+      "map_zip_ext": ".pcd",
+      "encoding_equivalence": "BYTE_IDENTICAL_WITH_HOLD_DETECTOR",
+      "hold_detector_files": [
+        "hold_detector/detect/pcd/12.pcd",
+        "hold_detector/detect/pcd/final_map_5_21_empty_boat.pcd",
+        "hold_detector/detect/test/final_map_5_21_empty_boat.pcd"
+      ]
+    },
+    {
+      "physical_scan_id": "final_map_5_29_2d_005",
+      "map_zip_file": "final_map_5_29_2d_005.pcd",
+      "map_zip_sha256": "3ea43b342fb3fee5792bb9bb7b85a97827c55117f139b3f505cf14c49f90c5a8",
+      "map_zip_ext": ".pcd",
+      "encoding_equivalence": "BYTE_IDENTICAL_WITH_HOLD_DETECTOR",
+      "hold_detector_files": [
+        "hold_detector/detect/pcd/3.pcd",
+        "hold_detector/detect/pcd/4.pcd",
+        "hold_detector/detect/pcd/final_map_5_29_2d_005.pcd",
+        "hold_detector/detect/test/final_map_5_29_2d_005.pcd"
+      ]
+    },
+    {
+      "physical_scan_id": "final_map_6_8_2d_005",
+      "map_zip_file": "final_map_6_8_2d_005.pcd",
+      "map_zip_sha256": "a63a2a12b161bea552269f21110164490d669b77afbd4e2de0e6bb766bef9b6f",
+      "map_zip_ext": ".pcd",
+      "encoding_equivalence": "BYTE_IDENTICAL_WITH_HOLD_DETECTOR",
+      "hold_detector_files": [
+        "hold_detector/detect/pcd/final_map_6_8_2d_005.pcd",
+        "hold_detector/detect/test/final_map_6_8_2d_005.pcd"
+      ]
+    },
+    {
+      "physical_scan_id": "final_map_7_15_2d_005",
+      "map_zip_file": "final_map_7_15_2d_005.pcd",
+      "map_zip_sha256": "d61a10ef7aa1b53ef962e35dd8e5a074c6cf91a4c3c3af08375f08375addeaa1",
+      "map_zip_ext": ".pcd",
+      "encoding_equivalence": "BYTE_IDENTICAL_WITH_HOLD_DETECTOR",
+      "hold_detector_files": [
+        "hold_detector/detect/pcd/9.pcd",
+        "hold_detector/detect/pcd/final_map_7_15_2d_005.pcd",
+        "hold_detector/detect/test/final_map_7_15_2d_005.pcd"
+      ]
+    },
+    {
+      "physical_scan_id": "final_map_7_16_2d_005",
+      "map_zip_file": "final_map_7_16_2d_005.pcd",
+      "map_zip_sha256": "3c7c08de7526f1a5e9777a481df69dcd3ed5c401d3f3f92a98faf70d8f7b647e",
+      "map_zip_ext": ".pcd",
+      "encoding_equivalence": "BYTE_IDENTICAL_WITH_HOLD_DETECTOR",
+      "hold_detector_files": [
+        "hold_detector/detect/pcd/10.pcd",
+        "hold_detector/detect/pcd/final_map_7_16_2d_005.pcd",
+        "hold_detector/detect/test/final_map_7_16_2d_005.pcd"
+      ]
+    },
+    {
+      "physical_scan_id": "final_map_7_2_005",
+      "map_zip_file": "final_map_7_2_005.pcd",
+      "map_zip_sha256": "1b2294589ad682e459aa77acd443103943c951c1d3e487b391eb5090c73c8036",
+      "map_zip_ext": ".pcd",
+      "encoding_equivalence": "BYTE_IDENTICAL_WITH_HOLD_DETECTOR",
+      "hold_detector_files": [
+        "hold_detector/detect/pcd/5.pcd",
+        "hold_detector/detect/pcd/6.pcd",
+        "hold_detector/detect/pcd/final_map_7_2_005.pcd",
+        "hold_detector/detect/test/final_map_7_2_005.pcd"
+      ]
+    },
+    {
+      "physical_scan_id": "final_map_8_22_cut",
+      "map_zip_file": "final_map_8_22_cut.ply",
+      "map_zip_sha256": "a992ebe7d85768f78120ebbe9bdbe086358d1079a0a0282312450124c7590841",
+      "map_zip_ext": ".ply",
+      "encoding_equivalence": "PLY_ASCII_CLEAN_ALIGNED_VS_HOLD_DETECTOR_PCD",
+      "hold_detector_files": "见 hold_detector_orig_pcd（点数一致，编码不同）"
+    },
+    {
+      "physical_scan_id": "huangshi_2026-08-01",
+      "map_zip_file": "huangshi_yiqi_2026-08-01-05-09-32_clean_010_aligned_nof_2d_005 - Cloud.ply",
+      "map_zip_sha256": "e6922bfda7a9b20232cd613ce9063c47e153364b94a1e6693a397bfcdea1abeb",
+      "map_zip_ext": ".ply",
+      "encoding_equivalence": "PLY_ASCII_CLEAN_ALIGNED_VS_HOLD_DETECTOR_PCD",
+      "hold_detector_files": "见 hold_detector_orig_pcd（点数一致，编码不同）"
+    },
+    {
+      "physical_scan_id": "huangshi_2026-08-08",
+      "map_zip_file": "huangshi_yiqi_2026-08-08-02-33-57__aligned_cut.ply",
+      "map_zip_sha256": "872932eac09195bbc663624f6722c3ecf557facf28fdd68b5321dcf5fb94d8d8",
+      "map_zip_ext": ".ply",
+      "encoding_equivalence": "PLY_ASCII_CLEAN_ALIGNED_VS_HOLD_DETECTOR_PCD",
+      "hold_detector_files": "见 hold_detector_orig_pcd（点数一致，编码不同）"
+    }
+  ]
+}
