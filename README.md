@@ -1,25 +1,165 @@
-# 卸船机船体识别与稳定跟踪
+# Ship-Unloader — 卸船机船舱精准识别
 
-V1.4 已完成 Ubuntu20 独立验证，当前功能分支正在实现 V1.5 船舱结构识别。目标环境为 Ubuntu 20.04、GCC9、CMake3.16、Eigen3.3.7、PCL1.10、C++17。
+面向散货卸船机双激光雷达场景的 **1～3 个船舱（Hatch）精准识别与整船刚体跟随** 系统。
 
-**当前产品优先级：V1.5-R Recognition First。当前阶段：R0 Data Contract / Baseline。** 生产架构为 `Proposal → 1/2/3 舱假设 → Local Deck → opening-side 3D 边界 → Hatch model`；Global Self-Bootstrap 仅作研究支线。场景契约见 `docs/V1.5-R数据契约_V2场景语义.md`，工程规范见 `docs/工程执行规范.md`。
+当前唯一优先级：**先把船舱识别做准，再接整船跟踪；控制、PLC、抓取规划、Web 全部后置。**
 
-原始数据在仓库内子文件夹 `Ship-Unloader-Data/`（`SHIP_UNLOADER_DATA_ROOT`），构建/验证输出在 `Ship-Unloader-Work/`（`SHIP_UNLOADER_WORK_ROOT`），均被 `.gitignore` 忽略、永不推送，不写本机绝对路径。
+## 一、目标
 
-V1.5 开发起点为 `d586b93fbf676e585e77286b7b10d7076a64d3b7`；冻结的 V1.4 技术 SHA 为 `2fdeb5055ae6ad6d84513453b5c6eff2d742a5d1`。V1.4 的正式通过报告已归档；V1.5 尚未达到整版放行条件。原始 M0 正式通过证据不补造。
+输入目标船区域内的原始点云，输出：
 
-- [构建与运行说明](ship_perception/README.md)
-- [V1.4 实现说明](docs/V1.4版本_船体稳定跟踪核心版实现说明.md)
-- [V1.4 Ubuntu20 正式独立验证报告](docs/validation/V1.4阶段_Ubuntu20正式独立验证报告.md)
-- [V1.5 数据集与标注契约](docs/V1.5版本_数据集与标注说明.md)
-- [V1.5 实现状态与技术说明](docs/V1.5版本_实现说明.md)
-- [V1.5 计划符合性审查与未完成项](docs/V1.5版本_计划符合性审查.md)
-- [V1.5 阶段性进展与未通过门禁（2026-09-21）](docs/validation/V1.5阶段性进展_2026-09-21.md)
-- [V1.5 Ubuntu20 验证交接准备](docs/V1.5版本_Ubuntu20统一验证交接.md)
-- [Ubuntu20 统一验证交接](docs/V1.4版本_Ubuntu20验证交接说明.md)
-- [协作与提交规范](docs/GitHub企业级协作与提交规范.md)
-- [M0 历史验证交接](docs/M0阶段_验证交接说明.md)
+- 视野内 1～3 个独立 Hatch；
+- 每个 Hatch 的 opening-side 结构边界；
+- 每条边的 `OBSERVED / INFERRED / HISTORICAL / UNKNOWN` 证据来源；
+- `VISIBLE / PARTIAL / UNRESOLVED` 状态；
+- 固定 Ship Frame 下的 Hatch 几何；
+- 船体位姿有效时，由统一 `T_W_B(t)` 更新全部 Hatch 世界位置。
 
-新实现位于 `ship_perception/`。本地 `hold_detector/` 是只读冻结资产，不导入此仓库。V1.5 真实数据验证通过 `--data-root` 使用外部副本；Synthetic 与核心单元测试不依赖这些资产。第三方源码及原始许可证保留原文。
+**禁止把货堆轮廓、坡脚、码头边缘或固定高度等值线伪装成船舱钢结构边界。**
 
-Synthetic 验收不能代替现场点密度、遮挡、同步和扫描失真验证，现场状态持续为 `SITE_PENDING`。V1.5 输出的多边形只是未审查结构候选，不是控制地图或 Canonical Model；不实现 EKF、最终可观性/协方差标定、完整 LOST/重定位、AI 或 PLC 控制。
+## 二、技术路线
+
+```text
+Raw XYZ / PCD / PLY
+        │
+        ▼
+Strict Point Cloud Decode
+        │
+        ▼
+Target Vessel Seed / Scene ROI
+        │
+        ├──────── Geometry Proposal
+        │
+        └──────── Optional Legacy CNN Proposal
+                       │
+                       ▼
+                Candidate Union
+                       │
+                       ▼
+             1 / 2 / 3 Hatch Solver
+                       │
+                       ▼
+              Per-Hatch Local Deck
+                       │
+                       ▼
+       opening-side 3D Profile Break
+           + Visible 3D Face Evidence
+                       │
+                       ▼
+                Boundary Fusion
+                       │
+                       ▼
+       Hatch Polygon / PARTIAL / Failure
+                       │
+                       ▼
+               Fixed Ship Frame B
+```
+
+**Production 主链不依赖 Global Deck / Global Structural ROI。**
+旧 `hold_detector` 只作为只读 Legacy Proposal 参考，不作为产品真值或生产依赖。
+
+## 三、当前阶段
+
+| 阶段 | 目标 | 状态 |
+|---|---|---|
+| V1.4 | 整船 SE(3) 稳定跟踪基础 | 已冻结 |
+| V1.5-R0 | 数据治理、场景契约、Proposal/Oracle 基线 | 当前 |
+| V1.5-R1 | 可见 1～3 舱精准识别 | 待进入 |
+| V1.5-R2 | 部分遮挡，不幻觉钢边 | 后续 |
+| V1.5-T1 | 复用 V1.4 做整船刚体跟随 | R1 后 |
+| V1.5-R3 | 完全覆盖：历史模型 / Prior-only | 最后 |
+
+## 四、目录结构
+
+```text
+Ship Unloader/
+├── README.md
+├── CLAUDE.md
+├── AGENTS.md
+├── .gitignore
+├── .gitattributes
+├── docs/
+│   ├── 00_项目总则与架构冻结.md
+│   ├── 01_技术路线与理论可行性.md
+│   ├── 02_数据标注与证据治理规范.md
+│   ├── 03_工程化与Git协作规范.md
+│   ├── 04_代码规范_C++17与Python.md
+│   ├── 05_测试验证与版本发布规范.md
+│   ├── 06_AI编码代理执行规范.md
+│   └── 07_README与文档维护规则.md
+├── ship_perception/              # 产品代码
+├── third_party/                  # 固定第三方依赖
+├── Ship-Unloader-Data/           # 永不推送
+│   ├── raw/map/
+│   ├── legacy/hold_detector/
+│   ├── annotations/
+│   └── manifests/
+└── Ship-Unloader-Work/           # 永不推送
+    ├── build/
+    ├── validation/
+    ├── logs/
+    ├── reports/
+    └── tmp/
+```
+
+## 五、环境
+
+```text
+Ubuntu       20.04
+GCC          9.4
+CMake        3.16.3
+C++          C++17
+PCL          1.10.0
+Eigen        3.3.7
+Python       3.8
+small_gicp   fd29d8cf / v1.0.0
+```
+
+几何变换统一使用 `Eigen::Isometry3d`，记号统一为 `T_A_B`：**将 B 坐标表达转换到 A 坐标表达**。
+
+## 六、核心原则
+
+1. **识别优先**：先解决 Hatch 是否识别正确，再做控制。
+2. **Fail-Closed**：证据不足时返回 `UNRESOLVED / AMBIGUOUS / UNKNOWN`，禁止强行补全。
+3. **观测与推断分离**：任何 Prior / Historical / Inferred 都不得伪装成 Observed。
+4. **单一 Ship Frame**：全部 Hatch 共享同一船体刚体位姿，不允许每个舱独立漂移。
+5. **Development ≠ Commercial Validation**：当前 Development 数据只用于定位问题，不作为商业泛化证明。
+6. **Raw Data Never in Git**：PCD / PLY / ZIP / build / validation / logs 永不推送。
+
+## 七、当前数据门禁
+
+主 Development：
+
+```text
+08-01    2 Hatch
+08-08    1 Hatch
+4-16     1 Hatch + FALSE_SPLIT negative
+6-8      1 Hatch
+7-16     1 Hatch
+8-22     3 Hatch
+----------------
+合计      9 Hatch
+```
+
+特殊场景：
+
+```text
+8-17     PARTIAL_FOV
+5-29     3-vessel stress
+7-2      2-vessel stress
+```
+
+R1 必须逐实例报告召回、误合并、重复、跨船污染和逐边证据；禁止只报平均 IoU。
+
+## 八、关键文档
+
+- `docs/00_项目总则与架构冻结.md`
+- `docs/01_技术路线与理论可行性.md`
+- `docs/02_数据标注与证据治理规范.md`
+- `docs/03_工程化与Git协作规范.md`
+- `docs/04_代码规范_C++17与Python.md`
+- `docs/05_测试验证与版本发布规范.md`
+- `docs/06_AI编码代理执行规范.md`
+- `docs/07_README与文档维护规则.md`
+
+**任何产品算法修改前，必须先读取 Architecture Freeze 与对应阶段 Acceptance Contract。**
