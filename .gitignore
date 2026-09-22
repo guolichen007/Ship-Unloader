@@ -1,13 +1,19 @@
+# 数据与工作产物：仓库内子文件夹，永不推送
+/Ship-Unloader-Data/
+/Ship-Unloader-Work/
+# legacy 只读资产（hold_detector 因挂载层 rename 保护保留原位）
 /hold_detector/
-/*.md
-!/README.md
-!/CLAUDE.md
-!/AGENTS.md
+# 残留保护
 /build*/
 /validation/
 /.local/
 /map.zip
 /local-data/
 /out/
+# 文档：默认忽略根 md，仅放行 README/CLAUDE/AGENTS
+/*.md
+!/README.md
+!/CLAUDE.md
+!/AGENTS.md
 __pycache__/
 *.pyc
