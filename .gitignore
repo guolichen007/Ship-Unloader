@@ -1,7 +1,7 @@
 # 数据与工作产物：仓库内子文件夹，永不推送
 /Ship-Unloader-Data/
 /Ship-Unloader-Work/
-# legacy 只读资产（hold_detector 因挂载层 rename 保护保留原位）
+# legacy 只读资产已迁入 Ship-Unloader-Data/legacy/hold_detector/；此项仅防旧路径残留误提交
 /hold_detector/
 # 残留保护
 /build*/

@@ -1,5 +1,10 @@
 # README 与文档维护规则
 
+> 状态：FROZEN
+> 适用版本：V1.5-R / V1.5-T
+> 最后更新：2026-09-22
+> Owner：Ship-Unloader Engineering
+
 ## 1. README 只保留长期入口信息
 
 README 回答：

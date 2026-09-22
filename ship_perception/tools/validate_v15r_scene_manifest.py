@@ -81,9 +81,10 @@ def validate(labels, dataset, schema, require_scoring_ready=False):
                 for edge in hatch["edges"]:
                     if edge["evidence_type"].startswith("OBSERVED") and edge["observed_support"] is None:
                         errors.append(f"OBSERVED_WITHOUT_SUPPORT:{sid}:{vid}:{hatch['local_id']}:{edge['edge_local_id']}")
-                    if edge["evidence_type"] in {"INFERRED", "HISTORICAL", "UNKNOWN"} and edge["observed_support"] is not None:
+                    if edge["evidence_type"] in {"INFERRED_GEOMETRY", "INFERRED_VESSEL_PRIOR", "HISTORICAL_MODEL", "UNKNOWN"} and edge["observed_support"] is not None:
                         errors.append(f"NON_OBSERVED_WITH_SUPPORT:{sid}:{vid}:{hatch['local_id']}:{edge['edge_local_id']}")
-                    if edge["evidence_type"] == "HISTORICAL" and source["dataset_id"] == "hold_detector_static_xyz_v1":
+                    # OPERATOR_CONFIRMED is a separate human provenance, not an OBSERVED_* sensor claim.
+                    if edge["evidence_type"] == "HISTORICAL_MODEL" and source["dataset_id"] == "hold_detector_static_xyz_v1":
                         errors.append(f"STATIC_SCAN_CANNOT_PROVE_HISTORY:{sid}:{vid}:{hatch['local_id']}:{edge['edge_local_id']}")
             # Subdivision semantics: TRACE_ONLY must never be promoted to two hatches.
             for sub in vessel["subdivision_evidence"]:
@@ -105,10 +106,15 @@ def validate(labels, dataset, schema, require_scoring_ready=False):
                     errors.append(f"WHOLE_COUNT_MISMATCH:{sid}:{vid}")
 
         if scan["scene_review_status"] == "ADJUDICATED":
-            if len(set(scan["reviewers"])) < 2:
+            reviewers = scan.get("reviewers")
+            independent = scan.get("independent_reviews")
+            if reviewers is None:
+                errors.append(f"MISSING_REVIEWERS:{sid}")
+            elif len(set(reviewers)) < 2:
                 errors.append(f"NEEDS_TWO_INDEPENDENT_REVIEWERS:{sid}")
-            independent = scan["independent_reviews"]
-            if (len({i["reviewer_id"] for i in independent}) < 2 or
+            if independent is None:
+                errors.append(f"MISSING_INDEPENDENT_REVIEWS:{sid}")
+            elif (len({i["reviewer_id"] for i in independent}) < 2 or
                     len({i["review_file_sha256"] for i in independent}) < 2):
                 errors.append(f"NEEDS_TWO_REVIEW_RECORDS:{sid}")
             if len(errors) == before:
@@ -117,6 +123,8 @@ def validate(labels, dataset, schema, require_scoring_ready=False):
     if labels["annotation_status"] == "ADJUDICATED" and any(
             r["scene_review_status"] != "ADJUDICATED" for r in labels["scans"]):
         errors.append("MANIFEST_ADJUDICATED_WITH_UNREVIEWED_SCAN")
+    if require_scoring_ready and labels["annotation_status"] != "ADJUDICATED":
+        errors.append("MANIFEST_NOT_ADJUDICATED")
     if require_scoring_ready and (errors or len(scoring_ready) != len(labels["scans"])):
         errors.append(f"SCORING_NOT_READY:{len(scoring_ready)}/{len(labels['scans'])}")
     return sorted(errors), scoring_ready

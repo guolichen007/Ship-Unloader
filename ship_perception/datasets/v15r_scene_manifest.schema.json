@@ -30,11 +30,16 @@
       "properties": {
         "edge_local_id": {"type": "string", "minLength": 1},
         "visibility": {"enum": ["VISIBLE", "PARTIAL", "UNCERTAIN", "NOT_IN_FOV"]},
-        "evidence_type": {"enum": ["OBSERVED_PROFILE_BREAK", "OBSERVED_3D_FACE", "INFERRED", "HISTORICAL", "UNKNOWN"]},
+        "evidence_type": {"enum": ["OBSERVED_PROFILE_BREAK", "OBSERVED_3D_FACE", "OBSERVED_BEV_CONTOUR", "INFERRED_GEOMETRY", "INFERRED_VESSEL_PRIOR", "HISTORICAL_MODEL", "OPERATOR_CONFIRMED", "UNKNOWN"]},
         "opening_side_status": {"enum": ["OBSERVABLE", "AMBIGUOUS_TRANSITION", "NOT_OBSERVABLE"]},
         "observed_support": {"type": ["array", "null"], "items": {"$ref": "#/$defs/point2"}, "minItems": 2},
+        "historical_source_frame_id": {"type": "string", "minLength": 1},
+        "historical_age_s": {"type": "number", "minimum": 0},
         "reason": {"type": "string"}
-      }
+      },
+      "allOf": [{"if": {"properties": {"evidence_type": {"const": "HISTORICAL_MODEL"}},
+                       "required": ["evidence_type"]},
+                 "then": {"required": ["historical_source_frame_id", "historical_age_s"]}}]
     },
     "hatch": {
       "type": "object",

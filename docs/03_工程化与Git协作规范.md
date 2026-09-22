@@ -1,5 +1,10 @@
 # 工程化与 Git 协作规范
 
+> 状态：FROZEN
+> 适用版本：V1.5-R / V1.5-T
+> 最后更新：2026-09-22
+> Owner：Ship-Unloader Engineering
+
 > 目标：让任何开发者、Codex、ClaudeCLI 都遵循同一企业级流程，避免“能跑但不可追溯”。
 
 ## 1. 参考原则
