@@ -1,8 +1,13 @@
 /hold_detector/
 /*.md
 !/README.md
+!/CLAUDE.md
+!/AGENTS.md
 /build*/
 /validation/
 /.local/
+/map.zip
+/local-data/
+/out/
 __pycache__/
 *.pyc

@@ -2,6 +2,10 @@
 
 V1.4 已完成 Ubuntu20 独立验证，当前功能分支正在实现 V1.5 船舱结构识别。目标环境为 Ubuntu 20.04、GCC9、CMake3.16、Eigen3.3.7、PCL1.10、C++17。
 
+**当前产品优先级：V1.5-R Recognition First。当前阶段：R0 Data Contract / Baseline。** 生产架构为 `Proposal → 1/2/3 舱假设 → Local Deck → opening-side 3D 边界 → Hatch model`；Global Self-Bootstrap 仅作研究支线。场景契约见 `docs/V1.5-R数据契约_V2场景语义.md`，工程规范见 `docs/工程执行规范.md`。
+
+原始数据通过 `SHIP_UNLOADER_DATA_ROOT` 提供，构建/验证输出通过 `SHIP_UNLOADER_WORK_ROOT` 提供，均位于仓库外，不写本机绝对路径。
+
 V1.5 开发起点为 `d586b93fbf676e585e77286b7b10d7076a64d3b7`；冻结的 V1.4 技术 SHA 为 `2fdeb5055ae6ad6d84513453b5c6eff2d742a5d1`。V1.4 的正式通过报告已归档；V1.5 尚未达到整版放行条件。原始 M0 正式通过证据不补造。
 
 - [构建与运行说明](ship_perception/README.md)
