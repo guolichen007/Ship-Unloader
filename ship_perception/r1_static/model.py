@@ -34,6 +34,55 @@ class Proposal:
 
 
 @dataclass(frozen=True)
+class OpeningSeed:
+    """Observed lower-return search region, not a measured steel boundary."""
+    seed_id: str
+    proposal_id: str
+    component: SeedComponent
+    source_component_ids: Tuple[int, ...]
+    contour_xy: Tuple[Tuple[float, float], ...]
+    scale_support: Tuple[float, ...]
+    fov_status: str
+    touches_scan_boundary: bool
+
+    @property
+    def bbox_xy(self):
+        return self.component.bbox_xy
+
+    @property
+    def evidence_cells(self):
+        return len(self.component.cells_rc)
+
+    def record(self):
+        return dict(seed_id=self.seed_id, proposal_id=self.proposal_id,
+                    source_components=list(self.source_component_ids),
+                    cell_m=self.component.cell_m, bbox_xy=list(self.bbox_xy),
+                    scale_support=list(self.scale_support), evidence_cells=self.evidence_cells,
+                    contour_points=[list(point) for point in self.contour_xy],
+                    fov_status=self.fov_status,
+                    touches_scan_boundary=self.touches_scan_boundary,
+                    source="LOWER_RETURN_STRUCTURAL_SEED_NOT_STEEL_BOUNDARY")
+
+
+@dataclass(frozen=True)
+class PerimeterSegment:
+    segment_id: str
+    opening_seed_id: str
+    rough_start: Tuple[float, float]
+    rough_end: Tuple[float, float]
+    tangent: Tuple[float, float]
+    outward_normal: Tuple[float, float]
+    length_m: float
+    fov_status: str
+
+    def record(self):
+        return dict(segment_id=self.segment_id, opening_seed_id=self.opening_seed_id,
+                    rough_start=list(self.rough_start), rough_end=list(self.rough_end),
+                    tangent=list(self.tangent), outward_normal=list(self.outward_normal),
+                    length_m=self.length_m, fov_status=self.fov_status)
+
+
+@dataclass(frozen=True)
 class Opening:
     opening_id: str
     proposal_id: str

@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 from ship_perception.r1_static.boundary_refinement import refine_boundaries
 from ship_perception.r1_static.height_grid import R1HeightGrid
@@ -13,6 +14,9 @@ from ship_perception.r1_static.hypothesis_solver import solve
 from ship_perception.r1_static.local_deck import _physical_components, _ring_points, estimate_local_deck
 from ship_perception.r1_static.local_opening import find_openings
 from ship_perception.r1_static.model import Opening, Proposal, SeedComponent
+from ship_perception.r1_static.opening_seed import (_outer_contour, build_opening_seeds,
+                                                  perimeter_segments)
+from ship_perception.r1_static.perimeter_deck import estimate_segment_deck
 from ship_perception.r1_static.run import analyze_points, resolve_config
 from ship_perception.r1_static.structural_proposal import propose
 from ship_perception.r1_static.visualization import (GREEN, PURPLE, seed_point_ids,
@@ -218,6 +222,106 @@ class StaticGeometry(unittest.TestCase):
         self.assertEqual(result["scene_status"], "PARTIAL_DETECTION")
         self.assertEqual(result["selected_candidate_count"], 1)
         self.assertEqual(result["confirmed_hatch_count"], 0)
+
+    def test_outer_contour_excludes_internal_holes(self):
+        cells = tuple((r, c) for r in range(7) for c in range(7)
+                      if not (2 <= r <= 4 and 2 <= c <= 4))
+        component = SeedComponent((0, 0), 1.0, cells, (0, 0, 7, 7))
+        contour = np.asarray(_outer_contour(component))
+        self.assertEqual(len(contour), 28)
+        self.assertTrue(np.all((contour[:, 0] == 0) | (contour[:, 0] == 7) |
+                               (contour[:, 1] == 0) | (contour[:, 1] == 7)))
+
+    def test_fine_components_remain_separate_with_coarse_support(self):
+        x, y = np.meshgrid(np.arange(0, 12, .2), np.arange(0, 12, .2))
+        points = np.column_stack((x.ravel(), y.ravel(), np.zeros(x.size)))
+        first = SeedComponent((0, 0), .15,
+                              tuple((r, c) for r in range(20, 33) for c in range(15, 28)),
+                              (2.25, 3, 4.2, 4.95))
+        second = SeedComponent((0, 0), .15,
+                               tuple((r, c) for r in range(20, 33) for c in range(45, 58)),
+                               (6.75, 3, 8.7, 4.95))
+        coarse = SeedComponent((0, 0), .5,
+                               tuple((r, c) for r in range(6, 10) for c in range(4, 18)),
+                               (2, 3, 9, 5))
+        proposal = Proposal("multi", (2, 3, 9, 5), 394, 2, (.15, .5),
+                            (first, second, coarse))
+        seeds, _ = build_opening_seeds([proposal], points, CONFIG)
+        self.assertEqual(len(seeds), 2)
+        self.assertEqual([seed.source_component_ids for seed in seeds], [(0, 2), (1, 2)])
+
+    def test_perimeter_outward_fov_translation_and_determinism(self):
+        points = scene()
+        proposals, _ = propose(points, CONFIG)
+        seeds, fov = build_opening_seeds(proposals, points, CONFIG)
+        self.assertEqual(len(seeds), 1)
+        segments = perimeter_segments(seeds[0], fov, CONFIG)
+        self.assertEqual(len(segments), 4)
+        self.assertEqual([segment.record() for segment in segments],
+                         [segment.record() for segment in perimeter_segments(seeds[0], fov, CONFIG)])
+        for segment in segments:
+            midpoint = (np.asarray(segment.rough_start) + segment.rough_end) / 2
+            outer = midpoint + .1 * np.asarray(segment.outward_normal)
+            x0, y0, x1, y1 = seeds[0].bbox_xy
+            self.assertTrue(outer[0] < x0 or outer[0] > x1 or outer[1] < y0 or outer[1] > y1)
+        shifted = points + (1000, 1000, 1000)
+        moved, moved_fov = build_opening_seeds(propose(shifted, CONFIG)[0], shifted, CONFIG)
+        moved_segments = perimeter_segments(moved[0], moved_fov, CONFIG)
+        self.assertEqual(seeds[0].fov_status, moved[0].fov_status)
+        np.testing.assert_allclose(np.asarray(seeds[0].contour_xy) + (1000, 1000),
+                                   moved[0].contour_xy, atol=1e-5)
+        np.testing.assert_allclose([row.outward_normal for row in segments],
+                                   [row.outward_normal for row in moved_segments], atol=1e-5)
+
+    def test_scan_exterior_marks_partial_fov(self):
+        x, y = np.meshgrid(np.arange(0, 10, .2), np.arange(0, 10, .2))
+        points = np.column_stack((x.ravel(), y.ravel(), np.zeros(x.size)))
+        component = SeedComponent((0, 0), .5,
+                                  tuple((r, c) for r in range(0, 3) for c in range(5, 15)),
+                                  (2.5, 0, 7.5, 1.5))
+        proposal = Proposal("edge", component.bbox_xy, 30, 1, (.5,), (component,))
+        seeds, fov = build_opening_seeds([proposal], points, CONFIG)
+        self.assertEqual(seeds[0].fov_status, "PARTIAL_FOV")
+        self.assertTrue(seeds[0].touches_scan_boundary)
+        self.assertTrue(any(segment.fov_status == "PARTIAL_FOV"
+                            for segment in perimeter_segments(seeds[0], fov, CONFIG)))
+
+    def test_segment_deck_prefers_broad_tilted_deck_and_localizes_competition(self):
+        points = scene(tilt=True)
+        seeds, fov = build_opening_seeds(propose(points, CONFIG)[0], points, CONFIG)
+        segments = perimeter_segments(seeds[0], fov, CONFIG)
+        x, y = np.meshgrid(np.arange(4, 10, .05), np.arange(4.4, 4.6, .05))
+        coaming = np.column_stack((x.ravel(), y.ravel(),
+                                   1 + .02 * x.ravel() + .01 * y.ravel()))
+        combined = np.vstack((points, coaming))
+        tree = cKDTree(combined[:, :2])
+        results = [estimate_segment_deck(combined, segment, CONFIG, tree)
+                   for segment in segments]
+        self.assertTrue(all(row[0]["status"] == "RESOLVED" for row in results))
+        self.assertGreaterEqual(results[0][0]["plane_candidate_count"], 2)
+        self.assertLess(abs(results[0][0]["selected_plane"]["offset"]), .1)
+        self.assertGreater(results[0][0]["outward_width_support_m"],
+                           CONFIG["roi"]["deck_patch_width_m"])
+        displacement = np.array((1000, 1000, 1000))
+        moved_base = points + displacement
+        moved_seeds, moved_fov = build_opening_seeds(
+            propose(moved_base, CONFIG)[0], moved_base, CONFIG)
+        moved_segment = perimeter_segments(moved_seeds[0], moved_fov, CONFIG)[0]
+        moved_points = combined + displacement
+        moved_result, _, _ = estimate_segment_deck(
+            moved_points, moved_segment, CONFIG, cKDTree(moved_points[:, :2]))
+        self.assertEqual(moved_result["status"], results[0][0]["status"])
+        np.testing.assert_allclose(moved_result["selected_plane"]["normal_raw"],
+                                   results[0][0]["selected_plane"]["normal_raw"], atol=1e-4)
+        extra = points[(points[:, 0] >= 4) & (points[:, 0] <= 10) &
+                       (points[:, 1] >= 1) & (points[:, 1] < 5)].copy()
+        extra[:, 2] += 1
+        two_planes = np.vstack((points, extra))
+        outcomes = [estimate_segment_deck(two_planes, segment, CONFIG,
+                                          cKDTree(two_planes[:, :2]))[0]["status"]
+                    for segment in segments]
+        self.assertEqual(outcomes[0], "SEGMENT_DECK_AMBIGUOUS")
+        self.assertEqual(outcomes[1:], ["RESOLVED"] * 3)
 
     def test_profile_break_complete_and_partial_no_inferred_side(self):
         points = scene()
