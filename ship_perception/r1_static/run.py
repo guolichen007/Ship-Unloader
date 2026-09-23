@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
+import tempfile
 import time
 
 import numpy as np
@@ -53,6 +55,8 @@ def _apply_override(config, key, value):
 
 
 def resolve_config(path=DEFAULT_CONFIG, overrides=(), override_file=None):
+    if Path(path).resolve() != DEFAULT_CONFIG.resolve():
+        raise ValueError("R1_CONFIG_PATH_FORBIDDEN_USE_OVERRIDE")
     config = copy.deepcopy(json.loads(Path(path).read_text(encoding="utf-8")))
     if override_file is not None:
         target = Path(override_file).resolve()
@@ -80,6 +84,21 @@ def resolve_config(path=DEFAULT_CONFIG, overrides=(), override_file=None):
                 continue
             if value <= 0:
                 raise ValueError("R1_NONPOSITIVE:" + section + "." + key)
+    # Reuse the existing V1.5 acceptance/domain validator. The JSON schema
+    # alone permits values that the frozen contract explicitly rejects.
+    work = REPO / "Ship-Unloader-Work"
+    work.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=str(work)) as directory:
+        if work.resolve() not in Path(directory).resolve().parents:
+            raise ValueError("R1_TEMP_DIRECTORY_OUTSIDE_WORK")
+        source = Path(directory) / "resolved.json"
+        generated = Path(directory) / "validated.hpp"
+        source.write_text(json.dumps(config, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+        check = subprocess.run([sys.executable, str(SOURCE / "tools/configure_v15.py"),
+                                str(source), str(generated)], cwd=str(REPO),
+                               capture_output=True, text=True)
+        if check.returncode:
+            raise ValueError("R1_CONFIG_CONTRACT_REJECTED:" + check.stderr.strip().splitlines()[-1])
     return config, config_hash(config)
 
 
@@ -197,13 +216,12 @@ def main():
     parser.add_argument("--output-root", type=Path, default=REPO / "Ship-Unloader-Work/r1_static")
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--scene-id")
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--observed-only", action="store_true", required=False)
     parser.add_argument("--override", action="append", default=[])
     parser.add_argument("--override-file", type=Path)
     args = parser.parse_args()
     result = run_file(args.input, args.output_root, args.run_id, scene_id=args.scene_id,
-                      config_path=args.config, overrides=args.override, override_file=args.override_file)
+                      overrides=args.override, override_file=args.override_file)
     print(json.dumps({"scene_status": result["scene_status"],
                       "confirmed_hatch_count": result["confirmed_hatch_count"]}, ensure_ascii=False))
 

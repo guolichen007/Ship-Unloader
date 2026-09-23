@@ -8,6 +8,7 @@ import numpy as np
 
 from ship_perception.measurement.proposal import Candidate, evaluate_instances, nms
 from ship_perception.measurement.oracle_local_geometry import _profile, diagnose
+from ship_perception.measurement.geometry_provider import run as run_geometry_provider
 from ship_perception.measurement.run_oracle import write_xyz_cache, score_physical_edges, run as run_oracle
 from scipy.spatial import cKDTree
 
@@ -21,6 +22,13 @@ def c(name, box, score=0.9):
 
 
 class ProposalTests(unittest.TestCase):
+    def test_geometry_provider_requires_explicit_legacy_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(FileNotFoundError, "LEGACY_HEIGHTMAP_PROVIDER_MISSING"):
+                run_geometry_provider(Path(directory) / "missing.pcd",
+                                      Path(__file__).resolve().parents[1] / "config/v15.json",
+                                      Path(directory) / "missing_legacy")
+
     def test_duplicate_candidate_and_nms_reason(self):
         rows = nms([c("a", (0, 0, 10, 10), 0.9), c("b", (0.1, 0, 10.1, 10), 0.8)])
         self.assertEqual([r.rank_post_nms for r in rows], [1, None])
