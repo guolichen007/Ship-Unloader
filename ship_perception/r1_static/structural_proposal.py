@@ -3,7 +3,7 @@ import numpy as np
 from scipy import ndimage
 
 from .height_grid import R1HeightGrid
-from .model import Proposal
+from .model import Proposal, SeedComponent
 
 
 def _overlap(a, b):
@@ -50,7 +50,10 @@ def _one_scale(points, config, cell_m):
         rr, cc = sl
         bbox = (grid.x0 + cc.start * cell_m, grid.y0 + rr.start * cell_m,
                 grid.x0 + cc.stop * cell_m, grid.y0 + rr.stop * cell_m)
-        rows.append((bbox, cells, float(np.mean(drop[sl][local])), cell_m))
+        cells_rc = np.argwhere(local) + (rr.start, cc.start)
+        component = SeedComponent((float(grid.x0), float(grid.y0)), float(cell_m),
+                                  tuple(map(tuple, cells_rc.tolist())), bbox)
+        rows.append((bbox, cells, float(np.mean(drop[sl][local])), cell_m, component))
     return rows, grid
 
 
@@ -80,5 +83,6 @@ def propose(points, config):
                max(r[0][2] for r in group), max(r[0][3] for r in group))
         proposals.append(Proposal("p%03d" % index, box, sum(r[1] for r in group),
                                   float(np.average([r[2] for r in group], weights=[r[1] for r in group])),
-                                  tuple(sorted({r[3] for r in group}))))
+                                  tuple(sorted({r[3] for r in group})),
+                                  tuple(r[4] for r in group)))
     return proposals, grids

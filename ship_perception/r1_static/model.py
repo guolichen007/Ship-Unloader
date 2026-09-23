@@ -4,17 +4,33 @@ from typing import Tuple
 
 
 @dataclass(frozen=True)
+class SeedComponent:
+    """One original connected seed, including its own grid coordinates."""
+    origin_xy: Tuple[float, float]
+    cell_m: float
+    cells_rc: Tuple[Tuple[int, int], ...]
+    bbox_xy: Tuple[float, float, float, float]
+
+    def record(self):
+        return dict(origin_xy=list(self.origin_xy), cell_m=self.cell_m,
+                    cells_rc=[list(cell) for cell in self.cells_rc],
+                    bbox_xy=list(self.bbox_xy), cell_count=len(self.cells_rc))
+
+
+@dataclass(frozen=True)
 class Proposal:
     proposal_id: str
     bbox_xy: Tuple[float, float, float, float]
     evidence_cells: int
     mean_drop_m: float
     scales_m: Tuple[float, ...]
+    seed_components: Tuple[SeedComponent, ...] = ()
 
     def record(self):
         return dict(proposal_id=self.proposal_id, bbox_xy=list(self.bbox_xy),
                     evidence_cells=self.evidence_cells, mean_drop_m=self.mean_drop_m,
-                    scales_m=list(self.scales_m), source="STRUCTURAL_GEOMETRY_V1")
+                    scales_m=list(self.scales_m), source="STRUCTURAL_GEOMETRY_V1",
+                    seed_components=[component.record() for component in self.seed_components])
 
 
 @dataclass(frozen=True)
