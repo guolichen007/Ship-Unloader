@@ -10,9 +10,9 @@ import numpy as np
 from ship_perception.r1_static.boundary_refinement import refine_boundaries
 from ship_perception.r1_static.height_grid import R1HeightGrid
 from ship_perception.r1_static.hypothesis_solver import solve
-from ship_perception.r1_static.local_deck import estimate_local_deck
+from ship_perception.r1_static.local_deck import _physical_components, _ring_points, estimate_local_deck
 from ship_perception.r1_static.local_opening import find_openings
-from ship_perception.r1_static.model import Opening, Proposal
+from ship_perception.r1_static.model import Opening, Proposal, SeedComponent
 from ship_perception.r1_static.run import analyze_points, resolve_config
 from ship_perception.r1_static.structural_proposal import propose
 from ship_perception.r1_static.visualization import write_colored_ply
@@ -82,6 +82,80 @@ class StaticGeometry(unittest.TestCase):
         self.assertEqual(deck["status"], "LOCAL_DECK_AMBIGUOUS")
         self.assertGreater(deck["competing_plane_count"], 0)
         self.assertIsNone(plane)
+        translated = Proposal("test", (1003, 1004, 1011, 1016), 100, 2, (0.5,))
+        moved, moved_plane, _ = estimate_local_deck(points + (1000, 1000, 1000),
+                                                     translated, CONFIG)
+        self.assertEqual(moved["status"], deck["status"], moved)
+        self.assertIsNone(moved_plane)
+
+    def test_local_deck_translation_and_ransac_duplicates(self):
+        points = scene(tilt=True)
+        points[:, 2] += np.random.default_rng(7).normal(0, 0.005, len(points))
+        first, _, _ = estimate_local_deck(points, envelope(1), CONFIG)
+        self.assertEqual(first["status"], "RESOLVED", first)
+        self.assertEqual(first["competing_plane_count"], 0)
+        for displacement in ((100, 37.3, 4.7), (1000, 1000, 1000)):
+            shifted = Proposal("test", tuple(np.asarray(envelope(1).bbox_xy) +
+                                             [displacement[0], displacement[1]] * 2),
+                               100, 2, (0.5,))
+            result, _, _ = estimate_local_deck(points + displacement, shifted, CONFIG)
+            self.assertEqual(result["status"], first["status"], result)
+            self.assertEqual(result["competing_plane_count"], 0)
+            self.assertEqual(result["support_sector_count"], first["support_sector_count"])
+            self.assertAlmostEqual(result["normal_raw"][0], first["normal_raw"][0], places=4)
+            self.assertAlmostEqual(result["normal_raw"][1], first["normal_raw"][1], places=4)
+
+    def test_physical_gap_and_multi_patch_union(self):
+        line = np.array(((0, 0, 0), (0.8, 0, 0), (1.6, 0, 0),
+                         (3.0, 0, 0)), dtype=float)
+        self.assertEqual([len(group) for group in _physical_components(line, 1.0)], [3, 1])
+        self.assertEqual([len(group) for group in _physical_components(line + 1000, 1.0)], [3, 1])
+        parts = []
+        for x0, x1, y0, y1 in ((0, 2, 3, 17), (10, 12, 3, 17),
+                               (3, 9, 0, 2), (3, 9, 18, 20)):
+            x, y = np.meshgrid(np.arange(x0, x1, 0.2), np.arange(y0, y1, 0.2))
+            parts.append(np.column_stack((x.ravel(), y.ravel(), np.zeros(x.size))))
+        deck, plane, support = estimate_local_deck(np.vstack(parts),
+                                                   Proposal("patches", (3, 3, 9, 17), 100, 2, (0.5,)),
+                                                   CONFIG)
+        self.assertEqual(deck["status"], "RESOLVED", deck)
+        self.assertGreaterEqual(deck["connectivity_component_count"], 4)
+        self.assertGreaterEqual(len(deck["accepted_component_ids"]), 4)
+        self.assertEqual(len(support), deck["support_count"])
+        self.assertIsNotNone(plane)
+
+    def test_seed_geometry_keeps_deck_inside_large_envelope(self):
+        points = scene(2)
+        components = []
+        for col0, col1 in ((8, 20), (28, 40)):
+            cells = tuple((row, col) for row in range(10, 30) for col in range(col0, col1))
+            components.append(SeedComponent((0, 0), 0.5, cells,
+                                            (col0 * 0.5, 5, col1 * 0.5, 15)))
+        proposal = Proposal("multi", (4, 5, 20, 15), 480, 2, (0.5,), tuple(components))
+        self.assertEqual(len(proposal.record()["seed_components"]), 2)
+        self.assertEqual(proposal.record()["seed_components"][0]["cell_count"], 240)
+        ring = _ring_points(points, proposal, CONFIG["roi"]["support_search_m"])
+        self.assertTrue(np.any((ring[:, 0] > 11) & (ring[:, 0] < 13) & (ring[:, 2] == 0)))
+        deck, plane, _ = estimate_local_deck(points, proposal, CONFIG)
+        self.assertEqual(deck["status"], "RESOLVED", deck)
+        self.assertIsNotNone(plane)
+
+    def test_proposal_preserves_child_seed_components(self):
+        proposals, _ = propose(scene(2), CONFIG)
+        self.assertTrue(proposals)
+        self.assertTrue(all(proposal.seed_components for proposal in proposals))
+        for proposal in proposals:
+            self.assertEqual(sum(len(child.cells_rc) for child in proposal.seed_components),
+                             proposal.evidence_cells)
+            self.assertEqual({child.cell_m for child in proposal.seed_components},
+                             set(proposal.scales_m))
+
+    def test_sparse_opening_drop_uses_only_observed_cells(self):
+        openings, _ = find_openings(scene(), envelope(1),
+                                    (np.array([0., 0., 1.]), 0.), CONFIG)
+        self.assertTrue(openings)
+        self.assertTrue(all(np.isfinite(opening.mean_drop_m) for opening in openings))
+        json.dumps([opening.record() for opening in openings], allow_nan=False)
 
     def test_profile_break_complete_and_partial_no_inferred_side(self):
         points = scene()

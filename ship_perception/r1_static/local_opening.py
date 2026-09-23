@@ -43,6 +43,9 @@ def find_openings(points, proposal, plane, config):
         rr, cc = sl
         bbox = (grid.x0 + cc.start * cell_m, grid.y0 + rr.start * cell_m,
                 grid.x0 + cc.stop * cell_m, grid.y0 + rr.stop * cell_m)
+        # Closing may bridge empty grid cells; only measured returns have a
+        # physical drop and may contribute to its reported mean.
+        observed = component & grid.occupancy[sl]
         openings.append(Opening("%s-o%03d" % (proposal.proposal_id, len(openings)), proposal.proposal_id,
-                                bbox, cells, float(area), float(np.mean(drop[sl][component]))))
+                                bbox, cells, float(area), float(np.mean(drop[sl][observed]))))
     return openings, grid
