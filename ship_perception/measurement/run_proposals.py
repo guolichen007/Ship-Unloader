@@ -69,7 +69,8 @@ def run(data_root: Path, out_dir: Path, report_path: Path, manifest_path=None):
         for module, output, extra in (
             ("ship_perception.measurement.legacy_cnn_provider", cnn_path,
              ["--legacy-dir", str(legacy)]),
-            ("ship_perception.measurement.geometry_provider", geo_path, []),
+            ("ship_perception.measurement.geometry_provider", geo_path,
+             ["--legacy-dir", str(legacy)]),
         ):
             command = [sys.executable, "-m", module, "--pcd", str(pcd),
                        "--output", str(output), *extra]

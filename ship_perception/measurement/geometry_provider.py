@@ -41,11 +41,11 @@ def candidates_from_grid(surf, valid, meta, levels, config):
     return found
 
 
-def run(pcd: Path, config_path: Path):
+def run(pcd: Path, config_path: Path, legacy_dir: Path):
     # Reuse the archived height-map construction as a read-only research provider.
     # Its PCD reader is bypassed: all points come from the strict V1.5 decoder.
     import sys
-    legacy = Path(__file__).resolve().parents[2] / "Ship-Unloader-Data/legacy/hold_detector/detect"
+    legacy = legacy_dir
     if not legacy.is_dir():
         raise FileNotFoundError("LEGACY_HEIGHTMAP_PROVIDER_MISSING")
     sys.path.insert(0, str(legacy))
@@ -70,9 +70,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--pcd", type=Path, required=True)
     ap.add_argument("--config", type=Path, default=Path("ship_perception/config/v15.json"))
+    ap.add_argument("--legacy-dir", type=Path, required=True)
     ap.add_argument("--output", type=Path, required=True)
     args = ap.parse_args()
-    report = run(args.pcd, args.config)
+    report = run(args.pcd, args.config, args.legacy_dir)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, allow_nan=False, indent=2), encoding="utf-8")
 
