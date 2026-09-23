@@ -19,6 +19,10 @@ NORMAL6 = {
 }
 REVIEW_COLUMNS = ("场景", "算法舱数", "舱编号", "舱数是否正确", "位置是否正确", "边界是否贴合",
                   "漏检", "误检", "错误合并", "错误拆分", "大约偏差米", "人工备注")
+PERIMETER_COLUMNS = ("Proposal", "OpeningSeed", "PerimeterSegments", "SegmentDeckResolved",
+                     "SegmentDeckAmbiguous", "ObservedProfileEdges", "Observed3DFaces",
+                     "CompleteObserved", "Partial", "Unresolved", "Selected", "Confirmed",
+                     "TouchesScanBoundary")
 
 
 def run_batch(dataset_manifest, data_root, output_root, run_id, overrides=(), override_file=None):
@@ -51,12 +55,21 @@ def run_batch(dataset_manifest, data_root, output_root, run_id, overrides=(), ov
             continue
         results[scene] = dict(scene_status=result["scene_status"],
                               confirmed_hatch_count=result["confirmed_hatch_count"],
-                              complete_observed=sum(h["status"] == "COMPLETE_OBSERVED" for h in result["hatches"]),
-                              partial=sum(h["status"] == "PARTIAL" for h in result["hatches"]),
-                              unresolved=sum(h["status"] == "UNRESOLVED" for h in result["hatches"]))
+                              **result["perimeter_summary"])
         print("%s: %s, %d" % (scene, result["scene_status"], result["confirmed_hatch_count"]), flush=True)
-    _atomic_json(directory / "batch_summary.json", dict(schema="ship_perception.v15r.static_batch.1",
+    _atomic_json(directory / "batch_summary.json", dict(schema="ship_perception.v15r.static_batch.2",
                                                       run_id=run_id, scenes=results))
+    perimeter_target = directory / "perimeter_summary.csv"
+    perimeter_temp = perimeter_target.with_name(perimeter_target.name + ".tmp")
+    with perimeter_temp.open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=("场景",) + PERIMETER_COLUMNS)
+        writer.writeheader()
+        for scene, summary in results.items():
+            writer.writerow({"场景": scene, **{key: summary.get(key, "")
+                                              for key in PERIMETER_COLUMNS}})
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(perimeter_temp, perimeter_target)
     target = directory / "人工复核.csv"
     temp = target.with_name(target.name + ".tmp")
     with temp.open("w", encoding="utf-8-sig", newline="") as stream:

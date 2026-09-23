@@ -1,5 +1,6 @@
 """Synthetic contracts for R1-S0 raw-frame geometry and fail-closed output."""
 import json
+from dataclasses import replace
 from pathlib import Path
 import tempfile
 import unittest
@@ -17,11 +18,13 @@ from ship_perception.r1_static.model import Opening, Proposal, SeedComponent
 from ship_perception.r1_static.opening_seed import (_outer_contour, build_opening_seeds,
                                                   perimeter_segments)
 from ship_perception.r1_static.perimeter_deck import estimate_segment_deck
+from ship_perception.r1_static.perimeter_boundary import refine_perimeter_boundaries
 from ship_perception.r1_static.run import analyze_points, resolve_config
 from ship_perception.r1_static.structural_proposal import propose
 from ship_perception.r1_static.visualization import (GREEN, PURPLE, seed_point_ids,
                                                     write_candidate_debug, write_colored_ply,
                                                     write_debug_clouds)
+from ship_perception.r1_static.visualization import write_perimeter_artifacts
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -213,7 +216,7 @@ class StaticGeometry(unittest.TestCase):
         decision = solve([partial], CONFIG)
         self.assertEqual([row["opening_id"] for row in decision["selected"]], ["partial"])
         self.assertEqual(decision["scene_status"], "PARTIAL_DETECTION")
-        with patch("ship_perception.r1_static.run.refine_boundaries",
+        with patch("ship_perception.r1_static.run.refine_perimeter_boundaries",
                    return_value=dict(status="PARTIAL", boundaries=[edge, edge],
                                      polygon_raw=None, center_raw=[6, 10, 0],
                                      center_source="COARSE_OPENING_SEED", profiles=[])):
@@ -322,6 +325,79 @@ class StaticGeometry(unittest.TestCase):
                     for segment in segments]
         self.assertEqual(outcomes[0], "SEGMENT_DECK_AMBIGUOUS")
         self.assertEqual(outcomes[1:], ["RESOLVED"] * 3)
+
+    def test_opening_seed_precedes_failed_global_deck(self):
+        points = scene()
+        empty = np.empty(0, dtype=np.int64)
+        failed = (dict(status="UNRESOLVED", reason="COMPETING_PLANAR_PATCHES"),
+                  None, empty, dict(accepted_raw_ids=empty, candidate_raw_ids=[],
+                                    competitor_raw_ids=[]))
+        with patch("ship_perception.r1_static.run.estimate_local_deck", return_value=failed):
+            result, auxiliary = analyze_points(points, CONFIG)
+        self.assertEqual(result["perimeter_summary"]["OpeningSeed"], 1)
+        self.assertEqual(result["confirmed_hatch_count"], 1)
+        self.assertEqual(auxiliary["proposal_debug"][0]["local_deck"]["reason"],
+                         "COMPETING_PLANAR_PATCHES")
+
+    def test_one_missing_perimeter_side_remains_partial(self):
+        points = scene()
+        seeds, fov = build_opening_seeds(propose(points, CONFIG)[0], points, CONFIG)
+        segments = perimeter_segments(seeds[0], fov, CONFIG)
+        partial_points = points[(points[:, 0] < 3.2) | (points[:, 0] > 4.8)]
+        tree = cKDTree(partial_points[:, :2])
+        decks = {segment.segment_id: estimate_segment_deck(partial_points, segment,
+                                                              CONFIG, tree)
+                 for segment in segments}
+        refined = refine_perimeter_boundaries(partial_points, seeds[0], segments,
+                                               decks, CONFIG, tree)
+        self.assertEqual(refined["status"], "PARTIAL")
+        self.assertIsNone(refined["polygon_raw"])
+        self.assertLess(len(refined["boundaries"]), len(segments))
+
+    def test_partial_fov_and_parallel_edges_cannot_confirm(self):
+        points = scene()
+        seeds, fov = build_opening_seeds(propose(points, CONFIG)[0], points, CONFIG)
+        segments = perimeter_segments(seeds[0], fov, CONFIG)
+        tree = cKDTree(points[:, :2])
+        decks = {segment.segment_id: estimate_segment_deck(points, segment,
+                                                              CONFIG, tree)
+                 for segment in segments}
+        partial_seed = replace(seeds[0], fov_status="PARTIAL_FOV",
+                               touches_scan_boundary=True)
+        refined = refine_perimeter_boundaries(points, partial_seed, segments,
+                                               decks, CONFIG, tree)
+        self.assertEqual(len(refined["boundaries"]), 4)
+        self.assertEqual(refined["status"], "PARTIAL")
+        self.assertIsNone(refined["polygon_raw"])
+        parallel = [dict(evidence_type="OBSERVED_PROFILE_BREAK", coverage=.9,
+                         fit_residual_p95_m=.01) for _ in range(2)]
+        row = dict(opening_id="scan-edge", bbox_xy=[0, 0, 7, 1], status="PARTIAL",
+                   local_deck=dict(status="RESOLVED", residual_p95_m=.01),
+                   boundaries=parallel)
+        decision = solve([row], CONFIG)
+        self.assertEqual(decision["scene_status"], "PARTIAL_DETECTION")
+        self.assertFalse(any(candidate["status"] == "COMPLETE_OBSERVED"
+                             for candidate in decision["selected"]))
+
+    def test_perimeter_debug_uses_exact_segment_support_ids(self):
+        points = scene()
+        result, auxiliary = analyze_points(points, CONFIG)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            write_perimeter_artifacts(path, points, auxiliary["perimeter_forensics"], CONFIG)
+            ply = (path / "perimeter_debug.ply").read_bytes()
+            header, payload = ply.split(b"end_header\n", 1)
+            self.assertIn(b"element vertex", header)
+            dtype = np.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"),
+                              ("red", "u1"), ("green", "u1"), ("blue", "u1")])
+            raw = np.frombuffer(payload, dtype=dtype, count=len(points))
+            support = np.flatnonzero((raw["red"] == GREEN[0]) &
+                                     (raw["green"] == GREEN[1]) &
+                                     (raw["blue"] == GREEN[2]))
+            np.testing.assert_array_equal(support,
+                                          auxiliary["accepted_segment_support_ids"])
+            self.assertTrue((path / "per_proposal_review/p000_perimeter.json").exists())
+            self.assertEqual(result["perimeter_summary"]["Confirmed"], 1)
 
     def test_profile_break_complete_and_partial_no_inferred_side(self):
         points = scene()

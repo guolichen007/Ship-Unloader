@@ -1,4 +1,6 @@
 """Dependency-free binary RGB PLY outputs for CloudCompare review."""
+from collections import defaultdict
+import json
 from pathlib import Path
 
 import numpy as np
@@ -15,30 +17,35 @@ YELLOW = (250, 220, 40)
 ORANGE = (245, 145, 35)
 
 
+def component_point_ids(points, component):
+    """Map one recorded seed cell set back to raw point IDs."""
+    xy = np.asarray(points)[:, :2]
+    cells = np.asarray(component.cells_rc, dtype=np.int64).reshape(-1, 2)
+    if not len(cells):
+        return np.empty(0, dtype=np.int64)
+    x0, y0, x1, y1 = component.bbox_xy
+    candidate = np.flatnonzero((xy[:, 0] >= x0) & (xy[:, 0] < x1) &
+                               (xy[:, 1] >= y0) & (xy[:, 1] < y1))
+    if not len(candidate):
+        return np.empty(0, dtype=np.int64)
+    row = np.floor((xy[candidate, 1] - component.origin_xy[1]) / component.cell_m).astype(np.int64)
+    col = np.floor((xy[candidate, 0] - component.origin_xy[0]) / component.cell_m).astype(np.int64)
+    low = cells.min(axis=0)
+    high = cells.max(axis=0)
+    width = int(high[1] - low[1] + 1)
+    valid = ((row >= low[0]) & (row <= high[0]) &
+             (col >= low[1]) & (col <= high[1]))
+    raw_keys = (row[valid] - low[0]) * width + col[valid] - low[1]
+    seed_keys = (cells[:, 0] - low[0]) * width + cells[:, 1] - low[1]
+    return candidate[valid][np.isin(raw_keys, seed_keys)]
+
+
 def seed_point_ids(points, proposals):
     """Return precisely the raw points whose source grid cells were seeds."""
-    xy = np.asarray(points)[:, :2]
-    selected = np.zeros(len(xy), dtype=bool)
+    selected = np.zeros(len(points), dtype=bool)
     for proposal in proposals:
         for component in proposal.seed_components:
-            cells = np.asarray(component.cells_rc, dtype=np.int64).reshape(-1, 2)
-            if not len(cells):
-                continue
-            x0, y0, x1, y1 = component.bbox_xy
-            candidate = np.flatnonzero((xy[:, 0] >= x0) & (xy[:, 0] < x1) &
-                                       (xy[:, 1] >= y0) & (xy[:, 1] < y1))
-            if not len(candidate):
-                continue
-            row = np.floor((xy[candidate, 1] - component.origin_xy[1]) / component.cell_m).astype(np.int64)
-            col = np.floor((xy[candidate, 0] - component.origin_xy[0]) / component.cell_m).astype(np.int64)
-            low = cells.min(axis=0)
-            high = cells.max(axis=0)
-            width = int(high[1] - low[1] + 1)
-            valid = ((row >= low[0]) & (row <= high[0]) &
-                     (col >= low[1]) & (col <= high[1]))
-            raw_keys = (row[valid] - low[0]) * width + col[valid] - low[1]
-            seed_keys = (cells[:, 0] - low[0]) * width + cells[:, 1] - low[1]
-            selected[candidate[valid]] |= np.isin(raw_keys, seed_keys)
+            selected[component_point_ids(points, component)] = True
     return np.flatnonzero(selected)
 
 
@@ -96,7 +103,8 @@ def _markers(result, spacing):
     return np.vstack(xyz), np.vstack(rgb)
 
 
-def write_debug_clouds(directory, points, proposals, deck_supports, result, config):
+def write_debug_clouds(directory, points, proposals, deck_supports, result, config,
+                       accepted_support_ids=None):
     directory = Path(directory)
     xyz = np.asarray(points, dtype=np.float32)
     gray = np.tile(np.array(GRAY, dtype=np.uint8), (len(xyz), 1))
@@ -104,10 +112,12 @@ def write_debug_clouds(directory, points, proposals, deck_supports, result, conf
     seed_ids = seed_point_ids(xyz, proposals)
     proposal_color[seed_ids] = PURPLE
     deck_color = gray.copy()
-    for proposal, deck, plane, ownership in deck_supports:
-        if plane is None:
-            continue
-        deck_color[ownership["accepted_raw_ids"]] = GREEN
+    if accepted_support_ids is None:
+        for proposal, deck, plane, ownership in deck_supports:
+            if plane is not None:
+                deck_color[ownership["accepted_raw_ids"]] = GREEN
+    else:
+        deck_color[accepted_support_ids] = GREEN
     scene_color = proposal_color.copy()
     scene_color[np.all(deck_color == np.array(GREEN), axis=1)] = GREEN
     markers, marker_rgb = _markers(result, config["geometry"]["refine_voxel_m"])
@@ -159,3 +169,131 @@ def write_candidate_debug(directory, points, deck_supports):
                                                candidate_raw_counts=[int(len(ids)) for ids in candidates],
                                                competitor_candidate_indexes=ownership.get("competitor_candidate_indexes", []))
     return artifacts
+
+
+def write_perimeter_artifacts(directory, points, forensics, config):
+    """Write actual seed/segment/deck ownership and all observed rough boundaries."""
+    directory = Path(directory)
+    xyz = np.asarray(points, dtype=np.float32)
+    palette = (BLUE, CYAN, PURPLE, ORANGE)
+    spacing = config["geometry"]["refine_voxel_m"]
+    groups = defaultdict(lambda: dict(seed_ids=[], support_ids=[], perimeter_xyz=[],
+                                      perimeter_rgb=[], boundary_xyz=[], boundary_rgb=[],
+                                      records=[]))
+    all_seed_ids, all_support_ids = [], []
+    segment_dir = directory / "segment_ownership"
+    segment_dir.mkdir(parents=True, exist_ok=True)
+    segment_count = 0
+    for item in forensics:
+        seed = item["seed"]
+        group = groups[seed.proposal_id]
+        seed_ids = component_point_ids(xyz, seed.component)
+        group["seed_ids"].append(seed_ids)
+        all_seed_ids.append(seed_ids)
+        z = float(np.median(xyz[seed_ids, 2])) if len(seed_ids) else float(np.median(xyz[:, 2]))
+        if seed.contour_xy:
+            contour = np.asarray(seed.contour_xy, dtype=float)
+            contour_xyz = np.column_stack((contour, np.full(len(contour), z)))
+            group["perimeter_xyz"].append(contour_xyz)
+            group["perimeter_rgb"].append(
+                np.tile(np.array(WHITE, dtype=np.uint8), (len(contour_xyz), 1)))
+        center = np.array(((seed.bbox_xy[0] + seed.bbox_xy[2]) / 2,
+                           (seed.bbox_xy[1] + seed.bbox_xy[3]) / 2, z))
+        group["perimeter_xyz"].append(center.reshape(1, 3))
+        group["perimeter_rgb"].append(np.array([YELLOW], dtype=np.uint8))
+        segment_records = []
+        for index, segment in enumerate(item["segments"]):
+            segment_count += 1
+            deck, _, ownership = item["segment_decks"][segment.segment_id]
+            support_ids = ownership["selected_raw_ids"]
+            group["support_ids"].append(support_ids)
+            all_support_ids.append(support_ids)
+            start = np.array((*segment.rough_start, z))
+            end = np.array((*segment.rough_end, z))
+            line = _segment(start, end, config["geometry"]["coarse_voxel_m"])
+            color = palette[index % len(palette)]
+            group["perimeter_xyz"].append(line)
+            group["perimeter_rgb"].append(
+                np.tile(np.array(color, dtype=np.uint8), (len(line), 1)))
+            midpoint = (start + end) / 2
+            tip = midpoint + np.array((*segment.outward_normal, 0.0)) * min(
+                config["roi"]["support_connectivity_m"], segment.length_m / 4)
+            arrow = _segment(midpoint, tip, spacing)
+            group["perimeter_xyz"].append(arrow)
+            group["perimeter_rgb"].append(
+                np.tile(np.array(ORANGE, dtype=np.uint8), (len(arrow), 1)))
+            arrays = dict(strip_raw_ids=ownership["strip_raw_ids"],
+                          selected_raw_ids=support_ids)
+            arrays.update({"candidate_%02d" % candidate_index: ids
+                           for candidate_index, ids in enumerate(ownership["candidate_raw_ids"])})
+            np.savez_compressed(segment_dir / ("%s_ownership.npz" % segment.segment_id), **arrays)
+            write_colored_ply(segment_dir / ("segment_%s_support.ply" % segment.segment_id),
+                              xyz[support_ids],
+                              np.tile(np.array(GREEN, dtype=np.uint8), (len(support_ids), 1)))
+            for candidate_index, ids in enumerate(ownership["candidate_raw_ids"][:2]):
+                write_colored_ply(
+                    segment_dir / ("segment_%s_candidate_plane_%02d.ply" %
+                                   (segment.segment_id, candidate_index)),
+                    xyz[ids],
+                    np.tile(np.array(palette[candidate_index], dtype=np.uint8), (len(ids), 1)))
+            segment_records.append({**segment.record(), **deck,
+                                    "ownership_npz": str(segment_dir /
+                                                         ("%s_ownership.npz" % segment.segment_id))})
+        for edge in item["boundary"]["boundaries"]:
+            line = _segment(edge["a_raw"], edge["b_raw"], spacing)
+            color = CYAN if "OBSERVED_3D_FACE" in edge["evidence_type"] else BLUE
+            group["boundary_xyz"].append(line)
+            group["boundary_rgb"].append(
+                np.tile(np.array(color, dtype=np.uint8), (len(line), 1)))
+        group["records"].append(dict(**seed.record(), segments=segment_records,
+                                     status=item["boundary"]["status"],
+                                     observed_boundaries=item["boundary"]["boundaries"]))
+
+    def stacked(rows, dtype=float):
+        return np.vstack(rows).astype(dtype) if rows else np.empty((0, 3), dtype=dtype)
+
+    metadata = dict(per_proposal={}, segment_ownership_count=segment_count)
+    global_perimeter_xyz, global_perimeter_rgb = [], []
+    global_boundary_xyz, global_boundary_rgb = [], []
+    review_dir = directory / "per_proposal_review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    for proposal_id, group in groups.items():
+        seed_ids = np.unique(np.concatenate(group["seed_ids"])) if group["seed_ids"] else np.empty(0, dtype=int)
+        support_ids = (np.unique(np.concatenate(group["support_ids"]))
+                       if group["support_ids"] else np.empty(0, dtype=int))
+        perimeter_xyz = stacked(group["perimeter_xyz"])
+        perimeter_rgb = stacked(group["perimeter_rgb"], np.uint8)
+        boundary_xyz = stacked(group["boundary_xyz"])
+        boundary_rgb = stacked(group["boundary_rgb"], np.uint8)
+        targets = {
+            "seed": review_dir / ("%s_seed.ply" % proposal_id),
+            "perimeter": review_dir / ("%s_perimeter.ply" % proposal_id),
+            "segment_decks": review_dir / ("%s_segment_decks.ply" % proposal_id),
+            "boundary": review_dir / ("%s_boundary.ply" % proposal_id),
+            "json": review_dir / ("%s_perimeter.json" % proposal_id),
+        }
+        write_colored_ply(targets["seed"], xyz[seed_ids],
+                          np.tile(np.array(PURPLE, dtype=np.uint8), (len(seed_ids), 1)))
+        write_colored_ply(targets["perimeter"], perimeter_xyz, perimeter_rgb)
+        write_colored_ply(targets["segment_decks"], xyz[support_ids],
+                          np.tile(np.array(GREEN, dtype=np.uint8), (len(support_ids), 1)))
+        write_colored_ply(targets["boundary"], boundary_xyz, boundary_rgb)
+        targets["json"].write_text(json.dumps(group["records"], ensure_ascii=False,
+                                              indent=2, allow_nan=False) + "\n", encoding="utf-8")
+        metadata["per_proposal"][proposal_id] = {key: str(path) for key, path in targets.items()}
+        global_perimeter_xyz.extend(group["perimeter_xyz"])
+        global_perimeter_rgb.extend(group["perimeter_rgb"])
+        global_boundary_xyz.extend(group["boundary_xyz"])
+        global_boundary_rgb.extend(group["boundary_rgb"])
+    raw_rgb = np.tile(np.array(GRAY, dtype=np.uint8), (len(xyz), 1))
+    if all_seed_ids:
+        raw_rgb[np.unique(np.concatenate(all_seed_ids))] = PURPLE
+    if all_support_ids:
+        raw_rgb[np.unique(np.concatenate(all_support_ids))] = GREEN
+    combined_xyz = np.vstack((xyz, stacked(global_perimeter_xyz),
+                              stacked(global_boundary_xyz)))
+    combined_rgb = np.vstack((raw_rgb, stacked(global_perimeter_rgb, np.uint8),
+                              stacked(global_boundary_rgb, np.uint8)))
+    metadata["perimeter_debug.ply"] = write_colored_ply(
+        directory / "perimeter_debug.ply", combined_xyz, combined_rgb)
+    return metadata

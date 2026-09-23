@@ -60,7 +60,8 @@ def solve(rows, config):
     selected = [] if ambiguous else [row for row in valid if row["opening_id"] in best["opening_ids"]]
     status = ("HATCH_HYPOTHESIS_AMBIGUOUS" if ambiguous else
               "RESOLVED" if any(row["status"] == "COMPLETE_OBSERVED" for row in selected) else
-              "PARTIAL_DETECTION" if selected else "NO_CONFIRMED_HATCH")
+              "PARTIAL_DETECTION" if selected or any(row["status"] == "PARTIAL" for row in rows)
+              else "NO_CONFIRMED_HATCH")
     return dict(scene_status=status, selected=selected, hypotheses=hypotheses[:2],
                 candidate_conflicts=[sorted(pair) for pair in conflicts],
                 score_gap=None if not math.isfinite(gap) else float(gap),

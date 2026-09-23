@@ -17,12 +17,14 @@ from scipy.spatial import cKDTree
 from ship_perception.tools.v15_config_identity import config_hash
 from ship_perception.tools.v15_pcd import decode
 
-from .boundary_refinement import refine_boundaries
 from .hypothesis_solver import solve
 from .local_deck import estimate_local_deck
-from .local_opening import find_openings
+from .opening_seed import build_opening_seeds, perimeter_segments
+from .perimeter_boundary import refine_perimeter_boundaries
+from .perimeter_deck import estimate_segment_deck
 from .structural_proposal import propose
-from .visualization import write_candidate_debug, write_debug_clouds
+from .visualization import (write_candidate_debug, write_debug_clouds,
+                            write_perimeter_artifacts)
 
 
 SOURCE = Path(__file__).resolve().parents[1]
@@ -115,33 +117,72 @@ def analyze_points(points, config, *, software_git_sha="UNCOMMITTED", input_sha2
     started = time.perf_counter()
     proposals, _ = propose(points, config)
     proposal_ms = (time.perf_counter() - started) * 1000
-    deck_ms = boundary_ms = 0.0
-    rows, deck_supports, diagnostics = [], [], []
+    t = time.perf_counter()
+    seeds, fov = build_opening_seeds(proposals, points, config)
+    opening_seed_ms = (time.perf_counter() - t) * 1000
+    proposal_deck_ms = segment_deck_ms = boundary_ms = 0.0
+    rows, deck_supports, diagnostics, perimeter_debug, perimeter_forensics = [], [], [], [], []
     tree = cKDTree(points[:, :2])
+    seeds_by_proposal = {proposal.proposal_id: [] for proposal in proposals}
+    for seed in seeds:
+        seeds_by_proposal[seed.proposal_id].append(seed)
     for proposal in proposals:
         t = time.perf_counter()
         deck, plane, support, ownership = estimate_local_deck(
             points, proposal, config, return_ownership=True)
-        deck_ms += (time.perf_counter() - t) * 1000
+        proposal_deck_ms += (time.perf_counter() - t) * 1000
         deck_supports.append((proposal, deck, plane, ownership))
-        detail = dict(proposal_id=proposal.proposal_id, local_deck=deck, openings=[])
-        if plane is not None:
-            t = time.perf_counter()
-            openings, _ = find_openings(points, proposal, plane, config)
-            deck_ms += (time.perf_counter() - t) * 1000
-            for opening in openings:
+        detail = dict(proposal_id=proposal.proposal_id,
+                      proposal_local_deck_diagnostic=deck, local_deck=deck,
+                      opening_seeds=[], openings=[])
+        for seed in seeds_by_proposal[proposal.proposal_id]:
+            segments = perimeter_segments(seed, fov, config)
+            segment_decks = {}
+            segment_rows = []
+            for segment in segments:
                 t = time.perf_counter()
-                refined = refine_boundaries(points, opening, plane, config, tree)
-                boundary_ms += (time.perf_counter() - t) * 1000
-                detail["openings"].append({**opening.record(), "status": refined["status"],
-                                           "observed_edge_count": len(refined["boundaries"])})
-                rows.append(dict(opening_id=opening.opening_id, proposal_id=proposal.proposal_id,
-                                 bbox_xy=list(opening.bbox_xy), status=refined["status"],
-                                 local_deck=deck, boundaries=refined["boundaries"],
-                                 polygon_raw=refined["polygon_raw"], center_raw=refined["center_raw"],
-                                 center_source=refined["center_source"], support_cells=opening.support_cells,
-                                 area_m2=opening.area_m2, mean_drop_m=opening.mean_drop_m,
-                                 profiles=refined["profiles"]))
+                segment_decks[segment.segment_id] = estimate_segment_deck(
+                    points, segment, config, tree)
+                segment_deck_ms += (time.perf_counter() - t) * 1000
+                segment_rows.append({**segment.record(),
+                                     **segment_decks[segment.segment_id][0]})
+            t = time.perf_counter()
+            refined = refine_perimeter_boundaries(
+                points, seed, segments, segment_decks, config, tree)
+            boundary_ms += (time.perf_counter() - t) * 1000
+            resolved = [row[0] for row in segment_decks.values()
+                        if row[0]["status"] == "RESOLVED"]
+            local_support = dict(status="RESOLVED" if resolved else "UNRESOLVED",
+                                 reason="PER_SEGMENT_DECK_SUPPORT" if resolved else
+                                 "NO_RESOLVED_PERIMETER_SEGMENT",
+                                 residual_p95_m=float(np.median(
+                                     [row["residual_p95_m"] for row in resolved])) if resolved else None,
+                                 support_count=sum(row["support_raw_point_count"] for row in resolved))
+            row = dict(opening_id=seed.seed_id, seed_id=seed.seed_id,
+                       proposal_id=proposal.proposal_id, bbox_xy=list(seed.bbox_xy),
+                       status=refined["status"], fov_status=seed.fov_status,
+                       touches_scan_boundary=seed.touches_scan_boundary,
+                       local_deck=local_support, boundaries=refined["boundaries"],
+                       polygon_raw=refined["polygon_raw"], center_raw=refined["center_raw"],
+                       center_source=refined["center_source"], support_cells=seed.evidence_cells,
+                       seed_area_m2=seed.evidence_cells * seed.component.cell_m ** 2,
+                       area_m2=None, mean_drop_m=None,
+                       perimeter_segment_count=len(segments), profiles=refined["profiles"])
+            rows.append(row)
+            seed_summary = dict(seed_id=seed.seed_id, status=refined["status"],
+                                fov_status=seed.fov_status,
+                                touches_scan_boundary=seed.touches_scan_boundary,
+                                segment_count=len(segments),
+                                observed_edge_count=len(refined["boundaries"]))
+            detail["opening_seeds"].append(seed_summary)
+            detail["openings"].append(seed_summary)
+            perimeter_debug.append(dict(**seed.record(), segments=segment_rows,
+                                        status=refined["status"],
+                                        observed_boundaries=refined["boundaries"],
+                                        observed_edge_count=len(refined["boundaries"])))
+            perimeter_forensics.append(dict(seed=seed, segments=segments,
+                                            segment_decks=segment_decks,
+                                            boundary=refined))
         diagnostics.append(detail)
     t = time.perf_counter()
     decision = solve(rows, config)
@@ -153,17 +194,40 @@ def analyze_points(points, config, *, software_git_sha="UNCOMMITTED", input_sha2
         hatch["hatch_id"] = "h%d" % (index + 1)
         hatch["extent"] = row["bbox_xy"]
         hatches.append(hatch)
-    warnings = ["%s:%s" % (row["proposal_id"], row["local_deck"]["reason"])
+    warnings = ["PROPOSAL_LOCAL_DECK_DIAGNOSTIC:%s:%s" %
+                (row["proposal_id"], row["local_deck"]["reason"])
                 for row in diagnostics if row["local_deck"]["status"] != "RESOLVED"]
     if decision["warning"]:
         warnings.append(decision["warning"])
     limitations = ["STATIC_SINGLE_FRAME", "PYTHON_REFERENCE_IMPLEMENTATION", "OBSERVED_ONLY_NO_EDGE_COMPLETION",
                    "NO_V14_TRACKING", "HUMAN_REVIEW_NOT_COMMERCIAL_GOLDEN",
-                   "SHARED_LOCAL_DECK_WITHIN_PROPOSAL"]
-    timing = dict(decode_ms=0.0, proposal_ms=proposal_ms, local_deck_ms=deck_ms,
+                   "PER_SEGMENT_DECK_EXPERIMENTAL"]
+    timing = dict(decode_ms=0.0, proposal_ms=proposal_ms, opening_seed_ms=opening_seed_ms,
+                  proposal_local_deck_diagnostic_ms=proposal_deck_ms,
+                  segment_deck_ms=segment_deck_ms,
+                  local_deck_ms=proposal_deck_ms + segment_deck_ms,
                   boundary_ms=boundary_ms, hypothesis_ms=hypothesis_ms,
                   visualization_ms=0.0, total_ms=(time.perf_counter() - started) * 1000)
     complete_count = sum(row["status"] == "COMPLETE_OBSERVED" for row in selected)
+    all_segment_rows = [segment for seed in perimeter_debug for segment in seed["segments"]]
+    all_edges = [edge for row in rows for edge in row["boundaries"]]
+    segment_counts = {item["seed_id"]: item["segment_count"]
+                      for detail in diagnostics for item in detail["opening_seeds"]}
+    perimeter_summary = dict(
+        Proposal=len(proposals), OpeningSeed=len(seeds),
+        PerimeterSegments=len(all_segment_rows),
+        SegmentDeckResolved=sum(row["status"] == "RESOLVED" for row in all_segment_rows),
+        SegmentDeckAmbiguous=sum(row["status"] == "SEGMENT_DECK_AMBIGUOUS"
+                                 for row in all_segment_rows),
+        ObservedProfileEdges=sum("OBSERVED_PROFILE_BREAK" in edge["evidence_type"]
+                                 for edge in all_edges),
+        Observed3DFaces=sum("OBSERVED_3D_FACE" in edge["evidence_type"]
+                            for edge in all_edges),
+        CompleteObserved=sum(row["status"] == "COMPLETE_OBSERVED" for row in rows),
+        Partial=sum(row["status"] == "PARTIAL" for row in rows),
+        Unresolved=sum(row["status"] == "UNRESOLVED" for row in rows),
+        Selected=len(selected), Confirmed=complete_count,
+        TouchesScanBoundary=sum(seed.touches_scan_boundary for seed in seeds))
     result = dict(schema_version="ship_perception.v15r.static_result.2",
                   software_git_sha=software_git_sha, input_sha256=input_sha256,
                   config_hash=config_hash(config), run_id=run_id, coordinate_frame=coordinate_frame,
@@ -174,12 +238,26 @@ def analyze_points(points, config, *, software_git_sha="UNCOMMITTED", input_sha2
                   partial_candidate_count=sum(row["status"] == "PARTIAL" for row in rows),
                   unresolved_candidate_count=sum(row["status"] == "UNRESOLVED" for row in rows),
                   observed_only=True, proposals=[proposal.record() for proposal in proposals],
+                  opening_seeds=[dict(seed_id=seed.seed_id, proposal_id=seed.proposal_id,
+                                      bbox_xy=list(seed.bbox_xy), evidence_cells=seed.evidence_cells,
+                                      fov_status=seed.fov_status,
+                                      perimeter_segment_count=segment_counts[seed.seed_id])
+                                 for seed in seeds],
+                  perimeter_summary=perimeter_summary,
                   hypotheses=decision["hypotheses"], hatches=hatches,
                   warnings=warnings, known_limitations=limitations, timing=timing)
+    accepted_segment_ids = np.unique(np.concatenate([
+        row[2]["selected_raw_ids"] for item in perimeter_forensics
+        for row in item["segment_decks"].values()
+        if len(row[2]["selected_raw_ids"])])) if any(
+            len(row[2]["selected_raw_ids"]) for item in perimeter_forensics
+            for row in item["segment_decks"].values()) else np.empty(0, dtype=np.int64)
     auxiliary = dict(proposals=proposals, proposal_debug=diagnostics,
                      profile_debug={row["opening_id"]: row["profiles"] for row in rows},
                      decision_debug={key: value for key, value in decision.items() if key != "selected"},
-                     deck_supports=deck_supports)
+                     deck_supports=deck_supports, perimeter_debug=perimeter_debug,
+                     perimeter_forensics=perimeter_forensics,
+                     accepted_segment_support_ids=accepted_segment_ids)
     return result, auxiliary
 
 
@@ -204,8 +282,12 @@ def run_file(input_path, output_root, run_id, *, scene_id=None, config_path=DEFA
     result["timing"]["decode_ms"] = decode_ms
     t = time.perf_counter()
     directory.mkdir(parents=True, exist_ok=True)
-    cloud = write_debug_clouds(directory, points, aux["proposals"], aux["deck_supports"], result, config)
+    cloud = write_debug_clouds(directory, points, aux["proposals"], aux["deck_supports"],
+                               result, config,
+                               accepted_support_ids=aux["accepted_segment_support_ids"])
     candidate_cloud = write_candidate_debug(directory, points, aux["deck_supports"])
+    perimeter_cloud = write_perimeter_artifacts(
+        directory, points, aux["perimeter_forensics"], config)
     result["timing"]["visualization_ms"] = (time.perf_counter() - t) * 1000
     result["timing"]["total_ms"] += decode_ms + result["timing"]["visualization_ms"]
     _atomic_json(directory / "resolved_config.json", config)
@@ -213,6 +295,8 @@ def run_file(input_path, output_root, run_id, *, scene_id=None, config_path=DEFA
     _atomic_json(directory / "proposal_debug.json", dict(proposals=aux["proposal_debug"],
                                                      decision=aux["decision_debug"], cloud=cloud,
                                                      candidate_plane_debug=candidate_cloud))
+    _atomic_json(directory / "perimeter_debug.json",
+                 dict(opening_seeds=aux["perimeter_debug"], cloud=perimeter_cloud))
     _atomic_json(directory / "profile_debug.json", aux["profile_debug"])
     _atomic_json(directory / "timing.json", result["timing"])
     return result
