@@ -1,0 +1,16 @@
+{
+  "schema": "ship_perception.v15r.heightmap_research.1",
+  "min_points_per_coarse_cell": 5,
+  "height_level_bin_m": 0.2,
+  "height_level_min_fraction": 0.02,
+  "height_level_min_separation_m": 0.5,
+  "separate_elevated_structure_gap_m": 3.0,
+  "minimum_region_vessel_area_fraction": 0.025,
+  "major_child_area_fraction": 0.1,
+  "minimum_relative_region_score": 0.08,
+  "gap_bridge_cells": 0,
+  "min_child_major_separation_fraction": 0.25,
+  "minimum_split_support_fraction": 0.25,
+  "minimum_single_child_support_fraction": 0.5,
+  "fragment_box_overlap_min": 0.3
+}
