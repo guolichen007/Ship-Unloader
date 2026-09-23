@@ -86,7 +86,7 @@ def _physical_components(points, radius):
                   key=lambda ids: (-len(ids), int(ids.min())))
 
 
-def _ring_points(points, proposal, band):
+def _ring_indices(points, proposal, band):
     xy = points[:, :2]
     x0, y0, x1, y1 = proposal.bbox_xy
     outer = ((xy[:, 0] >= x0 - band) & (xy[:, 0] <= x1 + band) &
@@ -94,8 +94,9 @@ def _ring_points(points, proposal, band):
     if not proposal.seed_components:
         inner = ((xy[:, 0] >= x0) & (xy[:, 0] <= x1) &
                  (xy[:, 1] >= y0) & (xy[:, 1] <= y1))
-        return points[outer & ~inner].astype(float)
-    subset = points[outer].astype(float)
+        return np.flatnonzero(outer & ~inner)
+    outer_ids = np.flatnonzero(outer)
+    subset = points[outer_ids].astype(float)
     near = np.zeros(len(subset), dtype=bool)
     interior = np.zeros(len(subset), dtype=bool)
     for component in proposal.seed_components:
@@ -109,11 +110,24 @@ def _ring_points(points, proposal, band):
         offset = np.abs(subset[:, :2] - centers[nearest])
         interior |= (offset[:, 0] <= half) & (offset[:, 1] <= half)
         near |= distance <= band + math.sqrt(2) * half
-    return subset[near & ~interior]
+    return outer_ids[near & ~interior]
 
 
-def estimate_local_deck(points, proposal, config):
-    ring = _ring_points(points, proposal, config["roi"]["support_search_m"])
+def _ring_points(points, proposal, band):
+    return points[_ring_indices(points, proposal, band)].astype(float)
+
+
+def estimate_local_deck(points, proposal, config, *, return_ownership=False):
+    ring_ids = _ring_indices(points, proposal, config["roi"]["support_search_m"])
+    ring = points[ring_ids].astype(float)
+    ownership = dict(accepted_raw_ids=np.empty(0, dtype=np.int64),
+                     candidate_plane_raw_ids=[], competitor_raw_ids=[])
+
+    def done(record, plane, support):
+        if return_ownership:
+            return record, plane, support, ownership
+        return record, plane, support
+
     minimum = config["geometry"]["min_plane_points"]
     result = dict(status="LOCAL_DECK_UNRESOLVED", normal_raw=None, offset=None,
                   ring_point_count=int(len(ring)), raw_ring_point_count=int(len(ring)),
@@ -126,7 +140,7 @@ def estimate_local_deck(points, proposal, config):
                   reason="INSUFFICIENT_RING_SUPPORT", rejection_stage="RING_SUPPORT")
     empty = np.empty((0, 3))
     if len(ring) < minimum:
-        return result, None, empty
+        return done(result, None, empty)
     rng = np.random.default_rng(2026)
     sample = ring[rng.choice(len(ring), min(len(ring), 3000), replace=False)]
     threshold = config["geometry"]["plane_inlier_m"]
@@ -144,7 +158,7 @@ def estimate_local_deck(points, proposal, config):
     result["ransac_hypothesis_count"] = len(hypotheses)
     if not hypotheses:
         result.update(reason="NO_LOCAL_PLANAR_PATCH", rejection_stage="RANSAC")
-        return result, None, empty
+        return done(result, None, empty)
     hypotheses.sort(key=lambda row: -row[0])
     clusters = []
     overlap_gate = config["frame"]["same_plane_overlap_min"]
@@ -163,36 +177,50 @@ def estimate_local_deck(points, proposal, config):
     result["candidate_plane_anchor_heights"] = [_anchor_height(row[1], anchor) for row in candidates]
     result["candidate_plane_normal_angles"] = [_plane_angle(row[1], candidates[0][1]) for row in candidates]
     best_count, initial, best_mask = candidates[0]
-    competitors = [row for row in candidates[1:]
-                   if row[0] >= best_count * overlap_gate and
-                   np.count_nonzero(row[2] & ~best_mask) >= minimum and
-                   (_plane_angle(row[1], initial) > angle_gate or
-                    abs(_anchor_height(row[1], anchor) - _anchor_height(initial, anchor)) > 3 * threshold)]
+    competitor_indexes = [index for index, row in enumerate(candidates[1:], 1)
+                          if row[0] >= best_count * overlap_gate and
+                          np.count_nonzero(row[2] & ~best_mask) >= minimum and
+                          (_plane_angle(row[1], initial) > angle_gate or
+                           abs(_anchor_height(row[1], anchor) -
+                               _anchor_height(initial, anchor)) > 3 * threshold)]
+    if return_ownership:
+        candidate_ids = [ring_ids[np.abs(ring @ row[1][0] + row[1][1]) <= threshold]
+                         for row in candidates]
+        ownership["candidate_plane_raw_ids"] = candidate_ids
+        ownership["competitor_raw_ids"] = [
+            np.setdiff1d(candidate_ids[index], candidate_ids[0], assume_unique=True)
+            for index in competitor_indexes]
+        ownership["competitor_candidate_indexes"] = competitor_indexes
+    competitors = [candidates[index] for index in competitor_indexes]
     result["competing_plane_count"] = len(competitors)
     inliers = ring[np.abs(ring @ initial[0] + initial[1]) <= threshold]
     result["plane_inlier_count"] = len(inliers)
     if len(inliers) < minimum:
         result.update(reason="INSUFFICIENT_PLANAR_SUPPORT", rejection_stage="PLANE_INLIERS")
-        return result, None, empty
+        return done(result, None, empty)
     refined = _huber_plane(inliers, initial, threshold, max_angle)
     if refined is None:
         result.update(reason="DEGENERATE_PLANE_REFINE", rejection_stage="PLANE_REFINE")
-        return result, None, empty
-    inliers = ring[np.abs(ring @ refined[0] + refined[1]) <= threshold]
+        return done(result, None, empty)
+    refined_mask = np.abs(ring @ refined[0] + refined[1]) <= threshold
+    inliers = ring[refined_mask]
+    inlier_ids = ring_ids[refined_mask]
     components = _physical_components(inliers, config["roi"]["support_connectivity_m"])
     result["connectivity_component_count"] = len(components)
     result["connectivity_component_sizes"] = [len(ids) for ids in components]
     accepted = [index for index, ids in enumerate(components)
                 if len(ids) >= config["geometry"]["normal_min_points"]]
     result["accepted_component_ids"] = accepted
-    grown = inliers[np.concatenate([components[index] for index in accepted])] if accepted else empty
+    accepted_ids = np.concatenate([components[index] for index in accepted]) if accepted else np.empty(0, dtype=np.int64)
+    grown = inliers[accepted_ids]
+    ownership["accepted_raw_ids"] = inlier_ids[accepted_ids]
     if len(grown) < minimum:
         result.update(reason="INSUFFICIENT_CONNECTED_PLANAR_SUPPORT", rejection_stage="CONNECTIVITY")
-        return result, None, grown
+        return done(result, None, grown)
     final = _huber_plane(grown, refined, threshold, max_angle)
     if final is None:
         result.update(reason="CONNECTED_PATCH_TILT_OUT_OF_RANGE", rejection_stage="PLANE_REFINE")
-        return result, None, grown
+        return done(result, None, grown)
     normal, offset = final
     residual = np.abs(grown @ normal + offset)
     relative = grown[:, :2] - anchor
@@ -212,13 +240,13 @@ def estimate_local_deck(points, proposal, config):
     if competitors:
         result.update(status="LOCAL_DECK_AMBIGUOUS", reason="COMPETING_PLANAR_PATCHES",
                       rejection_stage="PLANE_COMPETITION")
-        return result, None, grown
+        return done(result, None, grown)
     if sector_count < math.ceil(8 * config["roi"]["min_enclosure_ratio"]):
         result.update(reason="INSUFFICIENT_SECTOR_SUPPORT", rejection_stage="SECTOR_SUPPORT")
-        return result, None, grown
+        return done(result, None, grown)
     if (not (np.min(grown[:, 0]) < anchor[0] < np.max(grown[:, 0])) or
             not (np.min(grown[:, 1]) < anchor[1] < np.max(grown[:, 1]))):
         result.update(reason="ONE_SIDED_LOCAL_DECK_SUPPORT", rejection_stage="ENCLOSURE")
-        return result, None, grown
+        return done(result, None, grown)
     result.update(status="RESOLVED", reason="MULTI_PATCH_LOCAL_PLANAR_SUPPORT", rejection_stage=None)
-    return result, final, grown
+    return done(result, final, grown)

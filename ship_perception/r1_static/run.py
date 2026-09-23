@@ -22,7 +22,7 @@ from .hypothesis_solver import solve
 from .local_deck import estimate_local_deck
 from .local_opening import find_openings
 from .structural_proposal import propose
-from .visualization import write_debug_clouds
+from .visualization import write_candidate_debug, write_debug_clouds
 
 
 SOURCE = Path(__file__).resolve().parents[1]
@@ -120,9 +120,10 @@ def analyze_points(points, config, *, software_git_sha="UNCOMMITTED", input_sha2
     tree = cKDTree(points[:, :2])
     for proposal in proposals:
         t = time.perf_counter()
-        deck, plane, support = estimate_local_deck(points, proposal, config)
+        deck, plane, support, ownership = estimate_local_deck(
+            points, proposal, config, return_ownership=True)
         deck_ms += (time.perf_counter() - t) * 1000
-        deck_supports.append((proposal, deck, plane))
+        deck_supports.append((proposal, deck, plane, ownership))
         detail = dict(proposal_id=proposal.proposal_id, local_deck=deck, openings=[])
         if plane is not None:
             t = time.perf_counter()
@@ -162,11 +163,16 @@ def analyze_points(points, config, *, software_git_sha="UNCOMMITTED", input_sha2
     timing = dict(decode_ms=0.0, proposal_ms=proposal_ms, local_deck_ms=deck_ms,
                   boundary_ms=boundary_ms, hypothesis_ms=hypothesis_ms,
                   visualization_ms=0.0, total_ms=(time.perf_counter() - started) * 1000)
-    result = dict(schema_version="ship_perception.v15r.static_result.1",
+    complete_count = sum(row["status"] == "COMPLETE_OBSERVED" for row in selected)
+    result = dict(schema_version="ship_perception.v15r.static_result.2",
                   software_git_sha=software_git_sha, input_sha256=input_sha256,
                   config_hash=config_hash(config), run_id=run_id, coordinate_frame=coordinate_frame,
                   point_count=int(len(points)), bbox_raw=[points.min(axis=0).tolist(), points.max(axis=0).tolist()],
-                  scene_status=decision["scene_status"], confirmed_hatch_count=len(hatches),
+                  scene_status=decision["scene_status"], confirmed_hatch_count=complete_count,
+                  selected_candidate_count=len(selected),
+                  complete_observed_hatch_count=complete_count,
+                  partial_candidate_count=sum(row["status"] == "PARTIAL" for row in rows),
+                  unresolved_candidate_count=sum(row["status"] == "UNRESOLVED" for row in rows),
                   observed_only=True, proposals=[proposal.record() for proposal in proposals],
                   hypotheses=decision["hypotheses"], hatches=hatches,
                   warnings=warnings, known_limitations=limitations, timing=timing)
@@ -199,12 +205,14 @@ def run_file(input_path, output_root, run_id, *, scene_id=None, config_path=DEFA
     t = time.perf_counter()
     directory.mkdir(parents=True, exist_ok=True)
     cloud = write_debug_clouds(directory, points, aux["proposals"], aux["deck_supports"], result, config)
+    candidate_cloud = write_candidate_debug(directory, points, aux["deck_supports"])
     result["timing"]["visualization_ms"] = (time.perf_counter() - t) * 1000
     result["timing"]["total_ms"] += decode_ms + result["timing"]["visualization_ms"]
     _atomic_json(directory / "resolved_config.json", config)
     _atomic_json(directory / "result.json", result)
     _atomic_json(directory / "proposal_debug.json", dict(proposals=aux["proposal_debug"],
-                                                     decision=aux["decision_debug"], cloud=cloud))
+                                                     decision=aux["decision_debug"], cloud=cloud,
+                                                     candidate_plane_debug=candidate_cloud))
     _atomic_json(directory / "profile_debug.json", aux["profile_debug"])
     _atomic_json(directory / "timing.json", result["timing"])
     return result

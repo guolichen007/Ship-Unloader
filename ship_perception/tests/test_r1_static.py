@@ -15,7 +15,9 @@ from ship_perception.r1_static.local_opening import find_openings
 from ship_perception.r1_static.model import Opening, Proposal, SeedComponent
 from ship_perception.r1_static.run import analyze_points, resolve_config
 from ship_perception.r1_static.structural_proposal import propose
-from ship_perception.r1_static.visualization import write_colored_ply
+from ship_perception.r1_static.visualization import (GREEN, PURPLE, seed_point_ids,
+                                                    write_candidate_debug, write_colored_ply,
+                                                    write_debug_clouds)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -156,6 +158,66 @@ class StaticGeometry(unittest.TestCase):
         self.assertTrue(openings)
         self.assertTrue(all(np.isfinite(opening.mean_drop_m) for opening in openings))
         json.dumps([opening.record() for opening in openings], allow_nan=False)
+
+    def test_exact_seed_and_deck_support_visualization(self):
+        points = np.array(((1.1, 1.2, -2), (2.1, 2.1, -2),
+                           (1.9, 2.1, 0), (1.1, 1.1, 0), (5, 5, 0)))
+        seed = SeedComponent((0, 0), 1.0, ((1, 1), (2, 2)), (1, 1, 3, 3))
+        proposal = Proposal("p", (1, 1, 3, 3), 2, 2, (1.0,), (seed,))
+        np.testing.assert_array_equal(seed_point_ids(points, [proposal]), [0, 1, 3])
+        ownership = dict(accepted_raw_ids=np.array([1, 4]), candidate_plane_raw_ids=[],
+                         competitor_raw_ids=[])
+        with tempfile.TemporaryDirectory() as directory:
+            write_debug_clouds(directory, points, [proposal],
+                               [(proposal, {}, (np.array([0., 0., 1.]), 0.), ownership)],
+                               {"hatches": []}, CONFIG)
+            dtype = np.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"),
+                              ("r", "u1"), ("g", "u1"), ("b", "u1")])
+            for name, color, expected in (("proposal_debug.ply", PURPLE, [0, 1, 3]),
+                                          ("proposal_seed_debug.ply", PURPLE, [0, 1, 3]),
+                                          ("local_deck_debug.ply", GREEN, [1, 4])):
+                raw = (Path(directory) / name).read_bytes().split(b"end_header\n", 1)[1]
+                cloud = np.frombuffer(raw, dtype=dtype)
+                actual = np.flatnonzero(np.all(np.column_stack(
+                    (cloud["r"], cloud["g"], cloud["b"])) == color, axis=1))
+                np.testing.assert_array_equal(actual, expected)
+
+    def test_competitor_point_ownership_is_saved(self):
+        points = scene()
+        ring = ((points[:, 0] < 3) | (points[:, 0] > 11) |
+                (points[:, 1] < 4) | (points[:, 1] > 16))
+        points[ring & (points[:, 1] > 10), 2] += 1
+        proposal = envelope(1)
+        deck, plane, support, ownership = estimate_local_deck(
+            points, proposal, CONFIG, return_ownership=True)
+        self.assertEqual(deck["status"], "LOCAL_DECK_AMBIGUOUS")
+        self.assertIsNone(plane)
+        self.assertTrue(ownership["competitor_raw_ids"])
+        for ids in ownership["competitor_raw_ids"]:
+            self.assertFalse(np.intersect1d(ids, ownership["candidate_plane_raw_ids"][0]).size)
+        with tempfile.TemporaryDirectory() as directory:
+            write_candidate_debug(directory, points, [(proposal, deck, plane, ownership)])
+            with np.load(Path(directory) / "candidate_plane_debug/test_ownership.npz") as archive:
+                self.assertTrue(any(name.startswith("competitor_") for name in archive.files))
+
+    def test_partial_selection_is_not_confirmation(self):
+        edge = dict(evidence_type="OBSERVED_PROFILE_BREAK", coverage=0.9,
+                    fit_residual_p95_m=0.01)
+        partial = dict(opening_id="partial", bbox_xy=[0, 0, 5, 5], status="PARTIAL",
+                       local_deck=dict(status="RESOLVED", residual_p95_m=0.01),
+                       boundaries=[edge, edge])
+        decision = solve([partial], CONFIG)
+        self.assertEqual([row["opening_id"] for row in decision["selected"]], ["partial"])
+        self.assertEqual(decision["scene_status"], "PARTIAL_DETECTION")
+        with patch("ship_perception.r1_static.run.refine_boundaries",
+                   return_value=dict(status="PARTIAL", boundaries=[edge, edge],
+                                     polygon_raw=None, center_raw=[6, 10, 0],
+                                     center_source="COARSE_OPENING_SEED", profiles=[])):
+            result, _ = analyze_points(scene(), CONFIG)
+        self.assertEqual(result["schema_version"], "ship_perception.v15r.static_result.2")
+        self.assertEqual(result["scene_status"], "PARTIAL_DETECTION")
+        self.assertEqual(result["selected_candidate_count"], 1)
+        self.assertEqual(result["confirmed_hatch_count"], 0)
 
     def test_profile_break_complete_and_partial_no_inferred_side(self):
         points = scene()

@@ -22,7 +22,17 @@ def _profile(points, tree, center, tangent, inward, plane, config, profile_id):
         return row
     local, along = local[use], along[use]
     residual = local @ plane[0] + plane[1]
-    bins = np.floor(along / step).astype(int)
+    # Raw PCD coordinates are float32. A translated point lying exactly on a
+    # profile-bin edge can otherwise flip to the neighboring bin after
+    # float32 rounding, changing a physical 0.20 m bracket into 0.25 m.
+    scaled = along / step
+    coordinate_precision_m = (np.finfo(points.dtype).eps *
+                              max(1.0, float(np.max(np.abs(local[:, :2])))) * 2
+                              if np.issubdtype(points.dtype, np.floating) else 0.0)
+    nearest = np.rint(scaled)
+    scaled = np.where(np.abs(scaled - nearest) <= coordinate_precision_m / step,
+                      nearest, scaled)
+    bins = np.floor(scaled).astype(int)
     samples = []
     face_options = []
     for index in np.unique(bins):
@@ -48,7 +58,7 @@ def _profile(points, tree, center, tangent, inward, plane, config, profile_id):
         if inside[1] >= -b["profile_min_drop_m"]:
             continue
         prior = [(j, outer) for j, outer in enumerate(samples[:index])
-                 if 0 < inside[0] - outer[0] <= b["profile_max_bracket_m"]
+                 if 0 < inside[0] - outer[0] <= b["profile_max_bracket_m"] + coordinate_precision_m
                  and abs(outer[1]) <= config["roi"]["support_band_m"]]
         if not prior:
             continue
