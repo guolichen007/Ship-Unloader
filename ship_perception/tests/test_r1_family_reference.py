@@ -13,6 +13,7 @@ from ship_perception.r1_static.family_consensus import (
     role_from_zones,
 )
 from ship_perception.r1_static.family_reference import resolve_segment_reference
+from ship_perception.r1_static.family_reference_evaluator import compute_gates
 from ship_perception.r1_static.family_reference_synthetic import run_synthetic_regression
 
 
@@ -36,6 +37,20 @@ def _partition(families, candidates):
             parts.append(frozenset(candidates[index]["segment_id"]
                                    for index in family["members"]))
     return frozenset(parts)
+
+
+def _scene_stats(ambiguous, resolved, before, after):
+    return dict(ambiguous_count=ambiguous, family_reference_resolved_count=resolved,
+                before_edge_count=before, after_edge_count=after)
+
+
+def _passing_scene_stats(root_edges=0):
+    return {
+        "4-16": _scene_stats(86, 76, 9, 48),
+        "8-22": _scene_stats(94, 71, 9, 52),
+        "6-8": dict(node_evidence={
+            "l03-c0002": {"observed_structural_edge_count": root_edges}}),
+    }
 
 
 class FamilyReference(unittest.TestCase):
@@ -108,6 +123,25 @@ class FamilyReference(unittest.TestCase):
         families_by_id = {}
         resolution = resolve_segment_reference([0], family_of, families_by_id, candidates, CONFIG)
         self.assertEqual(resolution["status"], "NO_LOCAL_REFERENCE_OBSERVATION")
+
+    def test_gate_a_requires_majority_unlock(self):
+        # resolved == unresolved is not a majority: Gate A must fail.
+        stats = _passing_scene_stats()
+        stats["4-16"] = _scene_stats(86, 43, 9, 48)  # 43 == 86 - 43
+        gates, first_bad = compute_gates(stats, "ALL_PASS")
+        self.assertFalse(gates["gate_a_4_16_8_22_majority_unlock"])
+        self.assertEqual(first_bad, "REFERENCE_UNLOCK_NOT_MAJORITY")
+
+    def test_gate_c_root_false_complete_fails(self):
+        # 51 observed edges on the giant root must fail the strict zero-edge gate.
+        gates, first_bad = compute_gates(_passing_scene_stats(root_edges=51), "ALL_PASS")
+        self.assertFalse(gates["gate_c_6_8_root_no_false_complete"])
+        self.assertEqual(first_bad, "SIX_EIGHT_GIANT_ROOT_FALSE_COMPLETE")
+
+    def test_gate_c_root_zero_edges_passes(self):
+        gates, first_bad = compute_gates(_passing_scene_stats(root_edges=0), "ALL_PASS")
+        self.assertTrue(gates["gate_c_6_8_root_no_false_complete"])
+        self.assertIsNone(first_bad)
 
 
 if __name__ == "__main__":

@@ -14,6 +14,46 @@ from .batch import NORMAL6
 from .run import REPO, _atomic_json
 
 
+def compute_gates(scene_stats, synthetic_overall):
+    """S4-R1 acceptance gates from already-computed per-scene statistics."""
+    def majority_unlock(scene):
+        ambiguous = scene_stats[scene]["ambiguous_count"]
+        resolved = scene_stats[scene]["family_reference_resolved_count"]
+        return resolved > ambiguous - resolved
+
+    # Gate A: 4-16 / 8-22 each achieve a majority safe unlock (resolved > unresolved).
+    gate_a = majority_unlock("4-16") and majority_unlock("8-22")
+    # Gate B: 4-16 / 8-22 each produce more observed edges than before the unlock.
+    gate_b = (scene_stats["4-16"]["after_edge_count"] > scene_stats["4-16"]["before_edge_count"] and
+              scene_stats["8-22"]["after_edge_count"] > scene_stats["8-22"]["before_edge_count"])
+    # Gate C: 6-8 giant root (selected node) must have exactly zero observed edges.
+    root_edges = scene_stats["6-8"]["node_evidence"].get("l03-c0002", {}).get(
+        "observed_structural_edge_count", 0)
+    gate_c = bool(root_edges == 0)
+    gate_d = synthetic_overall == "ALL_PASS"
+    gate_e = True  # enforced in the batch: BASELINE004_BEHAVIOR_CHANGED raises.
+    gates = dict(
+        gate_a_4_16_8_22_majority_unlock=gate_a,
+        gate_b_observed_edges_increased=gate_b,
+        gate_c_6_8_root_no_false_complete=gate_c,
+        gate_d_synthetic_regression=gate_d,
+        gate_e_baseline004_unchanged=gate_e,
+    )
+    if not gate_a:
+        first_bad = "REFERENCE_UNLOCK_NOT_MAJORITY"
+    elif not gate_b:
+        first_bad = "UNLOCKED_PROFILE_PRODUCED_NO_EDGE"
+    elif not gate_c:
+        first_bad = "SIX_EIGHT_GIANT_ROOT_FALSE_COMPLETE"
+    elif not gate_d:
+        first_bad = "SYNTHETIC_REGRESSION_FAILED"
+    elif not gate_e:
+        first_bad = "BASELINE004_BEHAVIOR_CHANGED"
+    else:
+        first_bad = None
+    return gates, first_bad
+
+
 def evaluate_run_s4r1(run_root, synthetic_path):
     run_root = Path(run_root)
     frozen = {}
@@ -57,41 +97,8 @@ def evaluate_run_s4r1(run_root, synthetic_path):
             node_evidence=node_evidence,
         )
 
-    # Gate A: 4-16 and 8-22 each safely unlock at least 5 ambiguous segments.
-    gate_a = (scene_stats["4-16"]["family_reference_resolved_count"] >= 5 and
-              scene_stats["8-22"]["family_reference_resolved_count"] >= 5)
-    # Gate B: family-reference unlock actually produced new observed edges.
-    gate_b = sum(stats["new_edge_count"] for stats in scene_stats.values()) > 0
-    # Gate C: 6-8 giant root (selected node) not rescued into a complete perimeter.
-    root_edges = scene_stats["6-8"]["node_evidence"].get("l03-c0002", {}).get(
-        "observed_structural_edge_count", 0)
-    root_segments = scene_stats["6-8"]["node_evidence"].get("l03-c0002", {}).get(
-        "segment_count", 0)
-    gate_c = bool(root_segments == 0 or root_edges < root_segments)
-
-    synthetic = json.loads(synthetic_path.read_text(encoding="utf-8"))
-    gate_d = synthetic.get("overall") == "ALL_PASS"
-    gate_e = True  # enforced in the batch: BASELINE004_BEHAVIOR_CHANGED raises.
-
-    gates = dict(
-        gate_a_4_16_8_22_unlock=gate_a,
-        gate_b_observed_edges_increased=gate_b,
-        gate_c_6_8_root_no_false_complete=gate_c,
-        gate_d_synthetic_regression=gate_d,
-        gate_e_baseline004_unchanged=gate_e,
-    )
-    if not gate_a:
-        first_bad = "REFERENCE_UNLOCK_INSUFFICIENT"
-    elif not gate_b:
-        first_bad = "UNLOCKED_PROFILE_PRODUCED_NO_EDGE"
-    elif not gate_c:
-        first_bad = "SIX_EIGHT_GIANT_ROOT_FALSE_COMPLETE"
-    elif not gate_d:
-        first_bad = "SYNTHETIC_REGRESSION_FAILED"
-    elif not gate_e:
-        first_bad = "BASELINE004_BEHAVIOR_CHANGED"
-    else:
-        first_bad = None
+    synthetic_overall = json.loads(synthetic_path.read_text(encoding="utf-8")).get("overall")
+    gates, first_bad = compute_gates(scene_stats, synthetic_overall)
     decision = "PASS" if all(gates.values()) else "FAIL"
     return dict(
         schema="ship_perception.v15r.s4r1_decision.1",

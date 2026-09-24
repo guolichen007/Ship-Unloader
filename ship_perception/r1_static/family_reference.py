@@ -229,6 +229,10 @@ def analyze_scene_s4r1(points, config, research, baseline_result):
         if edge is not None:
             edge["via_family_reference"] = bool(
                 not profile_before and resolution["status"] == "FAMILY_REFERENCE_RESOLVED")
+            edge["node_id"] = entry["node_id"]
+            edge["seed_id"] = entry["seed_id"]
+            edge["reference_family_id"] = resolution["family_id"]
+            edge["reference_candidate_index"] = resolution["candidate_index"]
             edges.append(edge)
         segment_resolutions.append(dict(
             node_id=entry["node_id"], segment_id=segment.segment_id,
