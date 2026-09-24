@@ -41,7 +41,9 @@ def compute_p15_decision(summary_by_scene, cross_hatch_by_scene, synthetic, node
                 summary.get("structural_families", 0) >= 1)
     criterion_1 = has_stable_structural("4-16") and has_stable_structural("8-22")
 
-    # Criterion 2: 6-8 giant root not artificially favored over children.
+    # Criterion 2: 6-8 giant root not artificially favored over children. The
+    # child/fragment structural evidence must be STRICTLY stronger than the
+    # selected root; "child has any votes" is not enough.
     root_votes = 0
     child_votes = 0
     selected = set(selected_nodes_by_scene.get("6-8", []))
@@ -50,7 +52,7 @@ def compute_p15_decision(summary_by_scene, cross_hatch_by_scene, synthetic, node
             root_votes = max(root_votes, count)
         else:
             child_votes = max(child_votes, count)
-    criterion_2 = root_votes <= child_votes or child_votes > 0
+    criterion_2 = child_votes > root_votes
 
     criterion_3 = bool(synthetic.get("smooth_cargo_slope", {}).get("pass_"))
     criterion_4 = bool(synthetic.get("overflow_cargo", {}).get("pass_"))

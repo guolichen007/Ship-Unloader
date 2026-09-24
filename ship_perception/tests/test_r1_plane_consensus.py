@@ -14,6 +14,7 @@ from ship_perception.r1_static.plane_consensus import (
     normalize_normal,
     run_consensus,
 )
+from ship_perception.r1_static.plane_consensus_evaluator import compute_p15_decision
 from ship_perception.r1_static.plane_consensus_synthetic import (
     _rotation_matrix,
     apply_se3,
@@ -93,6 +94,23 @@ class PlaneConsensus(unittest.TestCase):
         roles = {family["role_hypothesis"] for family in families}
         self.assertIn("ROLE_AMBIGUOUS_OVERFLOW", roles)
         self.assertFalse(roles & {"BROAD_PERIMETER_SUPPORT", "NARROW_BOUNDARY_STRIP"})
+
+    def test_c2_requires_child_strictly_stronger_than_root(self):
+        synthetic = dict(smooth_cargo_slope=dict(pass_=True),
+                         overflow_cargo=dict(pass_=True),
+                         roll_pitch_yaw_invariance=dict(pass_=True))
+        summary = {"4-16": dict(cross_segment_families=1, structural_families=1),
+                   "8-22": dict(cross_segment_families=1, structural_families=1)}
+        cross = {}
+        selected = {"6-8": ["root"]}
+        # root=100, child=1 must FAIL: child is not strictly stronger.
+        d = compute_p15_decision(summary, cross, synthetic,
+                                 {"6-8": {"root": 100, "child": 1}}, selected)
+        self.assertFalse(d["criteria"]["c2_6_8_root_not_favored"])
+        # root=1, child=37 passes (real data shape).
+        d2 = compute_p15_decision(summary, cross, synthetic,
+                                  {"6-8": {"root": 1, "child": 37}}, selected)
+        self.assertTrue(d2["criteria"]["c2_6_8_root_not_favored"])
 
     def test_roll_pitch_invariance_preserves_roles(self):
         points, candidates, boxes = build_case_c()
