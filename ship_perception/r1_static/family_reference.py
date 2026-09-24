@@ -120,7 +120,7 @@ def run_profile_for_segment(points, tree, segment, plane, config):
                     visibility="VISIBLE", uncertainty_m=chosen["normal_uncertainty"],
                     coverage=min(1.0, chosen["support_length"] / segment.length_m),
                     reason="RAW_3D_OBSERVED_SUPPORT")
-    return edge, rows
+    return edge, rows, breaks, faces
 
 
 def is_reference_capable(family, config):
@@ -209,7 +209,7 @@ def analyze_scene_s4r1(points, config, research, baseline_result):
     candidate_family_id = [("f%03d" % family_of[index] if family_of[index] is not None else None)
                            for index in range(len(candidates))]
 
-    segment_resolutions, edges, narrow_strips = [], [], []
+    segment_resolutions, edges, narrow_strips, primitives = [], [], [], []
     for entry in segment_entries:
         segment = entry["segment"]
         deck = entry["deck"]
@@ -218,12 +218,16 @@ def analyze_scene_s4r1(points, config, research, baseline_result):
         profile_before = deck["status"] == "RESOLVED"
         profile_after = profile_before or resolution["status"] == "FAMILY_REFERENCE_RESOLVED"
         edge = None
+        breaks = np.empty((0, 2))
+        faces = np.empty((0, 2))
         if profile_before:
-            edge, rows = run_profile_for_segment(points, tree, segment, entry["plane"], config)
+            edge, rows, breaks, faces = run_profile_for_segment(
+                points, tree, segment, entry["plane"], config)
         elif resolution["status"] == "FAMILY_REFERENCE_RESOLVED":
             candidate = candidates[resolution["candidate_index"]]
             plane = (candidate["normal"], candidate["offset"])
-            edge, rows = run_profile_for_segment(points, tree, segment, plane, config)
+            edge, rows, breaks, faces = run_profile_for_segment(
+                points, tree, segment, plane, config)
         else:
             rows = []
         if edge is not None:
@@ -234,6 +238,16 @@ def analyze_scene_s4r1(points, config, research, baseline_result):
             edge["reference_family_id"] = resolution["family_id"]
             edge["reference_candidate_index"] = resolution["candidate_index"]
             edges.append(edge)
+            primitives.append(dict(
+                node_id=entry["node_id"], seed_id=entry["seed_id"],
+                segment_id=segment.segment_id,
+                reference_family_id=resolution["family_id"],
+                reference_candidate_index=resolution["candidate_index"],
+                via_family_reference=edge["via_family_reference"],
+                evidence_type=edge["evidence_type"],
+                profile_break_positions=[list(point) for point in breaks],
+                face_positions=[list(point) for point in faces],
+            ))
         segment_resolutions.append(dict(
             node_id=entry["node_id"], segment_id=segment.segment_id,
             original_deck_status=deck["status"], candidate_count=len(entry["candidate_indexes"]),
@@ -284,7 +298,8 @@ def analyze_scene_s4r1(points, config, research, baseline_result):
         scene=result, candidates=candidates, families=family_records,
         candidate_family_id=candidate_family_id,
         segment_resolutions=segment_resolutions, edges=edges, narrow_strips=narrow_strips,
-        node_summary=node_summary,
+        primitives=primitives, node_summary=node_summary,
+        grid=grid, valid=auxiliary["valid"],
     )
 
 
