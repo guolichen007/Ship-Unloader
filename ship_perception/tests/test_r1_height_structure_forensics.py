@@ -8,7 +8,10 @@ import unittest
 
 import numpy as np
 
-from ship_perception.r1_static.height_structure_evaluator import evaluate_scene
+from ship_perception.r1_static.height_structure_evaluator import (
+    _decision,
+    evaluate_scene,
+)
 from ship_perception.r1_static.height_structure_forensics import (
     _node_seeds,
     audit_scene,
@@ -97,6 +100,23 @@ class BridgeForensics(unittest.TestCase):
         self.assertEqual(metrics["comparisons"][0]["best_all_node_id"], "child")
         self.assertEqual(metrics["comparisons"][0]["best_bbox_iou"], 0.64)
         self.assertEqual(frozen, original)
+
+    def test_selection_discrepancy_is_reported_before_profile_failure(self):
+        audit = dict(
+            nodes=[
+                dict(
+                    observed_edge_count=1,
+                    boundary_status="PARTIAL",
+                    baseline_selected=False,
+                )
+            ]
+        )
+        weak = dict(comparisons=[dict(best_all_node_bbox_iou=0.72, best_bbox_iou=0.29)])
+        decision = _decision("synthetic", audit, dict(pairs=[]), weak)
+        self.assertEqual(decision["route"], "ROUTE_C")
+        self.assertEqual(
+            decision["first_bad_stage_hypothesis"], "HEIGHTMAP_CANDIDATE_SELECTION"
+        )
 
 
 if __name__ == "__main__":

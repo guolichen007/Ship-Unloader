@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -149,19 +150,25 @@ def _decision(scene, audit, fragments, weak):
         ROUTE_C="GENERALIZED_PROFILE_REQUIRED",
         ROUTE_D="INDEPENDENT_STRUCTURE_PROPOSAL_REQUIRED",
     )
-    first_bad = (
-        "HEIGHTMAP_TOPOLOGY_DECOMPOSITION"
-        if route == "ROUTE_D"
-        else (
-            "RAW_3D_STRUCTURAL_EVIDENCE_EXTRACTION"
-            if route == "ROUTE_C"
-            else (
-                "CANDIDATE_SELECTION"
-                if route == "ROUTE_A"
-                else "FRAGMENT_BOUNDARY_COMPLETION"
-            )
-        )
+    selected_vs_node_gap = max(
+        (
+            row["best_all_node_bbox_iou"] - row["best_bbox_iou"]
+            for row in (weak["comparisons"] if weak else [])
+            if row["best_all_node_bbox_iou"] is not None
+            and row["best_bbox_iou"] is not None
+        ),
+        default=0.0,
     )
+    if route == "ROUTE_D":
+        first_bad = "HEIGHTMAP_TOPOLOGY_DECOMPOSITION"
+    elif selected_vs_node_gap > 0.2:
+        first_bad = "HEIGHTMAP_CANDIDATE_SELECTION"
+    elif route == "ROUTE_C":
+        first_bad = "RAW_3D_STRUCTURAL_EVIDENCE_EXTRACTION"
+    elif route == "ROUTE_A":
+        first_bad = "CANDIDATE_SELECTION"
+    else:
+        first_bad = "FRAGMENT_BOUNDARY_COMPLETION"
     return dict(
         scene_id=scene,
         route=route,
@@ -246,6 +253,9 @@ def evaluate_run(run_root, manifest_path, data_root):
         run_root / "decision_matrix.json",
         dict(
             schema="ship_perception.v15r.height_structure_decision.1",
+            evaluator_git_sha=subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=str(REPO), text=True
+            ).strip(),
             evidence_only=True,
             decisions=decisions,
             next_stage="REVIEW_PROFILE_AND_SEGMENT_DECK_FAILURES_BEFORE_ALGORITHM_CHANGE",
