@@ -13,6 +13,7 @@ from ship_perception.r1_static.family_consensus import (
     role_from_zones,
 )
 from ship_perception.r1_static.family_reference import resolve_segment_reference
+from ship_perception.r1_static.family_reference_evaluator import compute_s4r1_gates
 from ship_perception.r1_static.family_reference_synthetic import run_synthetic_regression
 
 
@@ -108,6 +109,49 @@ class FamilyReference(unittest.TestCase):
         families_by_id = {}
         resolution = resolve_segment_reference([0], family_of, families_by_id, candidates, CONFIG)
         self.assertEqual(resolution["status"], "NO_LOCAL_REFERENCE_OBSERVATION")
+
+
+def _scene_stats(ambiguous, resolved, before, after, root_edges=0):
+    return dict(ambiguous_count=ambiguous, family_reference_resolved_count=resolved,
+                before_edge_count=before, after_edge_count=after,
+                node_evidence={"l03-c0002": {"observed_structural_edge_count": root_edges}})
+
+
+class S4R1GateHardening(unittest.TestCase):
+    def _stats(self, ambiguous, resolved, before, after, root_edges=0):
+        scenes = {"4-16": _scene_stats(ambiguous, resolved, before, after),
+                  "8-22": _scene_stats(ambiguous, resolved, before, after),
+                  "6-8": _scene_stats(ambiguous, resolved, before, after, root_edges=root_edges)}
+        return scenes
+
+    def test_gate_a_requires_majority_unlock(self):
+        synthetic = dict(overall="ALL_PASS")
+        # 5 of 10 is NOT a majority (5 > 5 is false) -> FAIL.
+        gates, first_bad, _ = compute_s4r1_gates(
+            self._stats(10, 5, 0, 10), synthetic)
+        self.assertFalse(gates["gate_a_4_16_8_22_majority_unlock"])
+        # 6 of 10 is a majority -> PASS.
+        gates, _, decision = compute_s4r1_gates(self._stats(10, 6, 0, 10), synthetic)
+        self.assertTrue(gates["gate_a_4_16_8_22_majority_unlock"])
+        self.assertEqual(decision, "PASS")
+
+    def test_gate_b_requires_per_scene_edge_gain(self):
+        synthetic = dict(overall="ALL_PASS")
+        gates, first_bad, _ = compute_s4r1_gates(self._stats(10, 6, 10, 10), synthetic)
+        self.assertFalse(gates["gate_b_observed_edges_increased"])
+        self.assertEqual(first_bad, "UNLOCKED_PROFILE_PRODUCED_NO_EDGE")
+        gates, _, decision = compute_s4r1_gates(self._stats(10, 6, 9, 48), synthetic)
+        self.assertTrue(gates["gate_b_observed_edges_increased"])
+
+    def test_gate_c_requires_root_zero_edges(self):
+        synthetic = dict(overall="ALL_PASS")
+        # root with 51 of 52 fake edges must FAIL.
+        gates, first_bad, _ = compute_s4r1_gates(self._stats(10, 6, 0, 10, root_edges=51), synthetic)
+        self.assertFalse(gates["gate_c_6_8_root_zero_edges"])
+        self.assertEqual(first_bad, "SIX_EIGHT_GIANT_ROOT_FALSE_COMPLETE")
+        gates, _, decision = compute_s4r1_gates(self._stats(10, 6, 0, 10, root_edges=0), synthetic)
+        self.assertTrue(gates["gate_c_6_8_root_zero_edges"])
+        self.assertEqual(decision, "PASS")
 
 
 if __name__ == "__main__":

@@ -226,12 +226,17 @@ def analyze_scene_s4r1(points, config, research, baseline_result):
             edge, rows = run_profile_for_segment(points, tree, segment, plane, config)
         else:
             rows = []
+        via_family = bool(not profile_before and
+                          resolution["status"] == "FAMILY_REFERENCE_RESOLVED")
         if edge is not None:
-            edge["via_family_reference"] = bool(
-                not profile_before and resolution["status"] == "FAMILY_REFERENCE_RESOLVED")
+            edge["node_id"] = entry["node_id"]
+            edge["seed_id"] = entry["seed_id"]
+            edge["via_family_reference"] = via_family
+            edge["reference_family_id"] = resolution["family_id"] if via_family else None
+            edge["reference_candidate_index"] = resolution["candidate_index"] if via_family else None
             edges.append(edge)
         segment_resolutions.append(dict(
-            node_id=entry["node_id"], segment_id=segment.segment_id,
+            node_id=entry["node_id"], seed_id=entry["seed_id"], segment_id=segment.segment_id,
             original_deck_status=deck["status"], candidate_count=len(entry["candidate_indexes"]),
             reference_family_id=resolution["family_id"],
             reference_resolution_status=(resolution["status"] if deck["status"] == "SEGMENT_DECK_AMBIGUOUS"
@@ -243,11 +248,16 @@ def analyze_scene_s4r1(points, config, research, baseline_result):
             profile_break_count=int(sum(1 for row in rows if row["valid"])),
             face_count=int(sum(1 for row in rows if row["face_position"] is not None)),
             line_fit_result=(edge["evidence_type"] if edge is not None else None),
+            profile_break_positions=[row["break_position"] for row in rows if row["valid"]],
+            face_positions=[row["face_position"] for row in rows
+                            if row["face_position"] is not None],
         ))
     narrow_strips = [dict(family_id=record["family_id"],
                           representative_normal=record["representative_normal"],
                           representative_offset=record["representative_offset"],
+                          node_ids=record["node_ids"],
                           member_segment_ids=record["segment_ids"],
+                          member_candidate_indexes=record["member_candidate_indexes"],
                           along_span_m=record["total_along_span"],
                           transverse_width_m=record["median_transverse_width"],
                           spatial_connectedness=record["spatial_connectedness"],

@@ -57,42 +57,8 @@ def evaluate_run_s4r1(run_root, synthetic_path):
             node_evidence=node_evidence,
         )
 
-    # Gate A: 4-16 and 8-22 each safely unlock at least 5 ambiguous segments.
-    gate_a = (scene_stats["4-16"]["family_reference_resolved_count"] >= 5 and
-              scene_stats["8-22"]["family_reference_resolved_count"] >= 5)
-    # Gate B: family-reference unlock actually produced new observed edges.
-    gate_b = sum(stats["new_edge_count"] for stats in scene_stats.values()) > 0
-    # Gate C: 6-8 giant root (selected node) not rescued into a complete perimeter.
-    root_edges = scene_stats["6-8"]["node_evidence"].get("l03-c0002", {}).get(
-        "observed_structural_edge_count", 0)
-    root_segments = scene_stats["6-8"]["node_evidence"].get("l03-c0002", {}).get(
-        "segment_count", 0)
-    gate_c = bool(root_segments == 0 or root_edges < root_segments)
-
     synthetic = json.loads(synthetic_path.read_text(encoding="utf-8"))
-    gate_d = synthetic.get("overall") == "ALL_PASS"
-    gate_e = True  # enforced in the batch: BASELINE004_BEHAVIOR_CHANGED raises.
-
-    gates = dict(
-        gate_a_4_16_8_22_unlock=gate_a,
-        gate_b_observed_edges_increased=gate_b,
-        gate_c_6_8_root_no_false_complete=gate_c,
-        gate_d_synthetic_regression=gate_d,
-        gate_e_baseline004_unchanged=gate_e,
-    )
-    if not gate_a:
-        first_bad = "REFERENCE_UNLOCK_INSUFFICIENT"
-    elif not gate_b:
-        first_bad = "UNLOCKED_PROFILE_PRODUCED_NO_EDGE"
-    elif not gate_c:
-        first_bad = "SIX_EIGHT_GIANT_ROOT_FALSE_COMPLETE"
-    elif not gate_d:
-        first_bad = "SYNTHETIC_REGRESSION_FAILED"
-    elif not gate_e:
-        first_bad = "BASELINE004_BEHAVIOR_CHANGED"
-    else:
-        first_bad = None
-    decision = "PASS" if all(gates.values()) else "FAIL"
+    gates, first_bad, decision = compute_s4r1_gates(scene_stats, synthetic)
     return dict(
         schema="ship_perception.v15r.s4r1_decision.1",
         evaluator_git_sha=subprocess.check_output(
@@ -105,6 +71,58 @@ def evaluate_run_s4r1(run_root, synthetic_path):
                              if key != "node_evidence"}
                      for scene, stats in scene_stats.items()},
     )
+
+
+def compute_s4r1_gates(scene_stats, synthetic):
+    """S4-R1 gates, tightened: majority unlock, per-scene edge gain, root==0.
+
+    ``scene_stats`` maps scene_id to a dict with ``ambiguous_count``,
+    ``family_reference_resolved_count``, ``before_edge_count``,
+    ``after_edge_count`` and ``node_evidence`` (node_id -> stats with
+    ``observed_structural_edge_count``).
+    """
+    def majority_unlocked(scene):
+        stats = scene_stats.get(scene, {})
+        resolved = stats.get("family_reference_resolved_count", 0)
+        ambiguous = stats.get("ambiguous_count", 0)
+        return ambiguous > 0 and resolved > ambiguous - resolved
+
+    # Gate A: 4-16 and 8-22 each have a strict majority of ambiguous segments
+    # safely unlocked (generic "majority unlock", no per-scene tuned ratio).
+    gate_a = majority_unlocked("4-16") and majority_unlocked("8-22")
+    # Gate B: 4-16 and 8-22 each gain observed edges after unlock.
+    gate_b = (scene_stats.get("4-16", {}).get("after_edge_count", 0) >
+              scene_stats.get("4-16", {}).get("before_edge_count", 0) and
+              scene_stats.get("8-22", {}).get("after_edge_count", 0) >
+              scene_stats.get("8-22", {}).get("before_edge_count", 0))
+    # Gate C: the known-wrong 6-8 giant root must produce zero observed edges.
+    root_edges = scene_stats.get("6-8", {}).get("node_evidence", {}).get(
+        "l03-c0002", {}).get("observed_structural_edge_count", 0)
+    gate_c = bool(root_edges == 0)
+    gate_d = synthetic.get("overall") == "ALL_PASS"
+    gate_e = True  # enforced in the batch: BASELINE004_BEHAVIOR_CHANGED raises.
+
+    gates = dict(
+        gate_a_4_16_8_22_majority_unlock=gate_a,
+        gate_b_observed_edges_increased=gate_b,
+        gate_c_6_8_root_zero_edges=gate_c,
+        gate_d_synthetic_regression=gate_d,
+        gate_e_baseline004_unchanged=gate_e,
+    )
+    if not gate_a:
+        first_bad = "REFERENCE_UNLOCK_NOT_MAJORITY"
+    elif not gate_b:
+        first_bad = "UNLOCKED_PROFILE_PRODUCED_NO_EDGE"
+    elif not gate_c:
+        first_bad = "SIX_EIGHT_GIANT_ROOT_FALSE_COMPLETE"
+    elif not gate_d:
+        first_bad = "SYNTHETIC_REGRESSION_FAILED"
+    elif not gate_e:
+        first_bad = "BASELINE004_BEHAVIOR_CHANGED"
+    else:
+        first_bad = None
+    decision = "PASS" if all(gates.values()) else "FAIL"
+    return gates, first_bad, decision
 
 
 def main():
