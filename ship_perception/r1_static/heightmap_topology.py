@@ -274,12 +274,46 @@ def _box_corners(node):
             ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
 
 
-def detect_regions(points, config, research):
+def detect_regions(points, config, research, *, forensic_trace=None):
     """Locate coarse height basins; selected regions are proposals, never observed steel."""
     points = np.asarray(points, dtype=np.float32)
     coarse = R1HeightGrid.from_points(points, config["geometry"]["coarse_voxel_m"])
     valid = coarse.count >= research["min_points_per_coarse_cell"]
     vessel = _vessel_support(valid)
+    if forensic_trace is not None:
+        closed = ndimage.binary_closing(valid, structure=np.ones((3, 3), dtype=bool)) | valid
+        labels, count = ndimage.label(closed, structure=np.ones((3, 3), dtype=bool))
+        sizes = np.bincount(labels.ravel(), minlength=count + 1)
+        point_rows, point_cols = coarse.cell_indices(points[:, :2])
+        inside_grid = ((point_rows >= 0) & (point_rows < labels.shape[0]) &
+                       (point_cols >= 0) & (point_cols < labels.shape[1]))
+        point_counts = np.bincount(labels[point_rows[inside_grid],
+                                          point_cols[inside_grid]], minlength=count + 1)
+        chosen_id = int(np.argmax(sizes[1:]) + 1) if count else None
+        components = []
+        for component_id, slices in enumerate(ndimage.find_objects(labels), 1):
+            if slices is None:
+                continue
+            rows, cols = slices
+            components.append(dict(
+                component_id=component_id,
+                cell_count=int(sizes[component_id]),
+                point_count=int(point_counts[component_id]),
+                support_area_m2=float(sizes[component_id] * coarse.cell_m ** 2),
+                bbox_xy=[float(coarse.x0 + cols.start * coarse.cell_m),
+                         float(coarse.y0 + rows.start * coarse.cell_m),
+                         float(coarse.x0 + cols.stop * coarse.cell_m),
+                         float(coarse.y0 + rows.stop * coarse.cell_m)],
+            ))
+        forensic_trace.update(raw_point_count=len(points),
+                              scene_connected_component_count=count,
+                              components=components,
+                              largest_only_selected_component=chosen_id,
+                              dropped_by_largest_component=[row["component_id"] for row in components
+                                                            if row["component_id"] != chosen_id],
+                              height_regions_before_global_filter=[],
+                              height_regions_after_global_filter=[],
+                              dropped_by_global_relative_score=[])
     if not np.any(vessel):
         return dict(schema_version="ship_perception.v15r.heightmap_regions.1",
                     status="NO_VESSEL_SUPPORT", coordinate_frame="RAW_INPUT_FRAME",
@@ -296,10 +330,20 @@ def detect_regions(points, config, research):
     _link_levels(groups)
     roots = [node for group in groups for node in group if node.parent is None]
     chosen = [selected for root in roots for selected in _choose(root, research)[0]]
+    if forensic_trace is not None:
+        forensic_trace["height_regions_before_global_filter"] = [
+            dict(node_id=node.node_id, score=float(node.score), bbox_xy=list(node.bbox_xy))
+            for node in chosen]
     if chosen:
         strongest = max(node.score for node in chosen)
         chosen = [node for node in chosen
                   if node.score >= strongest * research["minimum_relative_region_score"]]
+    if forensic_trace is not None:
+        kept = {node.node_id for node in chosen}
+        forensic_trace["height_regions_after_global_filter"] = [node.node_id for node in chosen]
+        forensic_trace["dropped_by_global_relative_score"] = [
+            row for row in forensic_trace["height_regions_before_global_filter"]
+            if row["node_id"] not in kept]
     chosen = _combine_fragments(chosen, coarse, valid, vessel, config, research)
     chosen.sort(key=lambda node: ((node.bbox_xy[0] + node.bbox_xy[2]) / 2,
                                   (node.bbox_xy[1] + node.bbox_xy[3]) / 2))

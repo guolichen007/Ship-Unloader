@@ -215,11 +215,24 @@ def _opening_relation(grid, normal_axis, rho, along_span, interior_sign, config)
 
 
 def _candidate_rectangle(
-    u0, u1, v0, v1, axes, modes, grid, config, node_id, forbidden_axial
+    u0, u1, v0, v1, axes, modes, grid, config, node_id, forbidden_axial,
+    forensic_trace=None,
 ):
+    def account(reason, **metrics):
+        if forensic_trace is not None:
+            record = dict(
+                node_id=node_id, rho=[float(u0), float(u1), float(v0), float(v1)],
+                reject_reason=reason, observed_side_count=None, strong_side_count=None,
+                majority_supported_side_count=None, dual_return_side_count=None,
+                structural_side_count=None, canonical_side_count=None,
+                geometry_constrained_side_count=None)
+            record.update(metrics)
+            forensic_trace.setdefault("candidate_attempts", []).append(record)
+
     # Both side probes must fit inside a resolved opening. This is an evidence
     # resolution condition, not a hatch dimension or aspect-ratio prior.
     if min(u1 - u0, v1 - v0) <= 2 * config["boundary"]["side_probe_m"]:
+        account("DEGENERATE_PROBE_GEOMETRY")
         return None
     for mode in modes[0]:
         if not (
@@ -237,6 +250,7 @@ def _candidate_rectangle(
                 _interval_coverage(internal, v0, v1)
                 >= config["roi"]["min_enclosure_ratio"]
             ):
+                account("INTERNAL_STRUCTURAL_SEPARATOR")
                 return None
         else:
             measured_fraction = min(1.0, len(inside) * mode["cell_m"] / (v1 - v0))
@@ -253,6 +267,7 @@ def _candidate_rectangle(
                 if other["kind"] == "STRUCTURAL"
             )
             if structural_crossbeam:
+                account("INTERNAL_STRUCTURAL_CROSSBEAM")
                 return None
             relation = _opening_relation(grid, 0, mode["rho"], (v0, v1), 1, config)
             near = relation["outside_minus_inside_m"]
@@ -266,6 +281,7 @@ def _candidate_rectangle(
                 and min(relation["support_fraction"], relation["far_support_fraction"])
                 >= config["roi"]["min_enclosure_ratio"]
             ):
+                account("INTERNAL_RASTER_TRANSITION")
                 return None
     side_specs = (
         ("U0", 0, u0, (v0, v1), 1),
@@ -299,13 +315,19 @@ def _candidate_rectangle(
                 conflicts += 1
         sides.append(support)
     if conflicts:
+        account("FORBIDDEN_REFERENCE_ROLE", role_conflict_side_count=conflicts)
         return None
     observed = sum(side["evidence_level"] != "UNRESOLVED" for side in sides)
     structural = sum(side["structural_coverage"] > 0 for side in sides)
     if observed < 3 or structural < 1:
+        account("INSUFFICIENT_OBSERVED_OR_STRUCTURAL_SIDES",
+                observed_side_count=observed, structural_side_count=structural)
         return None
     weak = sum(side["evidence_level"] == "UNRESOLVED" for side in sides)
     if weak > config["boundary"]["max_inferred_edges"]:
+        account("TOO_MANY_GEOMETRY_CONSTRAINED_SIDES",
+                observed_side_count=observed, structural_side_count=structural,
+                geometry_constrained_side_count=weak)
         return None
     for side in sides:
         if side["evidence_level"] == "UNRESOLVED":
@@ -339,8 +361,14 @@ def _candidate_rectangle(
         value >= config["roi"]["min_enclosure_ratio"] for value in side_strength
     )
     majority_supported = sum(value >= 0.5 for value in side_strength)
+    metrics = dict(observed_side_count=observed, strong_side_count=strong,
+                   majority_supported_side_count=majority_supported,
+                   dual_return_side_count=dual_return, structural_side_count=structural,
+                   canonical_side_count=canonical, geometry_constrained_side_count=weak)
     if strong < 4 or majority_supported < 3 or dual_return < 4:
+        account("FINAL_FOUR_SIDE_ACCEPTANCE_GATE", **metrics)
         return None
+    account("ACCEPTED_PROPOSAL", **metrics)
     local = sum(node_id in side["structural_node_ids"] for side in sides)
     # Height is only a ranking cue. A cargo-filled opening with reversed
     # height contrast remains eligible when its structural evidence survives.
@@ -404,7 +432,7 @@ def _spread_modes(rows, span, rank):
     ]
 
 
-def solve(points, segments, edges, height_regions, config):
+def solve(points, segments, edges, height_regions, config, *, forensic_trace=None):
     """Fuse 3D lines and RawXYZ rasters; return reviewable provisional polygons."""
     forbidden = {
         row["segment_id"]
@@ -415,6 +443,10 @@ def solve(points, segments, edges, height_regions, config):
         [edge for edge in edges if edge.get("segment_id") not in forbidden],
         2 * config["boundary"]["merge_angle_deg"],
     )
+    if forensic_trace is not None:
+        forensic_trace["height_region_input_count"] = len(height_regions)
+        forensic_trace["global_structural_axes"] = (
+            [axis.tolist() for axis in axes] if axes is not None else None)
     if axes is None:
         return dict(
             status="STRUCTURAL_AXES_UNRESOLVED",
@@ -509,6 +541,7 @@ def solve(points, segments, edges, height_regions, config):
                             config,
                             node["node_id"],
                             forbidden_axial,
+                            forensic_trace=forensic_trace,
                         )
                         if candidate is not None:
                             proposals.append(candidate)
