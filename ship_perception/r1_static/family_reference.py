@@ -237,6 +237,10 @@ def analyze_scene_s4r1(points, config, research, baseline_result):
             edges.append(edge)
         segment_resolutions.append(dict(
             node_id=entry["node_id"], seed_id=entry["seed_id"], segment_id=segment.segment_id,
+            segment_start_xy=list(map(float, segment.rough_start)),
+            segment_end_xy=list(map(float, segment.rough_end)),
+            segment_tangent=list(map(float, segment.tangent)),
+            segment_outward_normal=list(map(float, segment.outward_normal)),
             original_deck_status=deck["status"], candidate_count=len(entry["candidate_indexes"]),
             reference_family_id=resolution["family_id"],
             reference_resolution_status=(resolution["status"] if deck["status"] == "SEGMENT_DECK_AMBIGUOUS"
