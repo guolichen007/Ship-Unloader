@@ -347,15 +347,17 @@ def _candidate_rectangle(
     score = (
         strong,
         dual_return,
-        round((u1 - u0) * (v1 - v0), 3),
+        # Coarse proposal topology: prefer a resolved enclosure over a thin
+        # crossbeam/cargo strip. R2G final side selection never ranks area.
+        round(min(u1 - u0, v1 - v0), 3),
         canonical,
         round(min(side_strength), 3),
-        relation - adverse,
         multi,
         structural,
         round(structural_coverage, 3),
         local,
         round(raster, 3),
+        relation - adverse,
         -weak,
     )
     status = (
