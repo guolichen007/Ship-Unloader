@@ -4,39 +4,19 @@ Expected failures remain visible until R2H-B provides an evidence-backed scene
 and proposal layer. Passing tests assert that ambiguity stays unconfirmed.
 """
 
+import json
+import math
 import unittest
 
 import numpy as np
-from scipy import ndimage
 
-from ship_perception.r1_static.boundary_topology import structural_axes
-from ship_perception.r1_static.heightmap_topology import _vessel_support
 from ship_perception.r1_static.heightmap_topology import detect_regions
 from ship_perception.r1_static.heightmap_batch import RESEARCH_CONFIG
-from ship_perception.r1_static.r2h_scene_forensics import axis_families
 from ship_perception.r1_static.rectangle_fusion import solve
 from ship_perception.r1_static.rectangle_refinement import _ship_width_consensus
+from ship_perception.r1_static.scene_vessel import infer_scene_vessels
 from ship_perception.tests.test_r1_boundary_topology import CONFIG, rectangle_case
 from ship_perception.tests.test_r1_rectangle_fusion import raw_scene
-import json
-
-
-def islands(*, count=2, bridge=False, wharf=False):
-    valid = np.zeros((24, 75), dtype=bool)
-    for index in range(count):
-        valid[5:16, 4 + 22 * index:17 + 22 * index] = True
-    if bridge:
-        valid[10, 17:26] = True
-    if wharf:
-        valid[17:23, 0:75] = True
-    return valid
-
-
-def edge(angle_deg, node, x):
-    angle = np.radians(angle_deg)
-    return dict(node_id=node, a_raw=[x, 0, 0],
-                b_raw=[x + 15 * np.cos(angle), 15 * np.sin(angle), 0],
-                observed_support_length=15.0)
 
 
 def strong_hatch(width, vessel_id, x):
@@ -44,6 +24,26 @@ def strong_hatch(width, vessel_id, x):
     return dict(vessel_hypothesis_id=vessel_id, polygon_xy=polygon,
                 sides=[dict(side_id=key, structural_coverage=1.0, raster_coverage=1.0)
                        for key in ("U0", "U1", "V0", "V1")])
+
+
+def vessel_cloud(cx, cy, angle_deg=0, step=.2, gap=False):
+    longitudinal, transverse = np.meshgrid(np.arange(-20, 20, step),
+                                            np.arange(-6, 6, step))
+    longitudinal, transverse = longitudinal.ravel(), transverse.ravel()
+    keep = np.abs(longitudinal) > 1 if gap else np.ones(len(longitudinal), bool)
+    longitudinal, transverse = longitudinal[keep], transverse[keep]
+    rim = (np.abs(longitudinal) > 19.2) | (np.abs(transverse) > 5.2)
+    angle = math.radians(angle_deg)
+    return np.column_stack((cx + longitudinal * math.cos(angle) - transverse * math.sin(angle),
+                            cy + longitudinal * math.sin(angle) + transverse * math.cos(angle),
+                            rim.astype(float))).astype(np.float32)
+
+
+def scene_hypotheses(points):
+    research = json.loads(RESEARCH_CONFIG.read_text(encoding="utf-8"))
+    result, _ = infer_scene_vessels(points, CONFIG, research)
+    return result, [row for row in result["vessel_hypotheses"]
+                    if row["classification_status"] == "VESSEL_HYPOTHESIS"]
 
 
 class SceneCounterexamples(unittest.TestCase):
@@ -64,39 +64,51 @@ class SceneCounterexamples(unittest.TestCase):
         self.assertEqual(ordinary["rectangles"], audited["rectangles"])
         self.assertTrue(candidate_trace["candidate_attempts"])
 
-    @unittest.expectedFailure
     def test_two_parallel_vessels_are_not_largest_only(self):
-        valid = islands()
-        self.assertEqual(int((_vessel_support(valid) & valid).sum()), int(valid.sum()))
+        result, vessels = scene_hypotheses(np.vstack((vessel_cloud(0, 0),
+                                                     vessel_cloud(0, 20))))
+        self.assertEqual(len(vessels), 2)
+        self.assertEqual(result["target_vessel_status"], "NOT_SELECTED")
 
-    @unittest.expectedFailure
     def test_two_different_yaw_vessels_have_two_local_axes(self):
-        axes = structural_axes([edge(0, "a", 0), edge(20, "b", 35)], 4)
-        self.assertEqual(len(axes), 4)  # two orthogonal pairs required downstream
+        _, vessels = scene_hypotheses(np.vstack((vessel_cloud(0, 0),
+                                                 vessel_cloud(0, 23, angle_deg=20))))
+        self.assertEqual(len(vessels), 2)
+        angles = [math.degrees(math.atan2(row["local_axes"][0][1],
+                                             row["local_axes"][0][0])) for row in vessels]
+        self.assertAlmostEqual(min(angles), 0, delta=2)
+        self.assertAlmostEqual(max(angles), 20, delta=2)
 
-    @unittest.expectedFailure
     def test_three_vessels_unequal_density_retain_all_support(self):
-        valid = islands(count=3)
-        valid[5:13, 48:61] = False
-        self.assertEqual(int((_vessel_support(valid) & valid).sum()), int(valid.sum()))
+        _, vessels = scene_hypotheses(np.vstack((vessel_cloud(0, 0),
+                                                 vessel_cloud(0, 20, step=.3),
+                                                 vessel_cloud(0, 40, step=.25))))
+        self.assertEqual(len(vessels), 3)
 
-    @unittest.expectedFailure
     def test_wharf_larger_than_vessel_cannot_select_target(self):
-        valid = islands(wharf=True)
-        selected = _vessel_support(valid)
-        self.assertTrue(selected[10, 10])
-        self.assertFalse(selected[20, 10])
+        x, y = np.meshgrid(np.arange(30, 95, .2), np.arange(-20, 20, .2))
+        wharf = np.column_stack((x.ravel(), y.ravel(), np.ones(x.size))).astype(np.float32)
+        result, vessels = scene_hypotheses(np.vstack((wharf, vessel_cloud(0, 0))))
+        self.assertGreater(len(wharf), len(vessel_cloud(0, 0)))
+        self.assertEqual(len(vessels), 1)
+        self.assertLess(vessels[0]["bbox_xy"][2], 30)
+        self.assertEqual(result["target_vessel_status"], "NOT_SELECTED")
+        self.assertTrue(any(row["classification_status"] == "UNRESOLVED"
+                            for row in result["vessel_hypotheses"]))
 
-    @unittest.expectedFailure
     def test_one_vessel_split_components_keeps_both_halves(self):
-        valid = islands()
-        self.assertEqual(int((_vessel_support(valid) & valid).sum()), int(valid.sum()))
+        result, vessels = scene_hypotheses(vessel_cloud(0, 0, gap=True))
+        self.assertEqual(len(result["scene_support_candidates"]), 2)
+        self.assertEqual(len(vessels), 1)
+        self.assertEqual(len(vessels[0]["source_support_ids"]), 2)
 
-    @unittest.expectedFailure
     def test_two_vessels_noise_bridge_is_not_semantic_merge(self):
-        valid = islands(bridge=True)
-        labels, count = ndimage.label(valid, structure=np.ones((3, 3), bool))
-        self.assertEqual(count, 2)
+        bridge = np.column_stack((np.zeros(160), np.arange(6, 14, .05),
+                                  np.zeros(160))).astype(np.float32)
+        result, vessels = scene_hypotheses(np.vstack((vessel_cloud(0, 0),
+                                                     vessel_cloud(0, 20), bridge)))
+        self.assertEqual(len(vessels), 2)
+        self.assertEqual(result["target_vessel_status"], "NOT_SELECTED")
 
     @unittest.expectedFailure
     def test_height_provider_miss_keeps_raw_proposal(self):
@@ -156,11 +168,12 @@ class SceneCounterexamples(unittest.TestCase):
         result = solve(points, segments, edges, regions, CONFIG)
         self.assertFalse(result["rectangles"])
 
-    @unittest.expectedFailure
     def test_no_cross_vessel_axis_leak(self):
-        edges = [edge(0, "a", 0), edge(18, "b", 30)]
-        self.assertEqual(len(axis_families(edges)), 2)
-        self.assertEqual(len(structural_axes(edges, 4)), 4)
+        _, vessels = scene_hypotheses(np.vstack((vessel_cloud(0, 0),
+                                                 vessel_cloud(0, 23, angle_deg=20))))
+        self.assertEqual(len(vessels), 2)
+        self.assertGreater(abs(vessels[0]["local_axes"][0][1] -
+                               vessels[1]["local_axes"][0][1]), .25)
 
     @unittest.expectedFailure
     def test_no_cross_vessel_width_leak(self):
