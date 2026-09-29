@@ -2,12 +2,15 @@
 
 import unittest
 
+import numpy as np
+
 
 from ship_perception.r1_static.corner_topology import (
     _section_rho_modes, arbitrate_unresolved_side, solve_three_corners,
 )
 from ship_perception.r1_static.corner_topology_review import _initial_seed_groups
 from ship_perception.r1_static.run import DEFAULT_CONFIG, resolve_config
+from ship_perception.r1_static.static_showcase import classify_review_points
 
 
 CONFIG, _ = resolve_config(DEFAULT_CONFIG)
@@ -94,6 +97,15 @@ class B5R1Precision(unittest.TestCase):
         corners[1]["local_u_persistence"]["level_count"] = 0
         corners[2]["local_u_persistence"]["level_count"] = 0
         self.assertEqual(solve_three_corners(corners)["state"], "UNRESOLVED")
+
+    def test_showcase_categories_are_geometric_review_only(self):
+        points = np.asarray([[1, 1, 0], [.02, 1, 0], [3, 1, 0], [-2, -2, 0]])
+        polygon = [[0, 0], [2, 0], [2, 2], [0, 2]]
+        report = dict(vessels=[dict(vessel_hypothesis_id="V0000",
+                                    rectangles=[dict(polygon_after=polygon)])])
+        private = dict(vessel_point_indexes={"V0000": np.asarray([0, 1, 2])})
+        categories = classify_review_points(points, private, report, np.eye(2), CONFIG)
+        self.assertEqual(categories.tolist(), [3, 4, 2, 1])
 
 
 

@@ -16,6 +16,7 @@ from .rectangle_refinement_review import _read_validation_xyz
 from .run import DEFAULT_CONFIG, _atomic_json, resolve_config
 from .r2h_b5_corner_forensics import _observations, _side_modes
 from .scene_vessel import infer_scene_vessels
+from .static_showcase import render_showcase
 from .vessel_height_topology import build_vessel_scoped_topview
 
 
@@ -499,6 +500,8 @@ def main():
     parser.add_argument("--b2-root", type=Path, required=True)
     parser.add_argument("--b4-root", type=Path)
     parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--showcase-root", type=Path,
+                        help="Optional Chinese review figures, JSON and sampled color PLY")
     args = parser.parse_args()
     config, _ = resolve_config(DEFAULT_CONFIG)
     research = json.loads(RESEARCH_CONFIG.read_text(encoding="utf8"))
@@ -513,6 +516,9 @@ def main():
         report["png_outputs"] = (render(name, report, points, private, b4, config, output)
                                  if b4 is not None else
                                  render_holdout(report, points, private, b2, output, config))
+        if args.showcase_root:
+            report["showcase_outputs"] = render_showcase(
+                report, points, private, b2, config, args.showcase_root / name)
         _atomic_json(output / "corner_topology.json", report)
         print(name, [(v["vessel_hypothesis_id"], len(v["rectangles"]),
                       v.get("selected_pair")) for v in report["vessels"]], flush=True)
