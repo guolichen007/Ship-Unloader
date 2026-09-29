@@ -5,7 +5,8 @@ import unittest
 import numpy as np
 
 from ship_perception.r1_static.corner_topology import (
-    _corner, _merge_candidates, _side_rank, _strip_relation,
+    _corner, _merge_candidates, _pair_rank, _side_rank, _strip_relation,
+    _upper_multimode_conflict,
     solve_three_corners,
 )
 from ship_perception.r1_static.raw_topview_evidence import build_topview
@@ -76,6 +77,47 @@ class B5CornerTopology(unittest.TestCase):
         rank = _side_rank(_mode(5, raw=1, bev=1), relation, 5, CONFIG, "V1")
         self.assertEqual(rank[0], 0)
 
+    def test_parallel_inner_mode_cannot_win_only_by_more_raw_points(self):
+        opening_onset = dict(opening_one_sided=True, interior_ridge=False,
+                             boundary_asymmetry=.97)
+        deeper_mode = dict(opening_one_sided=True, interior_ridge=False,
+                           boundary_asymmetry=.65)
+        edge = _side_rank(_mode(4.5, raw=.55, bev=.52),
+                          opening_onset, 2.0, CONFIG, "V0")
+        deep = _side_rank(_mode(4.9, raw=1, bev=.68),
+                          deeper_mode, 2.0, CONFIG, "V0")
+        self.assertGreater(edge, deep)
+
+    def test_upper_rim_prefers_measured_persistent_contour_position(self):
+        relation = dict(opening_one_sided=False, interior_ridge=False,
+                        boundary_asymmetry=.1)
+        near = _mode(17.23, height=4, raw=1, bev=.6)
+        near["height_distance_m"] = .05
+        near["height_rho_m"] = 17.28
+        far = _mode(17.50, height=4, raw=1, bev=.6)
+        far["height_distance_m"] = .22
+        far["height_rho_m"] = 17.28
+        self.assertGreater(_side_rank(near, relation, 17.1, CONFIG, "V1"),
+                           _side_rank(far, relation, 17.1, CONFIG, "V1"))
+
+    def test_nearer_persistent_family_beats_outer_hull_family(self):
+        relation = dict(opening_one_sided=False, interior_ridge=True,
+                        boundary_asymmetry=0)
+        inner = _mode(13.04, height=2, raw=1, bev=.8)
+        inner.update(height_rho_m=13.07, height_distance_m=.03)
+        outer = _mode(15.09, height=4, raw=1, bev=.8)
+        outer.update(height_rho_m=15.10, height_distance_m=.01)
+        self.assertGreater(_side_rank(inner, relation, 13.45, CONFIG, "V1"),
+                           _side_rank(outer, relation, 13.45, CONFIG, "V1"))
+
+    def test_two_loaded_upper_height_families_require_review(self):
+        modes = [dict(rho=13.07, level_count=2),
+                 dict(rho=15.10, level_count=4)]
+        candidates = [dict(evidence_rank=[1], height_level_count=2,
+                           opening_relation=dict(interior_ridge=True))]
+        self.assertTrue(_upper_multimode_conflict(modes, candidates, CONFIG))
+        self.assertFalse(_upper_multimode_conflict(modes[:1], candidates, CONFIG))
+
     def test_three_corners_are_partial_with_inferred_fourth(self):
         roles = ["MEASURED_INTERSECTION_CANDIDATE"] * 3
         corners = [_corner_row(0, 0, roles[0]),
@@ -86,6 +128,18 @@ class B5CornerTopology(unittest.TestCase):
         self.assertEqual(result["state"], "PARTIAL_HATCH_3C")
         self.assertEqual(result["inferred_corner"], [0, 8])
         self.assertEqual(result["inferred_role"], "INFERRED_GEOMETRIC_CORNER")
+
+    def test_three_physical_corners_beat_four_on_an_inner_parallel_mode(self):
+        three = [_corner_row(u, v, "MEASURED_INTERSECTION_CANDIDATE")
+                 for u, v in ((0, 0), (10, 0), (10, 8))]
+        three.append(_corner_row(0, 8, "UNRESOLVED_CORNER"))
+        four = [_corner_row(u, v, "MEASURED_INTERSECTION_CANDIDATE")
+                for u, v in ((0, 0), (10, 0), (10, 8), (0, 8))]
+        upper = dict(evidence_rank=[1, 2, 0])
+        onset = dict(evidence_rank=[1, 1, .97])
+        inner = dict(evidence_rank=[1, 1, .65])
+        self.assertGreater(_pair_rank(onset, upper, [three]),
+                           _pair_rank(inner, upper, [four]))
 
     def test_shared_separator_three_corners_preserves_unequal_cells(self):
         shared_u = 7

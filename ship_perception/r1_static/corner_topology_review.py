@@ -128,12 +128,21 @@ def render(name, report, points, private, b4, config, output):
 
     fig, ax = plt.subplots(figsize=(16, 6))
     draw_grid(ax, masked, "Persistent height contours and B2 line modes")
+    summary = "V0 " + ", ".join(f"{row['rho']:.2f}" for row in target["v0_candidates"][:5])
+    summary += "  |  V1 " + ", ".join(f"{row['rho']:.2f}" for row in target["v1_candidates"][:5])
+    detail = ("Orange: selected pair" if target.get("selected_pair") else
+              "No pair selected: B4 retained")
+    ax.set_title(summary + "\n" + detail + "; dashed: alternative measured modes")
     for mode in target["height_topology"]["modes"][1]:
         ax.axhline(mode["rho"], color="yellow", alpha=.5,
                    lw=1 + mode["level_count"] / 3)
-    for mode in target["v0_candidates"] + target["v1_candidates"]:
-        if min(mode["primary_raw3d"], mode["primary_bev"]) >= config["roi"]["min_enclosure_ratio"]:
-            ax.axhline(mode["rho"], color="cyan", alpha=.12, lw=.6)
+    for label, color in (("v0_candidates", "#ffb15e"),
+                         ("v1_candidates", "#70d9ff")):
+        for mode in target[label][:6]:
+            ax.axhline(mode["rho"], color=color, alpha=.45, lw=.9, ls="--")
+    if target.get("selected_pair"):
+        for key in ("v0", "v1"):
+            ax.axhline(target["selected_pair"][key], color="orange", lw=2)
     for mode in target["u_boundary_chain"]:
         ax.axvline(mode["rho"], color="magenta", lw=.8)
     for row in target["height_topology"]["persistent_corners"]:
@@ -162,7 +171,8 @@ def render(name, report, points, private, b4, config, output):
     save(fig, [ax], "C_corner_graph")
 
     fig, ax = plt.subplots(figsize=(16, 6))
-    draw_grid(ax, masked, "B4 before (white) / B5 candidate (orange)")
+    draw_grid(ax, masked, "B4 before (white) / B5 review (orange)" +
+              (" — B4 retained" if target.get("selected_pair") is None else ""))
     for row in target["rectangles"]:
         plot_box(ax, row["polygon_before"], "white", 1, "B4" if row is target["rectangles"][0] else None)
         plot_box(ax, row["polygon_after"], "orange", 2, "B5" if row is target["rectangles"][0] else None)

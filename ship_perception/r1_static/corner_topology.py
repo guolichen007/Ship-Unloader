@@ -98,13 +98,17 @@ def _side_rank(row, relation, old_rho, config, side):
     dual = min(row["primary_raw3d"], row["primary_bev"])
     height = row["height_level_count"] >= 2
     footprint = row.get("support_limit_validated", False)
-    # A height contour is independent of B2 provider ownership. A cargo ridge
-    # with occupied opening on both sides is not a candidate boundary.
-    # The spatially repeated two-sided contour resolves a narrow rim even if
-    # a broad median strip averages it with cargo on both sides.
+    # Height topology is independent of B2 provider ownership. A contour with
+    # continuous cargo on both sides needs a unique spatial family; several
+    # plausible upper families are withheld by _upper_multimode_conflict.
     viable = (height or footprint or
               (relation["opening_one_sided"] and not relation["interior_ridge"] and
                dual >= minimum))
+    if (side == "V0" and relation["interior_ridge"] and
+            abs(row["rho"] - old_rho) > config["boundary"]["corner_join_m"]):
+        # A loaded hold can show a persistent cargo contour on both sides.
+        # Without an opening/outside transition it cannot move the lower rim.
+        viable = False
     if side == "V0":
         # The lower support limit distinguishes the vessel from the shore.
         # An old measured side may be retained when independent B1 topology
@@ -121,10 +125,14 @@ def _side_rank(row, relation, old_rho, config, side):
         int(height),
         int(dual >= minimum),
         int(footprint),
+        -round(abs(row["height_rho_m"] - old_rho), 3)
+        if side == "V1" and height else 0.0,
+        -round(row.get("height_distance_m") or 0.0, 3)
+        if side == "V1" and height else 0.0,
+        round(relation["boundary_asymmetry"], 3),
+        -round(abs(row["rho"] - old_rho), 3),
         round(min(dual, 1.0), 3),
         round(row["height_coverage"], 3),
-        -round(abs(row["rho"] - old_rho), 3),
-        round(relation["boundary_asymmetry"], 3),
     )
 
 
@@ -319,6 +327,34 @@ def _side_provenance(mode, config):
     return "GEOMETRY_CONSTRAINED_EDGE"
 
 
+def _pair_rank(lower, upper, cells):
+    unique = {tuple(c["corner_xy"]): c for cell in cells for c in cell}
+    supported = sum(c["role"] != "UNRESOLVED_CORNER" for c in unique.values())
+    measured = sum(c["role"] == "MEASURED_INTERSECTION_CANDIDATE"
+                   for c in unique.values())
+    min_cell = min(sum(c["role"] != "UNRESOLVED_CORNER" for c in cell)
+                   for cell in cells)
+    if min_cell < 3:
+        return None
+    # Rank physical edge evidence before fourth-corner completeness. Three
+    # independently supported corners geometrically close the rectangle.
+    return (tuple(lower["evidence_rank"]), tuple(upper["evidence_rank"]),
+            min_cell, supported, measured)
+
+
+def _upper_multimode_conflict(height_modes, upper_candidates, config):
+    """Fail closed when loaded cargo supports several unseparated top rims."""
+    persistent = sorted(row["rho"] for row in height_modes if row["level_count"] >= 2)
+    distinct = []
+    for rho in persistent:
+        if not distinct or rho - distinct[-1] > config["boundary"]["corner_join_m"]:
+            distinct.append(rho)
+    viable = [row for row in upper_candidates if row["evidence_rank"][0] and
+              row["height_level_count"] >= 2]
+    return bool(len(distinct) >= 2 and viable and all(
+        row["opening_relation"]["interior_ridge"] for row in viable))
+
+
 def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config):
     """Solve shared U chain and V rows using vessel-owned height and B2 lines."""
     hatches = [row for row in b4["rectangles"] if row.get("vessel_hypothesis_id") == vessel_id
@@ -438,19 +474,15 @@ def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config):
         cells = [[cached_corner(left, lower, 2), cached_corner(right, lower, 3),
                   cached_corner(right, upper, 0), cached_corner(left, upper, 1)]
                  for left, right in zip(u_chain, u_chain[1:])]
-        unique = {(round(c["corner_xy"][0], 3), round(c["corner_xy"][1], 3)): c
-                  for cell in cells for c in cell}
-        supported = sum(c["role"] != "UNRESOLVED_CORNER" for c in unique.values())
-        measured = sum(c["role"] == "MEASURED_INTERSECTION_CANDIDATE" for c in unique.values())
-        min_cell = min(sum(c["role"] != "UNRESOLVED_CORNER" for c in cell) for cell in cells)
-        score = (tuple(lower["evidence_rank"][:2]),
-                 tuple(upper["evidence_rank"][:2]),
-                 min_cell, supported, measured,
-                 min(lower["evidence_rank"], upper["evidence_rank"]),
-                 max(lower["evidence_rank"], upper["evidence_rank"]))
+        score = _pair_rank(lower, upper, cells)
+        if score is None:
+            continue
         pairs.append((score, lower, upper, cells))
     pairs.sort(key=lambda row: row[0], reverse=True)
-    chosen = pairs[0] if pairs else None
+    blocker = ("MULTIPLE_PERSISTENT_UPPER_RIM_FAMILIES" if
+               _upper_multimode_conflict(height["modes"][1], candidates["V1"], config)
+               else None)
+    chosen = pairs[0] if pairs and blocker is None else None
     ordered = sorted(zip(hatches, bounds), key=lambda pair: pair[1][0])
     outputs = []
     for index, (hatch, old_box) in enumerate(ordered):
@@ -484,13 +516,16 @@ def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config):
                              rho_after=bounds_after[0 if key == "U0" else
                                                    2 if key == "U1" else
                                                    1 if key == "V0" else 3],
-                             role=_side_provenance(side_modes[key], config) if side_modes[key] else
-                                  "GEOMETRY_CONSTRAINED_EDGE",
-                             selected_source_vessel_ids=[vessel_id] if side_modes[key] and
+                             role=("B4_UNCHANGED_UNRESOLVED" if geometry["state"] ==
+                                   "UNRESOLVED" else
+                                   _side_provenance(side_modes[key], config) if
+                                   side_modes[key] else "GEOMETRY_CONSTRAINED_EDGE"),
+                             selected_source_vessel_ids=[vessel_id] if
+                             geometry["state"] != "UNRESOLVED" and side_modes[key] and
                              min(side_modes[key]["primary_raw3d"],side_modes[key]["primary_bev"])
                              >= config["roi"]["min_enclosure_ratio"] else [],
                              height_level_count=side_modes[key]["height_level_count"] if
-                             side_modes[key] else 0)
+                             geometry["state"] != "UNRESOLVED" and side_modes[key] else 0)
                    for key in SIDES},
         ))
     # Lineage is assigned after the independent opening cells exist.
@@ -524,6 +559,7 @@ def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config):
                          for row in pairs[:10]],
         selected_pair=(dict(v0=chosen[1]["rho"],v1=chosen[2]["rho"],
                             score=str(chosen[0])) if chosen else None),
+        selection_blocker=blocker,
         shared_separator=(u_chain[1]["rho"] if len(u_chain) == 3 else None),
         lineage=lineage,
         rectangles=outputs,
