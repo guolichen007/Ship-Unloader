@@ -92,6 +92,28 @@ def _strip_relation(grid, rho, span, axis, inside_sign, config):
     )
 
 
+def _section_consensus(grid, rho, span, axis, inside_sign, config):
+    """Measure the same physical transition in independent occupied sections."""
+    edges = np.linspace(span[0], span[1], 6)
+    sections = []
+    for start, end in zip(edges[:-1], edges[1:]):
+        # _strip_relation omits the corner margin, so extend this local span.
+        margin = config["boundary"]["corner_join_m"]
+        relation = _strip_relation(grid, rho, (start - margin, end + margin),
+                                   axis, inside_sign, config)
+        if max(relation["inside_occupancy_fraction"],
+               relation["outside_occupancy_fraction"]) < config["roi"]["min_enclosure_ratio"]:
+            continue
+        sections.append(dict(start_m=float(start), end_m=float(end), **relation))
+    transitions = sum(row["opening_one_sided"] for row in sections)
+    ridges = sum(row["interior_ridge"] for row in sections)
+    return dict(section_count=len(sections), transition_count=transitions,
+                internal_ridge_section_count=ridges,
+                left_endpoint_support=bool(sections and sections[0]["opening_one_sided"]),
+                right_endpoint_support=bool(sections and sections[-1]["opening_one_sided"]),
+                sections=sections)
+
+
 def _side_rank(row, relation, old_rho, config, side):
     """Lexicographic evidence; no area, width or larger-rho reward."""
     minimum = config["roi"]["min_enclosure_ratio"]
@@ -121,6 +143,8 @@ def _side_rank(row, relation, old_rho, config, side):
     return (
         int(viable),
         boundary_class,
+        row.get("section_consensus", {}).get("transition_count", 0),
+        -row.get("section_consensus", {}).get("internal_ridge_section_count", 0),
         int(relation["opening_one_sided"]),
         int(height),
         int(dual >= minimum),
@@ -152,6 +176,8 @@ def _enrich_side(rows, grid, span, axis, sign, old_rho, config, side, support_li
             support_limit <= row["rho"] <= support_limit + config["roi"]["support_search_m"] / 4 and
             min(row["primary_raw3d"], row["primary_bev"]) >= minimum)
         row["opening_relation"] = _strip_relation(grid, row["rho"], span, axis, sign, config)
+        row["section_consensus"] = _section_consensus(
+            grid, row["rho"], span, axis, sign, config)
         row["evidence_rank"] = list(_side_rank(
             row, row["opening_relation"], old_rho, config, side))
         result.append(row)
@@ -289,9 +315,17 @@ def solve_three_corners(corners):
     positions = {tuple(row["corner_xy"]) for row in valid}
     if len(positions) < 3:
         return dict(state="UNRESOLVED", inferred_corner=None)
-    independently_supported = sum(row["role"] in (
-        "MEASURED_INTERSECTION_CANDIDATE", "HEIGHT_TOPOLOGY_CORNER") for row in valid)
-    if independently_supported < 2:
+    measured = sum(row["role"] == "MEASURED_INTERSECTION_CANDIDATE" for row in valid)
+    independently_supported = sum(
+        row["role"] in ("MEASURED_INTERSECTION_CANDIDATE", "HEIGHT_TOPOLOGY_CORNER") or
+        (row["role"] == "FOOTPRINT_CONTEXT_CORNER" and
+         row.get("local_u_persistence", {}).get("level_count", 0) >= 2 and
+         row.get("v_height_levels", 0) >= 2)
+        for row in valid)
+    # Footprint alone never closes a Hatch. A real Raw3D/BEV intersection is
+    # still required when local height topology supplies the other corners.
+    if independently_supported < 2 or (measured == 0 and all(
+            row["role"] == "FOOTPRINT_CONTEXT_CORNER" for row in valid)):
         return dict(state="UNRESOLVED", inferred_corner=None)
     x_values = sorted({xy[0] for xy in positions})
     y_values = sorted({xy[1] for xy in positions})
@@ -353,6 +387,88 @@ def _upper_multimode_conflict(height_modes, upper_candidates, config):
               row["height_level_count"] >= 2]
     return bool(len(distinct) >= 2 and viable and all(
         row["opening_relation"]["interior_ridge"] for row in viable))
+
+
+def _section_rho_modes(rows, side, config):
+    """Independently choose local rho evidence, then report median and MAD."""
+    active = [row for row in rows if row["evidence_rank"][0]]
+    count = max((len(row["section_consensus"]["sections"]) for row in active), default=0)
+    selected = []
+    for index in range(count):
+        candidates = [row for row in active if len(row["section_consensus"]["sections"]) > index]
+        if not candidates:
+            continue
+        def quality(row):
+            local = row["section_consensus"]["sections"][index]
+            structural = min(row["primary_raw3d"], row["primary_bev"])
+            if side == "V0":
+                return (int(local["opening_one_sided"]),
+                        round(local["boundary_asymmetry"], 3), structural)
+            return (int(row["height_level_count"] >= 2),
+                    -int(local["interior_ridge"]),
+                    round(local["boundary_asymmetry"], 3), structural)
+        winner = max(candidates, key=quality)
+        selected.append(float(winner["rho"]))
+    if not selected:
+        return dict(section_rho_modes=[], section_count=0,
+                    section_rho_median=None, section_rho_mad=None)
+    median = float(np.median(selected))
+    return dict(section_rho_modes=selected, section_count=len(selected),
+                section_rho_median=median,
+                section_rho_mad=float(np.median(np.abs(np.asarray(selected) - median))))
+
+
+def arbitrate_unresolved_side(side, side_id, vessel_id, config,
+                            neighboring_opening=False):
+    """Reject a later large inward move supported by mixed context and a weak transition.
+
+    The older edge still remains a review candidate, never certified steel.
+    Tiny B4 adjustments are preserved because raster registration alone can
+    account for them. The rule uses physical evidence, not a scene identifier.
+    """
+    older = float(side["rho_before"])
+    later = float(side["rho_after"])
+    join = config["boundary"]["corner_join_m"]
+    record = dict(r2g_rho=older, b4_rho=later, final_rho=later,
+                  final_stage="B4", rejection_reason=None,
+                  evidence_stronger_than_replaced_stage=None)
+    if abs(later - older) <= config["roi"]["support_search_m"] / 4:
+        return record
+    # A high-contrast line at the end of a single vessel can be its outer
+    # hull. A measured gap to another opening is independent end evidence.
+    if side_id not in ("U0", "U1") or not neighboring_opening:
+        return record
+    if vessel_id not in side.get("selected_source_vessel_ids", []):
+        return record
+    if set(side.get("selected_source_vessel_ids", [])) <= {vessel_id}:
+        return record
+    if side.get("previous_role") != "INNER_EDGE":
+        return record
+    modes = side.get("candidate_modes", [])
+    prior = min(modes, key=lambda row: abs(row["rho"] - older), default=None)
+    chosen = min(modes, key=lambda row: abs(row["rho"] - later), default=None)
+    if prior is None or chosen is None or abs(prior["rho"] - older) > join:
+        return record
+    providers = prior.get("provider_ids", [])
+    own_raw = any(value.startswith(vessel_id + ":RAW3D_STRUCTURAL_PROVIDER:")
+                  for value in providers)
+    own_bev = any(value.startswith(vessel_id + ":BEV_RECTILINEAR_PROVIDER:")
+                  for value in providers)
+    minimum = config["roi"]["min_enclosure_ratio"]
+    prior_contrast = prior.get("opening_relation", {}).get("outside_minus_inside_m")
+    chosen_contrast = chosen.get("opening_relation", {}).get("outside_minus_inside_m")
+    if (own_raw and own_bev and
+            min(prior.get("raw3d_coverage", 0), prior.get("bev_coverage", 0)) >= minimum and
+            prior.get("opening_relation", {}).get("canonical_inner") and
+            prior_contrast is not None and chosen_contrast is not None and
+            prior_contrast >= chosen_contrast + config["roi"]["opening_drop_m"]):
+        record.update(final_rho=older, final_stage="R2G",
+                      rejection_reason="B4_MIXED_CONTEXT_WEAKER_OPENING_END",
+                      evidence_stronger_than_replaced_stage=True,
+                      r2g_candidate_rho=prior["rho"],
+                      r2g_opening_contrast_m=prior_contrast,
+                      b4_opening_contrast_m=chosen_contrast)
+    return record
 
 
 def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config):
@@ -494,11 +610,31 @@ def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config):
             _, lower, upper, cells = chosen
             corners = cells[index]
             geometry = solve_three_corners(corners)
+        arbitration = {}
         if geometry["state"] == "UNRESOLVED":
-            bounds_after = old_box
+            bounds_after = list(old_box)
+            for side_id, position in zip(SIDES, (0, 2, 1, 3)):
+                neighbors = [other for other in bounds if other is not old_box and
+                             min(other[3], old_box[3]) - max(other[1], old_box[1]) >= join]
+                older_rho = float(hatch["sides"][side_id]["rho_before"])
+                nearby_gap = any(
+                    0 < (other[0] - older_rho if side_id == "U1" else
+                         older_rho - other[2]) <= config["roi"]["support_search_m"]
+                    for other in neighbors)
+                decision = arbitrate_unresolved_side(
+                    hatch["sides"][side_id], side_id, vessel_id, config,
+                    neighboring_opening=nearby_gap)
+                arbitration[side_id] = decision
+                bounds_after[position] = decision["final_rho"]
         else:
             bounds_after = [u_chain[index]["rho"], lower["rho"],
                             u_chain[index + 1]["rho"], upper["rho"]]
+            arbitration = {side_id: dict(
+                r2g_rho=float(hatch["sides"][side_id]["rho_before"]),
+                b4_rho=float(hatch["sides"][side_id]["rho_after"]),
+                final_rho=float(bounds_after[position]), final_stage="B5",
+                rejection_reason=None, evidence_stronger_than_replaced_stage=True)
+                for side_id, position in zip(SIDES, (0, 2, 1, 3))}
         polygon = (np.asarray([[bounds_after[0], bounds_after[1]],
                                [bounds_after[2], bounds_after[1]],
                                [bounds_after[2], bounds_after[3]],
@@ -510,13 +646,15 @@ def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config):
             polygon_before=hatch["polygon_after"], polygon_after=polygon,
             status=geometry["state"], inferred_corner=geometry["inferred_corner"],
             corners=corners,
+            side_stage_arbitration=arbitration,
             sides={key: dict(rho_before=old_box[0 if key == "U0" else
                                                2 if key == "U1" else
                                                1 if key == "V0" else 3],
                              rho_after=bounds_after[0 if key == "U0" else
                                                    2 if key == "U1" else
                                                    1 if key == "V0" else 3],
-                             role=("B4_UNCHANGED_UNRESOLVED" if geometry["state"] ==
+                             role=(("R2G_RESTORED_REVIEW" if arbitration[key]["final_stage"] == "R2G"
+                                    else "B4_UNCHANGED_UNRESOLVED") if geometry["state"] ==
                                    "UNRESOLVED" else
                                    _side_provenance(side_modes[key], config) if
                                    side_modes[key] else "GEOMETRY_CONSTRAINED_EDGE"),
@@ -547,6 +685,8 @@ def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config):
         height_topology=height,
         u_boundary_chain=u_chain,
         v0_candidates=candidates["V0"], v1_candidates=candidates["V1"],
+        section_rho_consensus={side: _section_rho_modes(candidates[side], side, config)
+                               for side in ("V0", "V1")},
         pair_candidates=[dict(v0=row[1]["rho"], v1=row[2]["rho"],
                               score=str(row[0]),
                               supported_unique_corners=len({tuple(c["corner_xy"])
