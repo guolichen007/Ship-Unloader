@@ -493,7 +493,7 @@ def _side_candidates(
     return chosen, rows
 
 
-def _joint_score(sides, before, config, shared_width_target=None):
+def _joint_score(sides, before, config):
     rho = [row["rho_refined"] for row in sides]
     if min(rho[1] - rho[0], rho[3] - rho[2]) <= 2 * config["boundary"]["side_probe_m"]:
         return None
@@ -528,15 +528,6 @@ def _joint_score(sides, before, config, shared_width_target=None):
         ),
         round(sum(row["raster_coverage"] for row in sides), 5),
         -round(sum(row["uncertainty_m"] for row in sides), 5),
-        (
-            -round(abs((rho[3] - rho[2]) - shared_width_target), 5)
-            if shared_width_target is not None
-            and any(
-                row["role"] != "INNER_EDGE" or row["structural_coverage"] < supported
-                for row in sides[2:]
-            )
-            else 0.0
-        ),
         -round(
             sum(
                 abs(row["rho_refined"] - original)
@@ -547,11 +538,19 @@ def _joint_score(sides, before, config, shared_width_target=None):
     )
 
 
-def _ship_width_consensus(rectangles, axes, config):
-    """Use only strong, mutually agreeing hatches from this scan."""
+def _ship_width_consensus(rectangles, axes, config, vessel_hypothesis_id=None):
+    """Use strong hatches with one explicit vessel identity only.
+
+    A legacy R2F rectangle has no VesselHypothesis identity. Its width can be
+    reported, but it cannot vote in any shared-width prior.
+    """
+    if not isinstance(vessel_hypothesis_id, str) or not vessel_hypothesis_id:
+        return None, [], None
     supported = config["roi"]["min_enclosure_ratio"]
     strong_widths = []
     for hatch in rectangles:
+        if hatch.get("vessel_hypothesis_id") != vessel_hypothesis_id:
+            continue
         sides = {row["side_id"]: row for row in hatch["sides"]}
         if not all(
             sides[key]["structural_coverage"] >= supported
@@ -570,6 +569,50 @@ def _ship_width_consensus(rectangles, axes, config):
     if mad is None or mad > config["boundary"]["corner_join_m"]:
         target = None
     return target, strong_widths, mad
+
+
+def _select_joint(by_side, before, config, shared_width_target=None):
+    """Resolve local evidence first; width may only break a measured tie."""
+    ranked = []
+    for combination in itertools.product(*by_side):
+        score = _joint_score(combination, before, config)
+        if score is not None:
+            ranked.append((score, combination))
+    if not ranked:
+        return None, False
+    baseline = max(ranked, key=lambda item: item[0])
+    if shared_width_target is None:
+        return baseline[1], False
+    best_evidence = max(score[:8] for score, _ in ranked)
+    tied = [(score, combination) for score, combination in ranked
+            if score[:8] == best_evidence]
+    widths = {round(combination[3]["rho_refined"] -
+                    combination[2]["rho_refined"], 5)
+              for _, combination in tied}
+    supported = config["roi"]["min_enclosure_ratio"]
+    measured = all(
+        max(side["structural_coverage"], side["raster_coverage"]) >= supported
+        for _, combination in tied for side in combination[2:]
+    )
+    if len(tied) < 2 or len(widths) < 2 or not measured:
+        return baseline[1], False
+    selected = max(tied, key=lambda item: (
+        -abs((item[1][3]["rho_refined"] - item[1][2]["rho_refined"]) -
+             shared_width_target), item[0][-1]))
+    return selected[1], selected[1] != baseline[1]
+
+
+def _rho_mode_clusters(measured, config):
+    """Separate sustained side modes before treating a median as one line."""
+    clusters = []
+    for rho in sorted(measured):
+        # Anchor each group at its first sample; adjacent small gaps must not
+        # chain two physically distinct parallel rims into one mode.
+        if not clusters or rho - clusters[-1][0] > config["boundary"]["corner_join_m"]:
+            clusters.append([])
+        clusters[-1].append(rho)
+    return [dict(rho_median=float(np.median(cluster)),
+                 independent_along_bins=len(cluster)) for cluster in clusters]
 
 
 def _local_rho_consensus(
@@ -641,6 +684,15 @@ def _local_rho_consensus(
     measured = [
         row["rho_measured"] for row in samples if row["status"] == "LOCAL_MEASUREMENT"
     ]
+    clusters = _rho_mode_clusters(measured, config)
+    sustained = [row for row in clusters
+                 if row["independent_along_bins"] >=
+                 config["boundary"]["profile_min_sections"]]
+    mode_conflict = any(
+        abs(first["rho_median"] - second["rho_median"]) >
+        config["boundary"]["corner_join_m"]
+        for index, first in enumerate(sustained) for second in sustained[index + 1:]
+    )
     if measured:
         median = float(np.median(measured))
         mad = float(np.median(np.abs(np.asarray(measured) - median)))
@@ -668,6 +720,7 @@ def _local_rho_consensus(
         len(accepted) >= config["boundary"]["profile_min_sections"]
         and mad is not None
         and mad <= config["boundary"]["corner_join_m"]
+        and not mode_conflict
     )
     return dict(
         local_rho_samples=samples,
@@ -680,6 +733,8 @@ def _local_rho_consensus(
         independent_along_support_bins=len(accepted),
         along_support_distribution=[row["along_center_m"] for row in accepted],
         rho_dispersion=mad,
+        rho_mode_clusters=clusters,
+        mode_conflict=mode_conflict,
         confident=bool(enough),
     )
 
@@ -708,11 +763,21 @@ def refine(points, segments, edges, initial, config):
         float(np.ptp(np.asarray(hatch["polygon_xy"]) @ axes.T, axis=0)[1])
         for hatch in rectangles
     ]
-    shared_width_target, strong_widths, width_mad = _ship_width_consensus(
-        rectangles, axes, config
+    vessel_ids = sorted({hatch["vessel_hypothesis_id"] for hatch in rectangles
+                         if isinstance(hatch.get("vessel_hypothesis_id"), str)
+                         and hatch["vessel_hypothesis_id"]})
+    width_by_vessel = {
+        vessel_id: _ship_width_consensus(rectangles, axes, config, vessel_id)
+        for vessel_id in vessel_ids
+    }
+    shared_width_target, strong_widths, width_mad = (
+        width_by_vessel[vessel_ids[0]] if len(vessel_ids) == 1
+        else (None, [], None)
     )
     results = []
     for hatch in rectangles:
+        vessel_id = hatch.get("vessel_hypothesis_id")
+        local_width_target = width_by_vessel.get(vessel_id, (None, [], None))[0]
         polygon_before = np.asarray(hatch["polygon_xy"], dtype=float)
         axial = polygon_before @ axes.T
         before = (
@@ -742,14 +807,11 @@ def refine(points, segments, edges, initial, config):
             )
             by_side.append(shortlist)
             profiles[side_id] = full_profile
-        ranked = []
-        for combination in itertools.product(*by_side):
-            score = _joint_score(combination, before, config, shared_width_target)
-            if score is not None:
-                ranked.append((score, combination))
-        if ranked:
-            _, selected = max(ranked, key=lambda item: item[0])
-        else:
+        selected, width_prior_used = _select_joint(
+            by_side, before, config, local_width_target
+        )
+        had_joint_candidate = selected is not None
+        if selected is None:
             selected = tuple(
                 next(row for row in rows if row["rho_grid"] == original)
                 for rows, original in zip(by_side, before)
@@ -836,7 +898,7 @@ def refine(points, segments, edges, initial, config):
             refined_rows.append({**row, "local_consensus": local})
         selected = tuple(refined_rows)
         after = [row["rho_refined"] for row in selected]
-        if not ranked:
+        if not had_joint_candidate:
             status = "NO_SAFE_REFINEMENT"
         elif all(
             row["refinement_status"] == "MULTISECTION_REFINED" for row in selected
@@ -869,11 +931,44 @@ def refine(points, segments, edges, initial, config):
                 raw_point_support=row["raw_point_support"],
                 raw_boundary_measured=row["raw_boundary_measured"],
                 refinement_status=row["refinement_status"],
+                selected_mode_rho_grid=row["rho_grid"],
+                mode_selection_reason=("REPEATED_LOCAL_MODE" if
+                                       row["refinement_status"] == "MULTISECTION_REFINED"
+                                       else "CONFLICT_OR_INSUFFICIENT_KEEP_R2F"),
+                local_evidence=dict(
+                    rawxyz_point_support=row["raw_point_support"],
+                    raw3d_face_coverage=row["face_coverage"],
+                    profile_break_coverage=row["profile_break_coverage"],
+                    bev_transition_coverage=row["height_transition_coverage"],
+                    section_consistency=(len(row["local_consensus"]["accepted_rho_samples"])
+                                         / max(1, len(row["local_consensus"]["local_rho_samples"]))),
+                    opening_interior_relation=row["opening_side_relation"]["status"],
+                    far_support=row["opening_side_relation"]["far_support_fraction"],
+                    role_conflict=(row["role"] in ("DISTANT_STRUCTURE", "CARGO_BOUNDARY")
+                                   or row["local_consensus"]["mode_conflict"]),
+                ),
                 **row["local_consensus"],
             )
+        width_sides = (sides["V0"], sides["V1"])
+        evidence_only_width = (
+            float(after[3] - after[2])
+            if all(side["role"] == "INNER_EDGE"
+                   and side["refinement_status"] == "MULTISECTION_REFINED"
+                   and side["raw_boundary_measured"]
+                   and not side["mode_conflict"] for side in width_sides)
+            else None
+        )
         results.append(
             dict(
                 hatch_id=hatch["hatch_id"],
+                vessel_hypothesis_id=vessel_id,
+                evidence_only_width_m=evidence_only_width,
+                evidence_only_width_status=("MEASURED_BOTH_SIDES" if
+                                            evidence_only_width is not None else
+                                            "UNRESOLVED_SIDE_EVIDENCE"),
+                width_prior_used=width_prior_used,
+                width_prior_role=("TIE_BREAK_ONLY" if width_prior_used
+                                  else "DIAGNOSTIC_ONLY"),
                 axis_initial_deg=diagnostics["initial_axis_angle_deg"],
                 axis_refined_deg=diagnostics["refined_axis_angle_deg"],
                 axis_delta_deg=diagnostics["axis_delta_deg"],
@@ -908,7 +1003,15 @@ def refine(points, segments, edges, initial, config):
                 float(np.ptp(np.asarray(row["polygon_after"]) @ axes.T, axis=0)[1])
                 for row in results
             ],
-            role="WEAK_TIE_BREAK_ONLY",
+            role=("TIE_BREAK_ONLY_IF_LOCAL_EVIDENCE_TIED" if
+                  any(target is not None for target, _, _ in width_by_vessel.values())
+                  else "DIAGNOSTIC_ONLY"),
+            per_vessel={vessel_id: dict(
+                target_m=target, strong_reference_widths_m=widths,
+                strong_reference_mad_m=mad) for vessel_id, (target, widths, mad)
+                in width_by_vessel.items()},
+            unassigned_rectangle_count=sum(
+                hatch.get("vessel_hypothesis_id") is None for hatch in rectangles),
         ),
         rectangles=results,
     )

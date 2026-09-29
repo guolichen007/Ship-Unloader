@@ -183,10 +183,9 @@ class SceneCounterexamples(unittest.TestCase):
         self.assertGreater(abs(vessels[0]["local_axes"][0][1] -
                                vessels[1]["local_axes"][0][1]), .25)
 
-    @unittest.expectedFailure
     def test_no_cross_vessel_width_leak(self):
         rectangles = [strong_hatch(20, "A", 0), strong_hatch(20, "B", 80)]
-        target, _, _ = _ship_width_consensus(rectangles, np.eye(2), CONFIG)
+        target, _, _ = _ship_width_consensus(rectangles, np.eye(2), CONFIG, "A")
         self.assertIsNone(target)
 
 

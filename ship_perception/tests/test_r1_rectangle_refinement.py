@@ -11,6 +11,7 @@ from ship_perception.r1_static.rectangle_fusion import solve
 from ship_perception.r1_static.rectangle_refinement import (
     _joint_score,
     _local_rho_consensus,
+    _select_joint,
     _ship_width_consensus,
     diagnose_axes,
     refine,
@@ -121,7 +122,7 @@ class RectangleRefinement(unittest.TestCase):
             _joint_score(outer, (-1, 41, -1, 21), CONFIG),
         )
 
-    def test_shared_width_is_only_a_late_tie_breaker(self):
+    def test_shared_width_is_only_a_measured_local_evidence_tie_breaker(self):
         def box(width, coverage):
             return [
                 dict(
@@ -135,11 +136,18 @@ class RectangleRefinement(unittest.TestCase):
                 for index, rho in enumerate((0, 40, 0, width))
             ]
 
-        equal_width = _joint_score(box(20, 0.8), (0, 40, 0, 20), CONFIG, 20)
-        unequal_width = _joint_score(box(21, 0.8), (0, 40, 0, 21), CONFIG, 20)
-        strong_unequal = _joint_score(box(21, 0.9), (0, 40, 0, 21), CONFIG, 20)
-        self.assertGreater(equal_width, unequal_width)
+        equal_width = _joint_score(box(20, 0.8), (0, 40, 0, 20), CONFIG)
+        unequal_width = _joint_score(box(21, 0.8), (0, 40, 0, 21), CONFIG)
+        strong_unequal = _joint_score(box(21, 0.9), (0, 40, 0, 21), CONFIG)
+        self.assertEqual(equal_width[:8], unequal_width[:8])
         self.assertGreater(strong_unequal, equal_width)
+        sides = box(20, 0.8)
+        alternative = box(21, 0.8)[3]
+        chosen, used = _select_joint([[side] for side in sides[:3]] +
+                                     [[sides[3], alternative]],
+                                     (0, 40, 0, 20), CONFIG, 21)
+        self.assertTrue(used)
+        self.assertEqual(chosen[3]["rho_refined"], 21)
 
     def test_local_noise_trap_uses_repeated_boundary_not_one_strong_peak(self):
         x, y = np.meshgrid(np.arange(8, 13, 0.15), np.arange(0, 21, 0.15))
@@ -176,6 +184,7 @@ class RectangleRefinement(unittest.TestCase):
     def test_weak_side_width_tie_break_needs_two_strong_same_ship_hatches(self):
         def hatch(x0, width, weak=False):
             return dict(
+                vessel_hypothesis_id="V_A",
                 polygon_xy=[[x0, 0], [x0 + 40, 0], [x0 + 40, width], [x0, width]],
                 sides=[
                     dict(
@@ -188,18 +197,19 @@ class RectangleRefinement(unittest.TestCase):
             )
 
         strong = [hatch(0, 20), hatch(50, 20)]
-        target, widths, mad = _ship_width_consensus(strong, np.eye(2), CONFIG)
+        target, widths, mad = _ship_width_consensus(strong, np.eye(2), CONFIG, "V_A")
         self.assertEqual(target, 20)
         self.assertEqual(widths, [20, 20])
         self.assertEqual(mad, 0)
         target_with_weak, _, _ = _ship_width_consensus(
-            [strong[0], hatch(50, 22, weak=True)], np.eye(2), CONFIG
+            [strong[0], hatch(50, 22, weak=True)], np.eye(2), CONFIG, "V_A"
         )
         self.assertIsNone(target_with_weak)
 
     def test_no_cross_scene_width_leakage(self):
         def hatch(width):
             return dict(
+                vessel_hypothesis_id="V_A",
                 polygon_xy=[[0, 0], [40, 0], [40, width], [0, width]],
                 sides=[
                     dict(side_id=side, structural_coverage=0.8, raster_coverage=0.8)
@@ -208,9 +218,11 @@ class RectangleRefinement(unittest.TestCase):
             )
 
         self.assertEqual(
-            _ship_width_consensus([hatch(20), hatch(20)], np.eye(2), CONFIG)[0], 20
+            _ship_width_consensus([hatch(20), hatch(20)], np.eye(2), CONFIG,
+                                  "V_A")[0], 20
         )
-        self.assertIsNone(_ship_width_consensus([hatch(12)], np.eye(2), CONFIG)[0])
+        self.assertIsNone(_ship_width_consensus([hatch(12)], np.eye(2), CONFIG,
+                                                "V_A")[0])
 
     def test_copied_ascii_map_ply_can_be_decoded_without_annotations(self):
         with tempfile.TemporaryDirectory() as directory:
