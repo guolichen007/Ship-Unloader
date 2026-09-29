@@ -62,6 +62,9 @@ if(BUILD_TESTING)
   add_test(NAME v15r1_r2h_a_counterexamples COMMAND "${Python3_EXECUTABLE}" -m unittest
     ship_perception.tests.test_r2h_a_counterexamples)
   set_tests_properties(v15r1_r2h_a_counterexamples PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+  add_test(NAME v15r1_r2h_b2_proposal COMMAND "${Python3_EXECUTABLE}" -m unittest
+    ship_perception.tests.test_r2h_b2_proposal)
+  set_tests_properties(v15r1_r2h_b2_proposal PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
   add_test(NAME v15_gt_isolation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/run_v15_isolation.py" "$<TARGET_FILE:v15_recognize>")
   add_executable(v15_grid_phase tests/v15_grid_phase.cpp)
   target_link_libraries(v15_grid_phase PRIVATE ship_structure)

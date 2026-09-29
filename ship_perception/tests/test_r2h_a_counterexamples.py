@@ -1,7 +1,7 @@
-"""R2H-A red tests: current stage failures, not relaxed acceptance gates.
+"""R2H counterexamples retained across staged scene and proposal repairs.
 
-Expected failures remain visible until R2H-B provides an evidence-backed scene
-and proposal layer. Passing tests assert that ambiguity stays unconfirmed.
+Passing tests exercise the stage that now owns each behavior; remaining
+expected failures stay visible until the relevant later stage is implemented.
 """
 
 import json
@@ -14,6 +14,7 @@ from ship_perception.r1_static.heightmap_topology import detect_regions
 from ship_perception.r1_static.heightmap_batch import RESEARCH_CONFIG
 from ship_perception.r1_static.rectangle_fusion import solve
 from ship_perception.r1_static.rectangle_refinement import _ship_width_consensus
+from ship_perception.r1_static.hatch_proposal import propose_for_vessel
 from ship_perception.r1_static.scene_vessel import infer_scene_vessels
 from ship_perception.tests.test_r1_boundary_topology import CONFIG, rectangle_case
 from ship_perception.tests.test_r1_rectangle_fusion import raw_scene
@@ -44,6 +45,11 @@ def scene_hypotheses(points):
     result, _ = infer_scene_vessels(points, CONFIG, research)
     return result, [row for row in result["vessel_hypotheses"]
                     if row["classification_status"] == "VESSEL_HYPOTHESIS"]
+
+
+def proposal_vessel():
+    return dict(vessel_hypothesis_id="V_TEST", source_support_ids=["S_TEST"],
+                local_axes=[[1, 0], [0, 1]], classification_status="VESSEL_HYPOTHESIS")
 
 
 class SceneCounterexamples(unittest.TestCase):
@@ -110,28 +116,29 @@ class SceneCounterexamples(unittest.TestCase):
         self.assertEqual(len(vessels), 2)
         self.assertEqual(result["target_vessel_status"], "NOT_SELECTED")
 
-    @unittest.expectedFailure
     def test_height_provider_miss_keeps_raw_proposal(self):
-        segments, edges, _ = rectangle_case()
-        result = solve(raw_scene(), segments, edges, [], CONFIG)
-        self.assertGreater(len(result["rectangles"]), 0)
+        research = json.loads(RESEARCH_CONFIG.read_text(encoding="utf-8"))
+        result = propose_for_vessel(raw_scene(), proposal_vessel(), CONFIG, research,
+                                    height_override=[])
+        self.assertEqual(result["provider_summary"]["height"]["region_count"], 0)
+        self.assertGreater(result["provider_summary"]["bev_count"], 0)
+        self.assertGreater(result["provider_summary"]["raw3d_count"], 0)
+        self.assertTrue(any(row["state"] == "HATCH_PROPOSAL"
+                            for row in result["hatch_hypotheses"]))
 
-    @unittest.expectedFailure
     def test_three_strong_one_occluded_is_partial_not_silent(self):
-        segments, edges, regions = rectangle_case()
         points = raw_scene()
         # One side has only a short measured transition and no 3D edge.
         points[(points[:, 0] <= .3) &
                ((points[:, 1] < 8) | (points[:, 1] > 12)), 2] = 0
-        trace = {}
-        result = solve(points, segments[:3], edges[:3], regions, CONFIG,
-                       forensic_trace=trace)
-        self.assertTrue(any(
-            row["reject_reason"] == "FINAL_FOUR_SIDE_ACCEPTANCE_GATE"
-            and row["strong_side_count"] == 3
-            for row in trace["candidate_attempts"]
-        ))
-        self.assertTrue(any(row["status"] == "PARTIAL_HATCH" for row in result["rectangles"]))
+        research = json.loads(RESEARCH_CONFIG.read_text(encoding="utf-8"))
+        result = propose_for_vessel(points, proposal_vessel(), CONFIG, research,
+                                    height_override=[])
+        partial = [row for row in result["hatch_hypotheses"]
+                   if row["state"] == "PARTIAL_HATCH"]
+        self.assertTrue(partial)
+        self.assertEqual(partial[0]["measured_strong_side_count"], 3)
+        self.assertIsNone(partial[0]["polygon_xy"])
 
     def test_two_edge_ambiguous_is_not_confirmed(self):
         segments, edges, regions = rectangle_case()
@@ -150,23 +157,24 @@ class SceneCounterexamples(unittest.TestCase):
         self.assertFalse(any(row["status"] == "PROVISIONAL_RECTANGLE"
                              for row in result["rectangles"]))
 
-    @unittest.expectedFailure
     def test_measured_crossbeam_strip_is_not_numbered_as_hatch(self):
         # A 2 m raised strip *inside* a larger opening has four measured
         # rectilinear sides, but its interior is steel, not an opening.
-        segments, edges, regions = rectangle_case()
-        for row in segments:
-            row["profile_break_positions"] = [
-                [x, 9 + y * 2 / 20] for x, y in row["profile_break_positions"]]
-        for row in edges:
-            row["a_raw"][1] = 9 + row["a_raw"][1] * 2 / 20
-            row["b_raw"][1] = 9 + row["b_raw"][1] * 2 / 20
-        regions[0]["bbox_xy"] = [0, 9, 40, 11]
         points = raw_scene()
         points[(points[:, 1] > 9) & (points[:, 1] < 11) &
                (points[:, 0] > 0) & (points[:, 0] < 40), 2] = 1
-        result = solve(points, segments, edges, regions, CONFIG)
-        self.assertFalse(result["rectangles"])
+        research = json.loads(RESEARCH_CONFIG.read_text(encoding="utf-8"))
+        result = propose_for_vessel(points, proposal_vessel(), CONFIG, research,
+                                    height_override=[])
+        strip = [row for row in result["hatch_hypotheses"]
+                 if row["bounds_axial"] is not None
+                 and abs(row["bounds_axial"][1] - 9) < CONFIG["roi"]["support_search_m"] / 2
+                 and abs(row["bounds_axial"][3] - 11) < CONFIG["roi"]["support_search_m"] / 2]
+        self.assertTrue(strip)
+        self.assertTrue(all(row["state"] != "PROVISIONAL_HATCH"
+                            and row["polygon_xy"] is None for row in strip))
+        self.assertTrue(any("RAISED_INTERIOR_ROLE_AMBIGUOUS" in row["role_conflicts"]
+                            for row in strip))
 
     def test_no_cross_vessel_axis_leak(self):
         _, vessels = scene_hypotheses(np.vstack((vessel_cloud(0, 0),
