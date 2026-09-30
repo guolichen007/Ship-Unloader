@@ -6,11 +6,14 @@ import numpy as np
 
 
 from ship_perception.r1_static.corner_topology import (
-    _section_rho_modes, arbitrate_unresolved_side, solve_three_corners,
+    _has_neighboring_opening, _section_rho_modes,
+    arbitrate_unresolved_side, solve_three_corners,
 )
 from ship_perception.r1_static.corner_topology_review import _initial_seed_groups
 from ship_perception.r1_static.run import DEFAULT_CONFIG, resolve_config
-from ship_perception.r1_static.static_showcase import classify_review_points
+from ship_perception.r1_static.static_showcase import (
+    _showcase_axes, classify_review_points,
+)
 
 
 CONFIG, _ = resolve_config(DEFAULT_CONFIG)
@@ -37,6 +40,14 @@ def _stage_side(sources):
 
 
 class B5R1Precision(unittest.TestCase):
+    def test_neighbor_context_survives_independent_group_recursion(self):
+        context = [("middle", [-2.36, 4.9, 22.42, 19.7]),
+                   ("next", [26.69, 4.9, 53.09, 20.6])]
+        self.assertTrue(_has_neighboring_opening(
+            "U1", 24.34, context[0][1], "middle", context, CONFIG))
+        self.assertFalse(_has_neighboring_opening(
+            "U1", 24.34, context[0][1], "middle", context[:1], CONFIG))
+
     def test_older_end_edge_survives_mixed_internal_transition(self):
         result = arbitrate_unresolved_side(
             _stage_side(["V0001", "V0002"]), "U1", "V0001", CONFIG,
@@ -106,6 +117,15 @@ class B5R1Precision(unittest.TestCase):
         private = dict(vessel_point_indexes={"V0000": np.asarray([0, 1, 2])})
         categories = classify_review_points(points, private, report, np.eye(2), CONFIG)
         self.assertEqual(categories.tolist(), [3, 4, 2, 1])
+
+    def test_showcase_uses_rectangle_axes_when_vessel_axis_differs(self):
+        b2 = dict(scene=dict(vessel_hypotheses=[dict(
+            vessel_hypothesis_id="V0001", local_axes=np.eye(2).tolist())]))
+        rotated = [[.99, -.14], [.14, .99]]
+        b4 = dict(rectangles=[dict(vessel_hypothesis_id="V0001", axes=rotated)])
+        axes, source = _showcase_axes("V0001", b2, b4)
+        self.assertEqual(source, "B4_RECTANGLE_AXES")
+        np.testing.assert_allclose(axes, rotated)
 
 
 

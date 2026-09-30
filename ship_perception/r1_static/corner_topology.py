@@ -471,13 +471,35 @@ def arbitrate_unresolved_side(side, side_id, vessel_id, config,
     return record
 
 
-def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config):
+def _has_neighboring_opening(side_id, rho_before, current_box, hatch_id,
+                            opening_context, config):
+    """Check adjacent cells across all same-vessel groups, not just one recursion leaf."""
+    if side_id not in ("U0", "U1"):
+        return False
+    join = config["boundary"]["corner_join_m"]
+    reach = config["roi"]["support_search_m"]
+    for other_id, other in opening_context:
+        if other_id == hatch_id or min(other[3], current_box[3]) - max(
+                other[1], current_box[1]) < join:
+            continue
+        gap = (other[0] - rho_before if side_id == "U1" else
+               rho_before - other[2])
+        if 0 < gap <= reach:
+            return True
+    return False
+
+
+def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config,
+                          _opening_context=None):
     """Solve shared U chain and V rows using vessel-owned height and B2 lines."""
     hatches = [row for row in b4["rectangles"] if row.get("vessel_hypothesis_id") == vessel_id
                and row.get("polygon_after") is not None]
     if not hatches:
         return dict(vessel_hypothesis_id=vessel_id, rectangles=[], status="NO_B4_OPENING")
     axes = np.asarray(hatches[0]["axes"])
+    if _opening_context is None:
+        _opening_context = [(row["hatch_id"], _box(row["polygon_after"], axes))
+                            for row in hatches]
     # A common U station is a separator only when two opening cells actually
     # touch. Distant hatches (notably 8-22) keep independent U stations and V
     # rows; pairing consecutive stations across their gap creates a false cell.
@@ -496,7 +518,8 @@ def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config):
         groups.append([hatch])
     if len(groups) > 1:
         children = [solve_vessel_openings(
-            points, b2, dict(rectangles=group), private_indexes, vessel_id, config)
+            points, b2, dict(rectangles=group), private_indexes, vessel_id, config,
+            _opening_context=_opening_context)
             for group in groups]
         result = dict(children[0])
         result["status"] = "INDEPENDENT_OPENING_GROUPS"
@@ -614,13 +637,10 @@ def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config):
         if geometry["state"] == "UNRESOLVED":
             bounds_after = list(old_box)
             for side_id, position in zip(SIDES, (0, 2, 1, 3)):
-                neighbors = [other for other in bounds if other is not old_box and
-                             min(other[3], old_box[3]) - max(other[1], old_box[1]) >= join]
                 older_rho = float(hatch["sides"][side_id]["rho_before"])
-                nearby_gap = any(
-                    0 < (other[0] - older_rho if side_id == "U1" else
-                         older_rho - other[2]) <= config["roi"]["support_search_m"]
-                    for other in neighbors)
+                nearby_gap = _has_neighboring_opening(
+                    side_id, older_rho, old_box, hatch["hatch_id"],
+                    _opening_context, config)
                 decision = arbitrate_unresolved_side(
                     hatch["sides"][side_id], side_id, vessel_id, config,
                     neighboring_opening=nearby_gap)
