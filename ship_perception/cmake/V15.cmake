@@ -80,6 +80,9 @@ if(BUILD_TESTING)
   add_test(NAME v15r1_r2h_b5_r1_precision COMMAND "${Python3_EXECUTABLE}" -m unittest
     ship_perception.tests.test_r2h_b5_r1_precision)
   set_tests_properties(v15r1_r2h_b5_r1_precision PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+  add_test(NAME v15r1_r2h_height_rim_review COMMAND "${Python3_EXECUTABLE}" -m unittest
+    ship_perception.tests.test_r2h_height_rim_review)
+  set_tests_properties(v15r1_r2h_height_rim_review PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
   add_test(NAME v15_gt_isolation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/run_v15_isolation.py" "$<TARGET_FILE:v15_recognize>")
   add_executable(v15_grid_phase tests/v15_grid_phase.cpp)
   target_link_libraries(v15_grid_phase PRIVATE ship_structure)

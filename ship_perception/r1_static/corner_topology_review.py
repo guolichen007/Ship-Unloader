@@ -11,6 +11,7 @@ from scipy import ndimage
 
 from .corner_topology import solve_vessel_openings
 from .heightmap_batch import RESEARCH_CONFIG
+from .height_rim_review import refine_height_review
 from .raw_topview_evidence import build_topview
 from .rectangle_refinement_review import _read_validation_xyz
 from .run import DEFAULT_CONFIG, _atomic_json, resolve_config
@@ -178,7 +179,7 @@ def _bootstrap_cell(points, b2, private, vessel, config, seed, group,
     return cell
 
 
-def review_scene(name, path, b2, b4, config, research):
+def review_scene(name, path, b2, b4, config, research, height_rim=False):
     path = Path(path)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     if b2["input_sha256"] != digest:
@@ -200,6 +201,11 @@ def review_scene(name, path, b2, b4, config, research):
         else:
             runs.append(solve_vessel_openings(
                 points, b2, b4, private["vessel_point_indexes"][ident], ident, config))
+        if height_rim and runs[-1]["rectangles"]:
+            refinement = refine_height_review(points, runs[-1], b2, b4, config)
+            runs[-1]["height_rim_review"] = refinement
+            for row in runs[-1]["rectangles"]:
+                row["height_review"] = refinement["rectangles"].get(row["hatch_id"])
     return dict(
         schema="ship_perception.v15r.r2h_b5_corner_topology.1",
         scene_id=name,
@@ -502,6 +508,8 @@ def main():
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--showcase-root", type=Path,
                         help="Optional Chinese review figures, JSON and sampled color PLY")
+    parser.add_argument("--height-only-root", type=Path,
+                        help="Raw XYZ height review only, including unresolved scenes")
     args = parser.parse_args()
     config, _ = resolve_config(DEFAULT_CONFIG)
     research = json.loads(RESEARCH_CONFIG.read_text(encoding="utf8"))
@@ -510,15 +518,22 @@ def main():
         b2 = json.loads((args.b2_root / name / "hatch_proposals.json").read_text(encoding="utf8"))
         b4_path = (args.b4_root / name / "opening_semantics.json") if args.b4_root else None
         b4 = json.loads(b4_path.read_text(encoding="utf8")) if b4_path and b4_path.exists() else None
-        report, points, private = review_scene(name, source, b2, b4, config, research)
+        report, points, private = review_scene(
+            name, source, b2, b4, config, research,
+            height_rim=bool(args.height_only_root))
         output = args.output_root / name
         output.mkdir(parents=True, exist_ok=True)
-        report["png_outputs"] = (render(name, report, points, private, b4, config, output)
+        report["png_outputs"] = ([] if args.height_only_root else
+                                 render(name, report, points, private, b4, config, output)
                                  if b4 is not None else
                                  render_holdout(report, points, private, b2, output, config))
-        if args.showcase_root:
+        if args.showcase_root and not args.height_only_root:
             report["showcase_outputs"] = render_showcase(
-                report, points, private, b2, config, args.showcase_root / name)
+                report, points, private, b2, b4, config, args.showcase_root / name)
+        if args.height_only_root:
+            report["height_only_outputs"] = render_showcase(
+                report, points, private, b2, b4, config,
+                args.height_only_root / name, height_only=True)
         _atomic_json(output / "corner_topology.json", report)
         print(name, [(v["vessel_hypothesis_id"], len(v["rectangles"]),
                       v.get("selected_pair")) for v in report["vessels"]], flush=True)

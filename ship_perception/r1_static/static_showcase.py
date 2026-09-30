@@ -67,10 +67,24 @@ def _write_colored_ply(path, xyz, category):
         stream.write(vertex.tobytes())
 
 
-def render_showcase(report, points, private, b2, config, output):
+def _showcase_axes(vessel_id, b2, b4):
+    """Render in the rectangle solver's axes when available."""
+    if b4 is not None:
+        rectangle = next((row for row in b4["rectangles"] if
+                          row.get("vessel_hypothesis_id") == vessel_id and
+                          row.get("axes") is not None), None)
+        if rectangle is not None:
+            return np.asarray(rectangle["axes"]), "B4_RECTANGLE_AXES"
+    vessel = next(row for row in b2["scene"]["vessel_hypotheses"] if
+                  row["vessel_hypothesis_id"] == vessel_id)
+    return np.asarray(vessel["local_axes"]), "B2_VESSEL_AXES"
+
+
+def render_showcase(report, points, private, b2, b4, config, output,
+                    height_only=False):
     """Write one raw-height frame, one colored point plot, and provenance data."""
     active = [row for row in report["vessels"] if row["rectangles"]]
-    if not active:
+    if not active and not height_only:
         return []
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -81,17 +95,27 @@ def render_showcase(report, points, private, b2, config, output):
     from matplotlib.font_manager import FontProperties
     from matplotlib.lines import Line2D
     font = FontProperties(fname="C:/Windows/Fonts/msyh.ttc")
-    ident = active[0]["vessel_hypothesis_id"]
-    axes = np.asarray(next(row["local_axes"] for row in
-                           b2["scene"]["vessel_hypotheses"] if
-                           row["vessel_hypothesis_id"] == ident))
+    ident = (active[0]["vessel_hypothesis_id"] if active else
+             next((row["vessel_hypothesis_id"] for row in
+                   b2["scene"]["vessel_hypotheses"] if
+                   row["classification_status"] == "VESSEL_HYPOTHESIS"), None))
+    if ident is None and b2["scene"]["vessel_hypotheses"]:
+        ident = b2["scene"]["vessel_hypotheses"][0]["vessel_hypothesis_id"]
+    axes, axis_source = (_showcase_axes(ident, b2, b4) if ident is not None else
+                         (np.eye(2), "RAW_XY_NO_VESSEL_AXIS"))
+    if height_only and active and active[0].get("height_rim_review"):
+        reviewed = active[0]["height_rim_review"]
+        if reviewed["rectangles"]:
+            axes = np.asarray(next(iter(reviewed["rectangles"].values()))["axes"])
+            axis_source = "RAWXYZ_HEIGHT_MULTI_SECTION_REVIEW"
     axial = points[:, :2] @ axes.T
-    category = classify_review_points(points, private, report, axes, config)
     grid = build_topview(points, axes, config)["coarse"]
-    polygons = [(row, np.asarray(row["polygon_after"]) @ axes.T)
+    polygons = [(row, np.asarray(
+        (row.get("height_review") or {}).get("polygon", row["polygon_after"])
+        if height_only else row["polygon_after"]) @ axes.T)
                 for vessel in active for row in vessel["rectangles"]]
-    boxes = np.vstack([polygon for _, polygon in polygons])
     margin = config["roi"]["support_search_m"] * 2
+    boxes = np.vstack([polygon for _, polygon in polygons]) if polygons else axial
     limits = (boxes[:, 0].min() - margin, boxes[:, 0].max() + margin,
               boxes[:, 1].min() - margin, boxes[:, 1].max() + margin)
 
@@ -124,6 +148,10 @@ def render_showcase(report, points, private, b2, config, output):
                    origin="lower", aspect="equal", cmap="viridis",
                    interpolation="nearest")
     boxes_on(ax)
+    if not polygons:
+        ax.text(.5, .5, "当前证据未形成可审查矩形", transform=ax.transAxes,
+                ha="center", va="center", fontproperties=font, fontsize=13,
+                bbox=dict(facecolor="white", alpha=.85, edgecolor="none"))
     cbar = fig.colorbar(im, ax=ax, shrink=.78, pad=.02)
     cbar.set_label("原始点云中位高度（米）", fontproperties=font)
     ax.text(.01, .02, "琥珀线：待复核的开口边界", transform=ax.transAxes,
@@ -133,6 +161,28 @@ def render_showcase(report, points, private, b2, config, output):
     raw_path = output / "原始XYZ高度_船舱候选单图.png"
     fig.savefig(raw_path, dpi=180)
     plt.close(fig)
+
+    if height_only:
+        data_path = output / "高度图审查数据.json"
+        data_path.write_text(json.dumps(dict(
+            场景=report["scene_id"], 原始输入SHA256=report["input_sha256"],
+            展示轴来源=axis_source, 静态标定状态=report["static_calibration_status"],
+            整船轴向复核=[dict(船体假设=vessel["vessel_hypothesis_id"],
+                          原角度=vessel["height_rim_review"].get("axis_initial_deg"),
+                          角度调整=vessel["height_rim_review"].get("axis_delta_deg"),
+                          复核角度=vessel["height_rim_review"].get("axis_review_deg"))
+                    for vessel in active if vessel.get("height_rim_review")],
+            矩形=[dict(编号=row["hatch_id"], 状态=row["status"],
+                     原始B5角点XY=row["polygon_after"],
+                     高度复核角点XY=(row.get("height_review") or {}).get(
+                         "polygon", row["polygon_after"]),
+                     高度复核状态=(row.get("height_review") or {}).get("status"),
+                     逐边剖面=(row.get("height_review") or {}).get("sides"))
+                for vessel in active for row in vessel["rectangles"]]),
+            ensure_ascii=False, indent=2), encoding="utf8")
+        return [str(raw_path), str(data_path)]
+
+    category = classify_review_points(points, private, report, axes, config)
 
     fig, ax = frame(report["scene_id"] + "｜原始点云按船舱区域分色")
     names = ((1, "船体外／未归属点"), (2, "船体内、开口外"),
@@ -166,6 +216,7 @@ def render_showcase(report, points, private, b2, config, output):
     _write_colored_ply(ply_path, points[sampled, :3], category[sampled])
     manifest = dict(
         场景=report["scene_id"], 原始输入SHA256=report["input_sha256"],
+        展示轴来源=axis_source,
         彩色PLY坐标系="原始XYZ（米）",
         静态标定状态=report["static_calibration_status"],
         目标船状态=report["target_vessel_status"],
