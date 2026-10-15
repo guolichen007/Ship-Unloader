@@ -81,7 +81,8 @@ def _showcase_axes(vessel_id, b2, b4):
 
 
 def render_showcase(report, points, private, b2, b4, config, output,
-                    height_only=False):
+                    height_only=False, image_only=False, image_name=None,
+                    title=None, annotation=None):
     """Write one raw-height frame, one colored point plot, and provenance data."""
     active = [row for row in report["vessels"] if row["rectangles"]]
     if not active and not height_only:
@@ -148,7 +149,7 @@ def render_showcase(report, points, private, b2, b4, config, output,
                     ha="center", va="center",
                     bbox=dict(facecolor="white", edgecolor="#ffac32", alpha=.85))
 
-    fig, ax = frame(report["scene_id"] + "｜原始 XYZ 高度图与船舱开口候选")
+    fig, ax = frame(title or report["scene_id"] + "｜原始 XYZ 高度图与船舱开口候选")
     extent = (grid.x0, grid.x0 + grid.cell_m * grid.count.shape[1],
               grid.y0, grid.y0 + grid.cell_m * grid.count.shape[0])
     im = ax.imshow(np.ma.masked_invalid(grid.median), extent=extent,
@@ -161,13 +162,16 @@ def render_showcase(report, points, private, b2, b4, config, output,
                 bbox=dict(facecolor="white", alpha=.85, edgecolor="none"))
     cbar = fig.colorbar(im, ax=ax, shrink=.78, pad=.02)
     cbar.set_label("原始点云中位高度（米）", fontproperties=font)
-    ax.text(.01, .02, "琥珀线：待复核的开口边界", transform=ax.transAxes,
+    ax.text(.01, .02, annotation or "琥珀线：待复核的开口边界", transform=ax.transAxes,
             fontproperties=font, fontsize=9,
             bbox=dict(facecolor="white", alpha=.8, edgecolor="none"))
     fig.tight_layout()
-    raw_path = output / "原始XYZ高度_船舱候选单图.png"
+    raw_path = output / (image_name or "原始XYZ高度_船舱候选单图.png")
     fig.savefig(raw_path, dpi=180)
     plt.close(fig)
+
+    if image_only:
+        return [str(raw_path)]
 
     if height_only:
         data_path = output / "高度图审查数据.json"

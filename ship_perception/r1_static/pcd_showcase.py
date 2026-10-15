@@ -41,36 +41,60 @@ def run(pcd, scene_id, output, expected_sha256=None):
     config, config_sha = resolve_config(DEFAULT_CONFIG)
     research = json.loads(RESEARCH_CONFIG.read_text(encoding="utf-8"))
     points, _ = decode(pcd)
+    b2, b4, counts = prepare_geometry(points, scene_id, digest, config, research)
+    report, _, private = review_scene(
+        scene_id, pcd, b2, b4, config, research, height_rim=True
+    )
+    output.mkdir(parents=True, exist_ok=True)
+    report["height_only_outputs"] = render_showcase(
+        report, points, private, b2, b4, config, output, height_only=True
+    )
+    _atomic_json(output / "corner_topology.json", report)
+    _atomic_json(
+        output / "运行摘要.json",
+        dict(
+            scene_id=scene_id,
+            input_sha256=digest,
+            point_count=int(len(points)),
+            config_sha256=config_sha,
+            **counts,
+            final_rectangle_count=sum(len(v["rectangles"]) for v in report["vessels"]),
+            static_calibration_status=report["static_calibration_status"],
+        ),
+    )
+    return report
+
+
+def prepare_geometry(points, scene_id, digest, config, research):
+    """Share the unchanged XYZ providers between file and ROS entry points."""
 
     height, _ = detect_regions(points, config, research)
     structural = analyze_scene_s4r1(points, config, research, height)
     r2f = fuse_rectangles(
-        points, structural["segment_resolutions"], structural["edges"],
-        height["level_hierarchy"], config)
+        points,
+        structural["segment_resolutions"],
+        structural["edges"],
+        height["level_hierarchy"],
+        config,
+    )
     r2g = refine_rectangles(
-        points, structural["segment_resolutions"], structural["edges"],
-        r2f, config)
+        points, structural["segment_resolutions"], structural["edges"], r2f, config
+    )
     r2g["input_pcd_sha256"] = digest
 
     b2 = discover_scene_hatches(points, config, research)
-    b2.update(scene_id=scene_id, input_sha256=digest,
-              raw_point_count=int(len(points)))
+    b2.update(scene_id=scene_id, input_sha256=digest, raw_point_count=int(len(points)))
     b4 = bridge_final_rectangles(points, r2g, b2, config)
-    report, _, private = review_scene(
-        scene_id, pcd, b2, b4, config, research, height_rim=True)
-    output.mkdir(parents=True, exist_ok=True)
-    report["height_only_outputs"] = render_showcase(
-        report, points, private, b2, b4, config, output, height_only=True)
-    _atomic_json(output / "corner_topology.json", report)
-    _atomic_json(output / "运行摘要.json", dict(
-        scene_id=scene_id, input_sha256=digest, point_count=int(len(points)),
-        config_sha256=config_sha, height_region_count=height["region_count"],
-        r2f_rectangle_count=len(r2f["rectangles"]),
-        r2g_rectangle_count=len(r2g["rectangles"]),
-        b4_rectangle_count=len(b4["rectangles"]),
-        final_rectangle_count=sum(len(v["rectangles"]) for v in report["vessels"]),
-        static_calibration_status=report["static_calibration_status"]))
-    return report
+    return (
+        b2,
+        b4,
+        dict(
+            height_region_count=height["region_count"],
+            r2f_rectangle_count=len(r2f["rectangles"]),
+            r2g_rectangle_count=len(r2g["rectangles"]),
+            b4_rectangle_count=len(b4["rectangles"]),
+        ),
+    )
 
 
 def main():
@@ -81,8 +105,11 @@ def main():
     parser.add_argument("--expected-sha256")
     args = parser.parse_args()
     report = run(args.pcd, args.scene_id, args.output, args.expected_sha256)
-    print(args.scene_id, [(v["vessel_hypothesis_id"], len(v["rectangles"]))
-                          for v in report["vessels"]], flush=True)
+    print(
+        args.scene_id,
+        [(v["vessel_hypothesis_id"], len(v["rectangles"])) for v in report["vessels"]],
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

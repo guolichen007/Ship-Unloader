@@ -153,14 +153,15 @@ def _side_rank(row, relation, old_rho, config, side):
         if side == "V1" and height else 0.0,
         -round(row.get("height_distance_m") or 0.0, 3)
         if side == "V1" and height else 0.0,
-        round(relation["boundary_asymmetry"], 3),
+        round(relation["boundary_asymmetry"] + row.get("intensity_bonus", 0.0), 3),
         -round(abs(row["rho"] - old_rho), 3),
         round(min(dual, 1.0), 3),
         round(row["height_coverage"], 3),
     )
 
 
-def _enrich_side(rows, grid, span, axis, sign, old_rho, config, side, support_limit=None):
+def _enrich_side(rows, grid, span, axis, sign, old_rho, config, side, support_limit=None,
+                 intensity_evidence=None):
     result = []
     for source in rows:
         row = dict(source)
@@ -178,6 +179,10 @@ def _enrich_side(rows, grid, span, axis, sign, old_rho, config, side, support_li
         row["opening_relation"] = _strip_relation(grid, row["rho"], span, axis, sign, config)
         row["section_consensus"] = _section_consensus(
             grid, row["rho"], span, axis, sign, config)
+        if intensity_evidence is not None:
+            from .intensity_evidence import AUX_WEIGHT
+            row["intensity_evidence"] = intensity_evidence.edge(axis, row["rho"], span)
+            row["intensity_bonus"] = AUX_WEIGHT * row["intensity_evidence"]["intensity_edge_score"]
         row["evidence_rank"] = list(_side_rank(
             row, row["opening_relation"], old_rho, config, side))
         result.append(row)
@@ -490,7 +495,7 @@ def _has_neighboring_opening(side_id, rho_before, current_box, hatch_id,
 
 
 def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config,
-                          _opening_context=None):
+                          _opening_context=None, intensity=None):
     """Solve shared U chain and V rows using vessel-owned height and B2 lines."""
     hatches = [row for row in b4["rectangles"] if row.get("vessel_hypothesis_id") == vessel_id
                and row.get("polygon_after") is not None]
@@ -519,7 +524,7 @@ def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config,
     if len(groups) > 1:
         children = [solve_vessel_openings(
             points, b2, dict(rectangles=group), private_indexes, vessel_id, config,
-            _opening_context=_opening_context)
+            _opening_context=_opening_context, intensity=intensity)
             for group in groups]
         result = dict(children[0])
         result["status"] = "INDEPENDENT_OPENING_GROUPS"
@@ -538,6 +543,11 @@ def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config,
         return result
     scoped = build_vessel_scoped_topview(points, private_indexes, axes, config)
     fine = scoped["grids"]["fine"]
+    intensity_evidence = None
+    if intensity is not None:
+        from .intensity_evidence import IntensityEvidence
+        intensity_evidence = IntensityEvidence(
+            points[private_indexes], intensity[private_indexes], axes, fine.cell_m)
     bounds = [_box(row["polygon_after"], axes) for row in hatches]
     envelope = [min(box[0] for box in bounds), min(box[1] for box in bounds),
                 max(box[2] for box in bounds), max(box[3] for box in bounds)]
@@ -595,7 +605,8 @@ def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config,
             if support_rows:
                 support_limit = min(row["rho"] for row in support_rows)
         candidates[side] = _enrich_side(
-            merged, fine, span_u, 1, sign, old, config, side, support_limit)
+            merged, fine, span_u, 1, sign, old, config, side, support_limit,
+            intensity_evidence=intensity_evidence)
     pairs = []
     corner_cache = {}
 

@@ -121,6 +121,14 @@ small_gicp   fd29d8cf / v1.0.0
 
 ## 六、核心原则
 
+ROS 1 Noetic 单帧现场复核入口（英文脚本）：
+
+```bash
+./scripts/run_ship_hatch_once.sh --topic /ship_scan/map --save_snapshot
+```
+
+直接读取同一帧 PointCloud2，输出几何主算法与强度辅助两张展示图、结果 JSON、输入摘要及可选快照；环境安装和字段说明见 [ROS 单帧运行说明](docs/ROS_HATCH_ONCE.md)。输出位于被 Git 忽略的 `output/`，候选保持人工复核状态。
+
 1. **识别优先**：先解决 Hatch 是否识别正确，再做控制。
 2. **Fail-Closed**：证据不足时返回 `UNRESOLVED / AMBIGUOUS / UNKNOWN`，禁止强行补全。
 3. **观测与推断分离**：任何 Prior / Historical / Inferred 都不得伪装成 Observed。

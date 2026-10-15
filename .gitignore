@@ -10,6 +10,7 @@
 /map.zip
 /local-data/
 /out/
+/output/
 # 文档：默认忽略根 md，仅放行 README/CLAUDE/AGENTS
 /*.md
 !/README.md
