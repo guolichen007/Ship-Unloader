@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 import tempfile
 from typing import Dict
+from typing import Optional
 
 import numpy as np
 
@@ -31,6 +32,7 @@ from ship_perception.r1_static.run import (
     resolve_config,
 )
 from ship_perception.r1_static.static_showcase import render_showcase
+from ship_perception.tools.stage_progress import StageProgress, stage
 
 
 BASELINE_IMAGE = "01_geometry_only.png"
@@ -98,16 +100,21 @@ def run_frame(
     output_dir: Path,
     save_snapshot: bool = False,
     disable_intensity_fusion: bool = False,
+    progress: Optional[StageProgress] = None,
 ) -> Path:
     """Run shared XYZ providers, then independent baseline and fusion reviews."""
-    config, config_sha = resolve_config(DEFAULT_CONFIG)
-    research_bytes = RESEARCH_CONFIG.read_bytes()
-    research = json.loads(research_bytes)
-    digest = frame.sha256
-    b2, b4, counts = prepare_geometry(frame.xyz, "ship_scan", digest, config, research)
-    baseline, _, private = review_points(
-        "ship_scan", frame.xyz, digest, b2, b4, config, research, height_rim=True
+    with stage(progress, "LOAD_CONFIGURATION"):
+        config, config_sha = resolve_config(DEFAULT_CONFIG)
+        research_bytes = RESEARCH_CONFIG.read_bytes()
+        research = json.loads(research_bytes)
+        digest = frame.sha256
+    b2, b4, counts = prepare_geometry(
+        frame.xyz, "ship_scan", digest, config, research, progress=progress
     )
+    with stage(progress, "GEOMETRY_BOUNDARY_AND_HEIGHT_REVIEW"):
+        baseline, _, private = review_points(
+            "ship_scan", frame.xyz, digest, b2, b4, config, research, height_rim=True
+        )
     summary = _summary(frame)
     status = (
         "DISABLED"
@@ -115,25 +122,27 @@ def run_frame(
         else "UNAVAILABLE" if not summary["intensity_available"] else "AVAILABLE"
     )
     if status == "AVAILABLE":
-        fusion, _, _ = review_points(
-            "ship_scan",
-            frame.xyz,
-            digest,
-            b2,
-            b4,
-            config,
-            research,
-            height_rim=True,
-            intensity=frame.intensity,
-        )
-        annotate_result(fusion, frame.xyz, frame.intensity, private, b2, b4, config)
+        with stage(progress, "INTENSITY_FUSION_AND_HEIGHT_REVIEW"):
+            fusion, _, _ = review_points(
+                "ship_scan",
+                frame.xyz,
+                digest,
+                b2,
+                b4,
+                config,
+                research,
+                height_rim=True,
+                intensity=frame.intensity,
+            )
+            annotate_result(fusion, frame.xyz, frame.intensity, private, b2, b4, config)
         if not any(
             v["normalized_intensity_stats"]["status"] == "AVAILABLE"
             for v in fusion["vessels"]
         ):
             status = "UNAVAILABLE_NO_VESSEL_CONTRAST"
     else:
-        fusion = copy.deepcopy(baseline)
+        with stage(progress, "INTENSITY_FALLBACK_" + status):
+            fusion = copy.deepcopy(baseline)
     # Keep global H labels unique across vessels, retaining original diagnostic IDs.
     for report in (baseline, fusion):
         for index, row in enumerate(
@@ -164,20 +173,21 @@ def run_frame(
                         "强度辅助：{}；琥珀线为待复核开口候选".format(status),
                     ),
                 ):
-                    render_showcase(
-                        report,
-                        frame.xyz,
-                        private,
-                        b2,
-                        b4,
-                        config,
-                        staged,
-                        height_only=True,
-                        image_only=True,
-                        image_name=filename,
-                        title="原始 XYZ 高度图与船舱开口候选（{}）".format(title),
-                        annotation=note,
-                    )
+                    with stage(progress, "RENDER_" + Path(filename).stem):
+                        render_showcase(
+                            report,
+                            frame.xyz,
+                            private,
+                            b2,
+                            b4,
+                            config,
+                            staged,
+                            height_only=True,
+                            image_only=True,
+                            image_name=filename,
+                            title="原始 XYZ 高度图与船舱开口候选（{}）".format(title),
+                            annotation=note,
+                        )
             finally:
                 if previous is None:
                     os.environ.pop("MPLCONFIGDIR", None)
@@ -196,7 +206,8 @@ def run_frame(
             geometry_only=_result(baseline, str(final / BASELINE_IMAGE), "NOT_USED"),
             intensity_fusion=_result(fusion, str(final / FUSION_IMAGE), status),
         )
-        _atomic_json(staged / RESULT_JSON, payload)
+        with stage(progress, "SAVE_RESULT_JSON"):
+            _atomic_json(staged / RESULT_JSON, payload)
         with (staged / SUMMARY_TEXT).open(
             "w", encoding="utf-8", newline="\n"
         ) as stream:
@@ -208,15 +219,17 @@ def run_frame(
             stream.flush()
             os.fsync(stream.fileno())
         if save_snapshot:
-            np.savez_compressed(
-                staged / "input_snapshot.npz",
-                xyz=frame.xyz,
-                intensity=(
-                    np.array([]) if frame.intensity is None else frame.intensity
-                ),
-                metadata=json.dumps(summary, ensure_ascii=False),
-            )
-        staged.rename(final)
+            with stage(progress, "SAVE_INPUT_SNAPSHOT"):
+                np.savez_compressed(
+                    staged / "input_snapshot.npz",
+                    xyz=frame.xyz,
+                    intensity=(
+                        np.array([]) if frame.intensity is None else frame.intensity
+                    ),
+                    metadata=json.dumps(summary, ensure_ascii=False),
+                )
+        with stage(progress, "PUBLISH_COMPLETE_OUTPUT"):
+            staged.rename(final)
     return final
 
 
@@ -234,9 +247,11 @@ def main() -> int:
     args = parser.parse_args()
     if not math.isfinite(args.timeout_sec) or args.timeout_sec <= 0:
         parser.error("--timeout_sec must be finite and positive")
+    progress = StageProgress()
     try:
         print("Waiting for one PointCloud2 from {} ...".format(args.topic), flush=True)
-        frame = read_once(args.topic, args.timeout_sec)
+        with progress.stage("CAPTURE_POINTCLOUD"):
+            frame = read_once(args.topic, args.timeout_sec)
         print(
             "Received {} finite XYZ points; intensity field: {}".format(
                 len(frame.xyz), frame.intensity is not None
@@ -244,11 +259,17 @@ def main() -> int:
             flush=True,
         )
         output = run_frame(
-            frame, args.output_dir, args.save_snapshot, args.disable_intensity_fusion
+            frame,
+            args.output_dir,
+            args.save_snapshot,
+            args.disable_intensity_fusion,
+            progress=progress,
         )
     except (ValueError, RuntimeError, OSError, ImportError) as error:
         print("ERROR: {}".format(error), file=sys.stderr)
+        progress.finish(False)
         return 1
+    progress.finish(True)
     print("Output directory: {}".format(output))
     for filename in (BASELINE_IMAGE, FUSION_IMAGE, RESULT_JSON, SUMMARY_TEXT):
         print(output / filename)

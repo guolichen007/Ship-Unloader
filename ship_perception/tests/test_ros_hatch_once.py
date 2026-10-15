@@ -2,9 +2,11 @@
 
 import copy
 import json
+import io
 from pathlib import Path
 import struct
 import tempfile
+import threading
 from types import SimpleNamespace as Obj
 import unittest
 from unittest.mock import patch
@@ -17,6 +19,7 @@ from ship_perception.ros.ship_scan_once import run_frame
 from ship_perception.r1_static.corner_topology import _side_rank
 from ship_perception.r1_static.intensity_evidence import IntensityEvidence
 from ship_perception.r1_static.run import DEFAULT_CONFIG, resolve_config
+from ship_perception.tools.stage_progress import StageProgress
 
 
 def message(big_endian=False, with_intensity=True):
@@ -238,12 +241,16 @@ class DualOutput(unittest.TestCase):
                         {},
                     ),
                 ):
+                    console = io.StringIO()
                     output = run_frame(
                         frame,
                         Path(directory),
                         save_snapshot=True,
                         disable_intensity_fusion=disabled,
+                        progress=StageProgress(console, interval_sec=0),
                     )
+                self.assertIn("PUBLISH_COMPLETE_OUTPUT DONE", console.getvalue())
+                self.assertIn("stage_elapsed=", console.getvalue())
                 self.assertEqual(
                     {p.name for p in output.iterdir()},
                     {
@@ -286,6 +293,38 @@ class DualOutput(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 run_frame(frame, Path(directory), disable_intensity_fusion=True)
             self.assertEqual(list(Path(directory).iterdir()), [])
+
+
+class ProgressReporting(unittest.TestCase):
+    def test_failure_reports_elapsed_and_preserves_exception(self):
+        console = io.StringIO()
+        progress = StageProgress(console, interval_sec=0)
+        with self.assertRaisesRegex(ValueError, "original failure"):
+            with progress.stage("GEOMETRY"):
+                raise ValueError("original failure")
+        progress.finish(False)
+        self.assertIn("GEOMETRY FAILED stage_elapsed=", console.getvalue())
+        self.assertIn("TOTAL status=FAILED elapsed=", console.getvalue())
+
+    def test_long_stage_reports_heartbeat_and_stops_before_done(self):
+        observed = threading.Event()
+
+        class Console(io.StringIO):
+            def write(self, text):
+                result = super().write(text)
+                if "RUNNING" in text:
+                    observed.set()
+                return result
+
+        console = Console()
+        progress = StageProgress(console, interval_sec=0.01)
+        with progress.stage("LONG_STAGE"):
+            self.assertTrue(observed.wait(2), "No heartbeat while a stage is running")
+        progress.finish(True)
+        text = console.getvalue()
+        self.assertLess(text.index("RUNNING"), text.index("DONE"))
+        self.assertTrue(text.rstrip().endswith("s"))
+        self.assertIn("TOTAL status=COMPLETED elapsed=", text)
 
 
 if __name__ == "__main__":

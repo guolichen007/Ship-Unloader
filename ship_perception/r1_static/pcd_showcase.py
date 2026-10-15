@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 from ship_perception.tools.v15_pcd import decode
+from ship_perception.tools.stage_progress import stage
 
 from .corner_topology_review import review_scene
 from .family_reference import analyze_scene_s4r1
@@ -65,26 +66,32 @@ def run(pcd, scene_id, output, expected_sha256=None):
     return report
 
 
-def prepare_geometry(points, scene_id, digest, config, research):
+def prepare_geometry(points, scene_id, digest, config, research, progress=None):
     """Share the unchanged XYZ providers between file and ROS entry points."""
 
-    height, _ = detect_regions(points, config, research)
-    structural = analyze_scene_s4r1(points, config, research, height)
-    r2f = fuse_rectangles(
-        points,
-        structural["segment_resolutions"],
-        structural["edges"],
-        height["level_hierarchy"],
-        config,
-    )
-    r2g = refine_rectangles(
-        points, structural["segment_resolutions"], structural["edges"], r2f, config
-    )
+    with stage(progress, "HEIGHT_PROVIDER"):
+        height, _ = detect_regions(points, config, research)
+    with stage(progress, "STRUCTURAL_PROVIDERS"):
+        structural = analyze_scene_s4r1(points, config, research, height)
+    with stage(progress, "RECTANGLE_FUSION"):
+        r2f = fuse_rectangles(
+            points,
+            structural["segment_resolutions"],
+            structural["edges"],
+            height["level_hierarchy"],
+            config,
+        )
+    with stage(progress, "RECTANGLE_REFINEMENT"):
+        r2g = refine_rectangles(
+            points, structural["segment_resolutions"], structural["edges"], r2f, config
+        )
     r2g["input_pcd_sha256"] = digest
 
-    b2 = discover_scene_hatches(points, config, research)
+    with stage(progress, "SCENE_VESSEL_DISCOVERY"):
+        b2 = discover_scene_hatches(points, config, research)
     b2.update(scene_id=scene_id, input_sha256=digest, raw_point_count=int(len(points)))
-    b4 = bridge_final_rectangles(points, r2g, b2, config)
+    with stage(progress, "OPENING_SIDE_REVIEW"):
+        b4 = bridge_final_rectangles(points, r2g, b2, config)
     return (
         b2,
         b4,
