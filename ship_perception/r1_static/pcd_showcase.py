@@ -1,0 +1,89 @@
+"""Reproduce the current static hatch height review directly from one PCD.
+
+This is an orchestration entry point for existing algorithms. It never reads
+intermediate review JSON and does not relax any calibration evidence gate.
+"""
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+
+from ship_perception.tools.v15_pcd import decode
+
+from .corner_topology_review import review_scene
+from .family_reference import analyze_scene_s4r1
+from .hatch_proposal import discover_scene_hatches
+from .heightmap_batch import RESEARCH_CONFIG
+from .heightmap_topology import detect_regions
+from .opening_semantics import bridge_final_rectangles
+from .rectangle_fusion import solve as fuse_rectangles
+from .rectangle_refinement import refine as refine_rectangles
+from .run import DEFAULT_CONFIG, _atomic_json, resolve_config
+from .static_showcase import render_showcase
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def run(pcd, scene_id, output, expected_sha256=None):
+    """Run the full current static chain and write one raw XYZ height figure."""
+    pcd = Path(pcd)
+    output = Path(output)
+    digest = _sha256(pcd)
+    if expected_sha256 and digest.lower() != expected_sha256.lower():
+        raise ValueError("INPUT_SHA_MISMATCH:" + scene_id)
+    config, config_sha = resolve_config(DEFAULT_CONFIG)
+    research = json.loads(RESEARCH_CONFIG.read_text(encoding="utf-8"))
+    points, _ = decode(pcd)
+
+    height, _ = detect_regions(points, config, research)
+    structural = analyze_scene_s4r1(points, config, research, height)
+    r2f = fuse_rectangles(
+        points, structural["segment_resolutions"], structural["edges"],
+        height["level_hierarchy"], config)
+    r2g = refine_rectangles(
+        points, structural["segment_resolutions"], structural["edges"],
+        r2f, config)
+    r2g["input_pcd_sha256"] = digest
+
+    b2 = discover_scene_hatches(points, config, research)
+    b2.update(scene_id=scene_id, input_sha256=digest,
+              raw_point_count=int(len(points)))
+    b4 = bridge_final_rectangles(points, r2g, b2, config)
+    report, _, private = review_scene(
+        scene_id, pcd, b2, b4, config, research, height_rim=True)
+    output.mkdir(parents=True, exist_ok=True)
+    report["height_only_outputs"] = render_showcase(
+        report, points, private, b2, b4, config, output, height_only=True)
+    _atomic_json(output / "corner_topology.json", report)
+    _atomic_json(output / "运行摘要.json", dict(
+        scene_id=scene_id, input_sha256=digest, point_count=int(len(points)),
+        config_sha256=config_sha, height_region_count=height["region_count"],
+        r2f_rectangle_count=len(r2f["rectangles"]),
+        r2g_rectangle_count=len(r2g["rectangles"]),
+        b4_rectangle_count=len(b4["rectangles"]),
+        final_rectangle_count=sum(len(v["rectangles"]) for v in report["vessels"]),
+        static_calibration_status=report["static_calibration_status"]))
+    return report
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--pcd", type=Path, required=True)
+    parser.add_argument("--scene-id", required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--expected-sha256")
+    args = parser.parse_args()
+    report = run(args.pcd, args.scene_id, args.output, args.expected_sha256)
+    print(args.scene_id, [(v["vessel_hypothesis_id"], len(v["rectangles"]))
+                          for v in report["vessels"]], flush=True)
+
+
+if __name__ == "__main__":
+    main()

@@ -94,7 +94,14 @@ def render_showcase(report, points, private, b2, b4, config, output,
     import matplotlib.pyplot as plt
     from matplotlib.font_manager import FontProperties
     from matplotlib.lines import Line2D
-    font = FontProperties(fname="C:/Windows/Fonts/msyh.ttc")
+    font_paths = (
+        os.environ.get("SHIP_SHOWCASE_CJK_FONT"),
+        "C:/Windows/Fonts/msyh.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    )
+    font_file = next((path for path in font_paths if path and Path(path).is_file()), None)
+    font = FontProperties(fname=font_file) if font_file else FontProperties()
     ident = (active[0]["vessel_hypothesis_id"] if active else
              next((row["vessel_hypothesis_id"] for row in
                    b2["scene"]["vessel_hypotheses"] if
