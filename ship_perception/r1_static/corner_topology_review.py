@@ -185,6 +185,14 @@ def review_scene(name, path, b2, b4, config, research, height_rim=False):
     if b2["input_sha256"] != digest:
         raise ValueError("B2_INPUT_SHA_MISMATCH:" + name)
     points = _read_validation_xyz(path)
+    return review_points(name, points, digest, b2, b4, config, research, height_rim)
+
+
+def review_points(name, points, digest, b2, b4, config, research,
+                  height_rim=False, intensity=None):
+    """Review an already decoded frame without file or ROS dependencies."""
+    if b2["input_sha256"] != digest:
+        raise ValueError("B2_INPUT_SHA_MISMATCH:" + name)
     scene, private = infer_scene_vessels(points, config, research)
     recorded = {row["vessel_hypothesis_id"]: row for row in b2["scene"]["vessel_hypotheses"]}
     for vessel in scene["vessel_hypotheses"]:
@@ -200,7 +208,8 @@ def review_scene(name, path, b2, b4, config, research, height_rim=False):
             runs.append(_bootstrap_vessel(points, b2, private, vessel, config))
         else:
             runs.append(solve_vessel_openings(
-                points, b2, b4, private["vessel_point_indexes"][ident], ident, config))
+                points, b2, b4, private["vessel_point_indexes"][ident], ident, config,
+                intensity=intensity))
         if height_rim and runs[-1]["rectangles"]:
             refinement = refine_height_review(points, runs[-1], b2, b4, config)
             runs[-1]["height_rim_review"] = refinement
