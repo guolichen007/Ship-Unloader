@@ -1,13 +1,15 @@
-# ROS 单帧船舱复核
+# ROS 现场一键识别运行说明
 
-> 状态：DRAFT
-> 适用版本：V1.5-R1 静态复核入口
+> 状态：REVIEWED
+> 适用版本：当前现场复核基线；V1.4 历史事实单列
 > 最后更新：2026-10-15
 > Owner：Ship-Unloader Engineering
 
 本工具适用于 Ubuntu 20.04、Python 3.8、ROS 1 Noetic，接收拼接完成的 `sensor_msgs/PointCloud2`。启动雷达/建图发布器后，在仓库根目录执行。脚本名、参数、终端提示和输出文件名均为英文；展示图保持统一中文标题与坐标轴。
 
-首次准备环境（已有兼容依赖可跳过）：
+## 首次准备环境
+
+已有兼容依赖可跳过。首次使用先安装 `python3-venv`：`sudo apt-get install python3-venv`。
 
 ```bash
 source /opt/ros/noetic/setup.bash
@@ -19,7 +21,7 @@ python3 -m pip install -r requirements-ros.txt
 sudo apt-get install fonts-noto-cjk
 ```
 
-每次运行：
+## 每次运行
 
 ```bash
 source /opt/ros/noetic/setup.bash
@@ -35,6 +37,8 @@ python3 -m ship_perception.ros.ship_scan_once \
 ```
 
 也支持 `python3 ship_perception/ros/ship_scan_once.py`。参数 `--disable_intensity_fusion` 禁用强度辅助，两张图仍输出，第二张明确标注 `DISABLED`；省略 `--save_snapshot` 时不写快照。可用 `PYTHON_BIN` 为 shell 入口指定解释器。远程 ROS master 按 ROS 标准设置 `ROS_MASTER_URI`、`ROS_IP`/`ROS_HOSTNAME`。
+
+## 输出与结果解释
 
 每次成功运行仅发布一个完整目录：
 
@@ -56,3 +60,20 @@ output/YYYYMMDD_HHMMSS_microseconds/
 JSON `boundary_xy` 保留原 B5 几何，`display_boundary_xy` 对应高度复核后的图示框；两者均在输入消息的 XY 米制坐标系中，逐船 UV 轴记录在诊断中。无可信目标船 seed 时保持 `TARGET_VESSEL_UNRESOLVED`；不自动选择目标船、不输出控制模型。`UNVERIFIED_NO_INDEPENDENT_INNER_EDGE_GOLDEN` 保留，不表示真实钢内沿精度已验收。
 
 字体可通过 `SHIP_SHOWCASE_CJK_FONT` 指定本机字体路径。Windows 上可以运行纯 Python 解码/合成测试和离线算法，但现场订阅需要上述 ROS 1 环境；ROS 2 不属于此入口支持范围。
+
+## 阶段进度与耗时
+
+Shell 先打印英文 ENV 依赖预检查及其耗时。Python 从 CAPTURE_POINTCLOUD 开始依次报告配置、Height、结构 providers、融合/精修、Scene/Vessel、opening-side、几何复核、强度复核或 fallback、两图、JSON、可选快照和发布。
+
+```text
+[01] CAPTURE_POINTCLOUD START total_elapsed=0.00s
+[01] CAPTURE_POINTCLOUD DONE stage_elapsed=0.42s total_elapsed=0.42s
+[04] STRUCTURAL_PROVIDERS RUNNING stage_elapsed=15.00s total_elapsed=16.08s
+TOTAL status=COMPLETED elapsed=93.42s
+```
+
+以上时间只是格式示例。编号按实际执行递增，不是百分比；每个长阶段每 15 秒打印 RUNNING，异常为 FAILED。阶段/累计时间使用单调时钟，TOTAL 包含 Python 消息接收与计算，shell 预检查耗时另列。库函数默认静默。观察日志不参与算法，不增加结果文件。
+
+`--timeout_sec` 约束等待消息，不约束整套算法计算。点数、范围、候选和机器决定计算耗时，不承诺实时控制频率。依赖问题核对解释器、ROS source 和 requirements；超时先用 `rostopic type /ship_scan/map` 与 `rostopic hz /ship_scan/map` 查发布器、消息类型及网络。UNRESOLVED 或零候选不等于崩溃，执行完成也不等于钢内沿通过。
+
+本轮评估已开舱场景，未开舱船由现场确认后登记范围；程序尚未自动排除闭舱。人工说明不能进入运行时评分或改写原检测结果。文件型 PCD 的支持范围和转换追溯见[数据规范](03_数据与证据规范.md)。

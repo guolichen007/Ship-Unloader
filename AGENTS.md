@@ -1,10 +1,8 @@
 # AGENTS.md
 
-面向 Codex / ClaudeCLI / 自动编码代理。
+Codex / ClaudeCLI / 自动编码代理入口。执行细则见 [开发与 Git 协作规范](docs/05_开发与Git协作规范.md)，用户明确任务优先。
 
-## 开始任务
-
-必须先返回：
+开工必读 README、CLAUDE 和 docs/00～05 当前规范；检查工作树并保护用户修改。先返回：
 
 ```text
 BRANCH=
@@ -16,27 +14,9 @@ OUT_OF_SCOPE=
 STOP_CONDITION=
 ```
 
-## 必读
+不自行改架构、算法阈值、验收门或 V1.4 冻结源；不把 GT 暴露给 runtime，不伪造钢边，不提交客户数据和运行产物。未经明确授权不 merge/tag/删分支；禁止 force push main 或丢失独立历史。
 
-- `README.md`
-- `docs/00_项目总则与架构冻结.md`
-- `docs/03_工程化与Git协作规范.md`
-- `docs/04_代码规范_C++17与Python.md`
-- `docs/05_测试验证与版本发布规范.md`
-
-## 红线
-
-- 不自行重设计架构；
-- 不混合多个逻辑任务到一个 commit；
-- 不把 GT 暴露给 runtime；
-- 不把 Cargo/Wharf 伪装成 Hatch steel boundary；
-- 不降低 acceptance gate；
-- 不 merge / tag / force push；
-- 不提交 raw data / build / validation / logs。
-
-## 结束任务
-
-必须返回：
+结束返回：
 
 ```text
 PREV_SHA=

@@ -1,20 +1,7 @@
 # CLAUDE.md
 
-本项目为 **V1.5-R 船舱精准识别优先**。
+与 Codex 共用 [AGENTS.md](AGENTS.md) 的任务契约。
 
-开工前必须读取：
+先读 README、[开发与 Git 协作规范](docs/05_开发与Git协作规范.md)及当前架构、算法、数据和验收文档。按精确 SHA 验证，保留失败证据；Windows、Ubuntu20、Synthetic 与 SITE 结论分开，不修改门槛或补造历史通过记录。
 
-1. `README.md`
-2. `docs/00_项目总则与架构冻结.md`
-3. `docs/03_工程化与Git协作规范.md`
-4. 当前阶段验收文档
-
-核心规则：
-
-- Production 主链不得重新依赖 Global Deck / Global Structural ROI。
-- 原始数据放 `Ship-Unloader-Data/`，构建/验证放 `Ship-Unloader-Work/`，两者永不推送。
-- `Ship-Unloader-Data/legacy/hold_detector/` 只读；产品代码禁止 include/link。
-- 不自行改架构、数据 split、门禁、阈值、holdout 状态或 V1.4 frozen source。
-- 不 merge main、不 tag、不 force push、不访问 sealed holdout annotation。
-- 一项逻辑一个 commit；Git/README/验证说明使用中文，代码标识保持英文。
-- 证据不足必须 fail-closed，不得为了 PASS 降低标准。
+源码保持英文标识，Git/规范文档使用中文；现场脚本名、参数与终端提示保持英文。产品不读取 sealed GT，客户点云与 Work/output 不进 Git。V1.4 frozen 和正式 Tag 继续保留。
