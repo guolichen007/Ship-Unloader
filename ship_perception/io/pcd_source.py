@@ -78,22 +78,57 @@ def read_pcd(path, frame_id="pcd", max_points=12000000):
             )
         dtype = np.dtype(dtype_fields)
         if header["DATA"] == ["binary"]:
-            records = np.fromfile(stream, dtype=dtype, count=n)
-            tail = stream.read()
-            if len(records) != n:
+            offset = stream.tell()
+            payload_bytes = n * dtype.itemsize
+            trailing_bytes = path.stat().st_size - offset - payload_bytes
+            if trailing_bytes < 0:
                 raise ValueError("PCD_PAYLOAD_SIZE_MISMATCH")
-            if tail:
-                # Preserve the repository's immutable, SHA-bound PCL zero-tail exception.
-                from ship_perception.tools.v15_pcd import decode
-
-                decode(path)
+            if trailing_bytes:
+                # Only the immutable file identities audited by the old decoder
+                # may carry its PCL zero tail. No dataset/GT manifest is loaded.
+                contracts = (
+                    Path(__file__).resolve().parents[1]
+                    / "config/pcd_padding_contracts.json"
+                )
+                authorized = any(
+                    item["expected_file_sha256"] == wire_sha
+                    and item["expected_point_payload_bytes"] == payload_bytes
+                    and item["expected_trailing_zero_bytes"] == trailing_bytes
+                    for item in json.loads(contracts.read_text())
+                )
+                if not (
+                    authorized
+                    and trailing_bytes == 4096 - offset
+                    and 0 < trailing_bytes < 4096
+                ):
+                    raise ValueError("UNAUTHORIZED_PCD_TRAILING_BYTES")
+                stream.seek(offset + payload_bytes)
+                if any(stream.read(trailing_bytes)):
+                    raise ValueError("UNAUTHORIZED_PCD_TRAILING_BYTES")
+            # Map unknown/padding fields instead of allocating their whole payload.
+            records = np.memmap(path, dtype=dtype, mode="r", offset=offset, shape=(n,))
         elif header["DATA"] == ["ascii"] and all(c == 1 for c in counts):
-            table = np.loadtxt(stream, ndmin=2)
-            if table.shape != (n, len(names)):
+            selected = [name for name in ("x", "y", "z", "intensity") if name in names]
+
+            def ascii_rows():
+                for line in stream:
+                    if line.strip() and not line.lstrip().startswith(b"#"):
+                        if len(line.split()) != len(names):
+                            raise ValueError("PCD_ASCII_LAYOUT_INVALID")
+                    yield line
+
+            table = np.loadtxt(
+                ascii_rows(),
+                ndmin=2,
+                usecols=[names.index(k) for k in selected],
+                max_rows=n + 1,
+            )
+            if len(table) != n:
                 raise ValueError("PCD_ASCII_LAYOUT_INVALID")
-            records = np.empty(n, dtype=dtype)
-            for index, name in enumerate(dtype.names):
-                records[name] = table[:, index]
+            records = {
+                name: table[:, index].astype(dtype.fields[name][0])
+                for index, name in enumerate(selected)
+            }
         else:
             raise ValueError("UNSUPPORTED_PCD_DATA_ENCODING")
     xyz = np.column_stack([records[k] for k in ("x", "y", "z")])

@@ -130,10 +130,12 @@ def _height_provider(points, vessel, config, research):
     )
 
 
-def _bev_provider(points, vessel, config):
+def _bev_provider(points, vessel, config, *, fine_grid=None):
     """Measured Raw XYZ raster transitions; no Height input or region ROI."""
     axes = vessel["local_axes"]
-    grid = build_topview(points, axes, config)["fine"]
+    grid = (
+        build_topview(points, axes, config)["fine"] if fine_grid is None else fine_grid
+    )
     modes = raster_modes(grid, config)
     evidence = []
     for normal_axis in (0, 1):
@@ -167,7 +169,7 @@ def _bev_provider(points, vessel, config):
     return evidence, grid
 
 
-def _raw3d_provider(points, vessel, config):
+def _raw3d_provider(points, vessel, config, *, coarse_grid=None):
     """Direct Raw XYZ section profiles and vertical spans in this local axis.
 
     This reads neither Height regions nor BEV provider results. A profile break
@@ -176,7 +178,11 @@ def _raw3d_provider(points, vessel, config):
     """
     axes = np.asarray(vessel["local_axes"])
     axial = np.column_stack((np.asarray(points[:, :2]) @ axes.T, points[:, 2]))
-    grid = R1HeightGrid.from_points(axial, config["geometry"]["coarse_voxel_m"])
+    grid = (
+        R1HeightGrid.from_points(axial, config["geometry"]["coarse_voxel_m"])
+        if coarse_grid is None
+        else coarse_grid
+    )
     valid = grid.occupancy
     span = grid.q90 - grid.q10
     evidence = []
@@ -642,7 +648,14 @@ def _iou(a, b):
 
 
 def propose_for_vessel(
-    points, vessel, config, research, *, height_override=None, verified_rectangles=()
+    points,
+    vessel,
+    config,
+    research,
+    *,
+    height_override=None,
+    verified_rectangles=(),
+    structural_override=None,
 ):
     """Independent providers first; association and state come afterwards."""
     points = np.asarray(points, dtype=np.float32)
@@ -654,8 +667,11 @@ def propose_for_vessel(
         height, height_summary = list(height_override), dict(
             region_count=len(height_override), dropped_within_vessel=[]
         )
-    bev, grid = _bev_provider(points, vessel, config)
-    raw3d = _raw3d_provider(points, vessel, config)
+    if structural_override is None:
+        bev, grid = _bev_provider(points, vessel, config)
+        raw3d = _raw3d_provider(points, vessel, config)
+    else:
+        bev, raw3d, grid = structural_override
     evidence = height + bev + raw3d
     extent = _axial_extent(points, vessel["local_axes"])
     seeds = _association_seeds(evidence, extent, config)
@@ -763,7 +779,9 @@ def propose_for_vessel(
     )
 
 
-def discover_scene_hatches(points, config, research, *, scene_context=None):
+def discover_scene_hatches(
+    points, config, research, *, scene_context=None, structural_cache=None
+):
     """Scope all evidence, association and suppression by B1 vessel identity."""
     if scene_context is None:
         scene, auxiliary = infer_scene_vessels(points, config, research)
@@ -790,8 +808,17 @@ def discover_scene_hatches(points, config, research, *, scene_context=None):
             )
             continue
         indexes = auxiliary["vessel_point_indexes"][vessel["vessel_hypothesis_id"]]
+        options = (
+            {}
+            if structural_cache is None
+            else dict(
+                structural_override=structural_cache.get(vessel["vessel_hypothesis_id"])
+            )
+        )
         per_vessel.append(
-            propose_for_vessel(np.asarray(points)[indexes], vessel, config, research)
+            propose_for_vessel(
+                np.asarray(points)[indexes], vessel, config, research, **options
+            )
         )
     return dict(
         schema_version="ship_perception.v15r.hatch_proposal.1",

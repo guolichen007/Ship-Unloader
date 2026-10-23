@@ -69,7 +69,8 @@ class SceneEvidenceContext:
         vessels = []
         for row in scene["vessel_hypotheses"]:
             ownership_bytes = np.asarray(
-                private["vessel_point_indexes"][row["vessel_hypothesis_id"]], dtype="<i8"
+                private["vessel_point_indexes"][row["vessel_hypothesis_id"]],
+                dtype="<i8",
             ).tobytes()
             # Immutable bytes also prohibit re-enabling ndarray writeability.
             indexes = np.frombuffer(ownership_bytes, dtype="<i8")

@@ -67,7 +67,16 @@ def run(pcd, scene_id, output, expected_sha256=None):
 
 
 def prepare_geometry(
-    points, scene_id, digest, config, research, progress=None, *, scene_context=None
+    points,
+    scene_id,
+    digest,
+    config,
+    research,
+    progress=None,
+    *,
+    scene_context=None,
+    structural_cache=None,
+    evidence_sink=None,
 ):
     """Share the unchanged XYZ providers between file and ROS entry points."""
 
@@ -75,6 +84,8 @@ def prepare_geometry(
         height, _ = detect_regions(points, config, research)
     with stage(progress, "STRUCTURAL_PROVIDERS"):
         structural = analyze_scene_s4r1(points, config, research, height)
+    if evidence_sink is not None:
+        evidence_sink["structural"] = structural
     with stage(progress, "RECTANGLE_FUSION"):
         r2f = fuse_rectangles(
             points,
@@ -102,7 +113,11 @@ def prepare_geometry(
             discover_scene_hatches(points, config, research)
             if scene_context is None
             else discover_scene_hatches(
-                points, config, research, scene_context=scene_context
+                points,
+                config,
+                research,
+                scene_context=scene_context,
+                structural_cache=structural_cache,
             )
         )
     b2.update(scene_id=scene_id, input_sha256=digest, raw_point_count=int(len(points)))

@@ -1,6 +1,7 @@
 """Vessel-local measurement caches and recall before global score suppression."""
 
 from dataclasses import dataclass, field
+import copy
 import hashlib
 import math
 
@@ -9,7 +10,11 @@ from scipy import ndimage
 
 from ship_perception.r1_static.height_grid import R1HeightGrid
 from ship_perception.r1_static.heightmap_topology import _side_height_rises
-from ship_perception.r1_static.hatch_proposal import _bev_provider, _raw3d_provider
+from ship_perception.r1_static.hatch_proposal import (
+    _bev_provider,
+    _raw3d_provider,
+    _world_line,
+)
 from .context import thaw
 
 
@@ -43,6 +48,9 @@ class VesselLocalEvidence:
     config: dict
     grids: dict = field(default_factory=dict)
     providers: object = None
+    input_frame_providers: object = None
+    provider_build_count: int = 0
+    grid_build_counts: dict = field(default_factory=dict)
 
     @classmethod
     def build(cls, frame, vessel, config):
@@ -57,6 +65,7 @@ class VesselLocalEvidence:
             self.grids[name] = R1HeightGrid.from_points(
                 self.xyz, self.config["geometry"][key]
             )
+            self.grid_build_counts[name] = self.grid_build_counts.get(name, 0) + 1
         return self.grids[name]
 
     def structural_providers(self):
@@ -64,11 +73,41 @@ class VesselLocalEvidence:
             local = thaw(self.vessel.public)
             local["local_axes"] = [[1, 0], [0, 1]]
             # Both providers work in exactly the frozen vessel UV frame.
-            bev, grid = _bev_provider(self.xyz, local, self.config)
+            bev, grid = _bev_provider(
+                self.xyz, local, self.config, fine_grid=self.grid("fine")
+            )
             self.grids["fine"] = grid
-            raw = _raw3d_provider(self.xyz, local, self.config)
+            raw = _raw3d_provider(
+                self.xyz, local, self.config, coarse_grid=self.grid("coarse")
+            )
             self.providers = bev + raw
+            self.provider_build_count += 1
+            for row in self.providers:
+                row["coordinate_frame"] = "VESSEL_LOCAL_UV"
+                row["input_vessel_axes"] = self.vessel.axes.tolist()
+                row["point_index_sha256"] = self.vessel.point_index_sha256
         return self.providers
+
+    def export_structural(self):
+        """Transform cached measured lines for the independent legacy consumer."""
+        if self.input_frame_providers is None:
+            rows = copy.deepcopy(self.structural_providers())
+            for row in rows:
+                row["coordinate_frame"] = "RAW_INPUT_FRAME"
+                row["local_axis_family"] = self.vessel.axes.tolist()
+                line = row["rho_or_region"]
+                row["source_geometry"]["endpoints_xy"] = _world_line(
+                    self.vessel.axes,
+                    line["normal_axis"],
+                    line["rho"],
+                    *row["support_interval"],
+                )
+            self.input_frame_providers = (
+                [r for r in rows if r["provider_type"] == "BEV_RECTILINEAR_PROVIDER"],
+                [r for r in rows if r["provider_type"] == "RAW3D_STRUCTURAL_PROVIDER"],
+                self.grid("fine"),
+            )
+        return self.input_frame_providers
 
 
 def local_height_recall(cache, research):

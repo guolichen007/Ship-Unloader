@@ -1,0 +1,7 @@
+{
+  "schema": "ship_perception.hatch_golden_registry.1",
+  "usage": "EVALUATION_ONLY_NEVER_RUNTIME",
+  "status": "DATA_PENDING",
+  "manifests": [],
+  "reason": "Independent steel-inner-edge annotations with source PCD SHA and two reviewers are not yet available."
+}

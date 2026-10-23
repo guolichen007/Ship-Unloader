@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema",
+    "usage",
+    "pcd_sha256",
+    "annotation_version",
+    "coordinate_frame",
+    "reviewer",
+    "hatches"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ship_perception.hatch_golden.1"
+    },
+    "usage": {
+      "const": "EVALUATION_ONLY_NEVER_RUNTIME"
+    },
+    "pcd_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "annotation_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "coordinate_frame": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reviewer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hatches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "prediction_hatch_id",
+          "edges"
+        ],
+        "properties": {
+          "prediction_hatch_id": {
+            "type": "string"
+          },
+          "edges": {
+            "type": "object",
+            "required": [
+              "U0",
+              "U1",
+              "V0",
+              "V1"
+            ],
+            "additionalProperties": {
+              "type": "object",
+              "required": [
+                "start_xy",
+                "end_xy",
+                "inward_normal_xy",
+                "visibility",
+                "ignore_segments"
+              ],
+              "properties": {
+                "start_xy": {
+                  "$ref": "#/$defs/xy"
+                },
+                "end_xy": {
+                  "$ref": "#/$defs/xy"
+                },
+                "inward_normal_xy": {
+                  "$ref": "#/$defs/xy"
+                },
+                "visibility": {
+                  "enum": [
+                    "VISIBLE",
+                    "OCCLUDED",
+                    "IGNORE"
+                  ]
+                },
+                "ignore_segments": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "review_status": {
+      "enum": [
+        "DRAFT",
+        "ADJUDICATED"
+      ]
+    },
+    "reviewers": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "xy": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "number"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "review_status"
+        ],
+        "properties": {
+          "review_status": {
+            "const": "ADJUDICATED"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "reviewers"
+        ],
+        "properties": {
+          "reviewers": {
+            "minItems": 2
+          }
+        }
+      }
+    }
+  ]
+}

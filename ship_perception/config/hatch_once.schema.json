@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema",
+    "pipeline_version",
+    "input",
+    "scene_context",
+    "pipeline_health",
+    "stage_elapsed",
+    "runtime",
+    "geometry_only",
+    "intensity_fusion",
+    "intensity_status",
+    "per_vessel_status",
+    "rejected_exterior_candidates",
+    "rejected_outside_vessel",
+    "software_git_sha",
+    "software_source_identity",
+    "config_sha256",
+    "scene_exterior_low_regions",
+    "per_hatch_status",
+    "per_side_uncertainty",
+    "grid_phase_stability",
+    "undercoverage_risk"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ship_perception.hatch_once.2"
+    },
+    "input": {
+      "type": "object",
+      "required": [
+        "semantic_sha256",
+        "point_count",
+        "frame_id",
+        "provenance"
+      ]
+    },
+    "scene_context": {
+      "type": "object",
+      "required": [
+        "b1_execution_count",
+        "vessels"
+      ],
+      "properties": {
+        "b1_execution_count": {
+          "const": 1
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "required": [
+        "transport"
+      ]
+    },
+    "pipeline_health": {
+      "type": "object",
+      "required": [
+        "status",
+        "first_failure_stage",
+        "isolated_failures"
+      ]
+    },
+    "stage_elapsed": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "geometry_only": {
+      "$ref": "#/$defs/result"
+    },
+    "intensity_fusion": {
+      "$ref": "#/$defs/result"
+    },
+    "per_hatch_status": {
+      "type": "object"
+    },
+    "per_side_uncertainty": {
+      "type": "object"
+    },
+    "grid_phase_stability": {
+      "type": "object"
+    },
+    "undercoverage_risk": {
+      "type": "object"
+    },
+    "scene_exterior_low_regions": {
+      "type": "object"
+    },
+    "intensity_status": {
+      "type": "object"
+    },
+    "software_source_identity": {
+      "type": "object"
+    },
+    "per_vessel_status": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "vessel_hypothesis_id",
+          "status",
+          "independent_groups",
+          "aggregate_summary"
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "result": {
+      "type": "object",
+      "required": [
+        "hatch_count",
+        "hatches",
+        "intensity_used"
+      ],
+      "properties": {
+        "hatch_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hatches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hatch"
+          }
+        },
+        "intensity_used": {
+          "type": "boolean"
+        }
+      }
+    },
+    "hatch": {
+      "type": "object",
+      "required": [
+        "hatch_id",
+        "status",
+        "boundary_xy",
+        "boundary_uv",
+        "best_estimate_boundary_xy",
+        "review_coverage_boundary_xy",
+        "vessel_hypothesis_id",
+        "sides",
+        "corners",
+        "undercoverage_risk",
+        "per_side_uncertainty",
+        "candidate_blockers",
+        "input_frame",
+        "vessel_local_axes",
+        "corner_geometry"
+      ],
+      "properties": {
+        "sides": {
+          "type": "object",
+          "required": [
+            "U0",
+            "U1",
+            "V0",
+            "V1"
+          ],
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "rho_before_m",
+              "rho_after_m",
+              "side_inward_move_m",
+              "boundary_uncertainty_m",
+              "support_section_count",
+              "grid_phase",
+              "raw_source_scope",
+              "undercoverage_risk",
+              "steel_edge_certified"
+            ],
+            "properties": {
+              "steel_edge_certified": {
+                "const": false
+              }
+            }
+          }
+        },
+        "boundary_xy": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "undercoverage_risk": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

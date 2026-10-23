@@ -12,7 +12,9 @@ from scipy.stats import theilslopes
 from .raw_topview_evidence import build_topview
 
 
-def _section_transition(grid, u_bounds, rho_anchor, side_id, config):
+def _section_transition(
+    grid, u_bounds, rho_anchor, side_id, config, *, section_edges=None
+):
     """Return robust U-section transition samples near an existing side."""
     u, v = grid.centers()
     u, v = u[0], v[:, 0]
@@ -23,14 +25,24 @@ def _section_transition(grid, u_bounds, rho_anchor, side_id, config):
     search = config["roi"]["boundary_search_m"]
     direction = 1 if side_id == "V1" else -1
     samples = []
-    for center_u in np.arange(u_bounds[0] + half, u_bounds[1] - half, step_u):
-        columns = (u >= center_u - half) & (u <= center_u + half)
+    spans = (
+        [
+            (c - half, c + half)
+            for c in np.arange(u_bounds[0] + half, u_bounds[1] - half, step_u)
+        ]
+        if section_edges is None
+        else list(zip(section_edges[:-1], section_edges[1:]))
+    )
+    for begin, end in spans:
+        center_u = (begin + end) / 2
+        columns = (u >= begin) & (u <= end)
         if columns.sum() < 3:
             continue
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
-            section_z = np.nanmedian(np.where(count[:, columns] > 0,
-                                              z[:, columns], np.nan), axis=1)
+            section_z = np.nanmedian(
+                np.where(count[:, columns] > 0, z[:, columns], np.nan), axis=1
+            )
         candidates = []
         for index in np.flatnonzero(abs(v - rho_anchor) <= search):
             inside = index - direction * step_v
@@ -41,7 +53,10 @@ def _section_transition(grid, u_bounds, rho_anchor, side_id, config):
                 continue
             inside_fraction = np.mean(count[inside, columns] > 0)
             outside_fraction = np.mean(count[outside, columns] > 0)
-            if min(inside_fraction, outside_fraction) < config["roi"]["min_enclosure_ratio"]:
+            if (
+                min(inside_fraction, outside_fraction)
+                < config["roi"]["min_enclosure_ratio"]
+            ):
                 continue
             contrast = float(section_z[outside] - section_z[inside])
             if contrast < config["roi"]["opening_drop_m"]:
@@ -49,36 +64,56 @@ def _section_transition(grid, u_bounds, rho_anchor, side_id, config):
             candidates.append((float(v[index]), contrast))
         if candidates:
             peak = max(score for _, score in candidates)
-            near_peak = [(rho, score) for rho, score in candidates if
-                         score >= peak - config["roi"]["opening_drop_m"]]
+            near_peak = [
+                (rho, score)
+                for rho, score in candidates
+                if score >= peak - config["roi"]["opening_drop_m"]
+            ]
             groups = []
             for item in near_peak:
                 if groups and item[0] - groups[-1][-1][0] <= grid.cell_m * 1.5:
                     groups[-1].append(item)
                 else:
                     groups.append([item])
-            group = max(groups, key=lambda rows: (
-                np.mean([score for _, score in rows]),
-                -abs(np.median([rho for rho, _ in rows]) - rho_anchor)))
-            samples.append([float(center_u),
-                            float(np.median([rho for rho, _ in group])),
-                            float(np.median([score for _, score in group]))])
+            group = max(
+                groups,
+                key=lambda rows: (
+                    np.mean([score for _, score in rows]),
+                    -abs(np.median([rho for rho, _ in rows]) - rho_anchor),
+                ),
+            )
+            samples.append(
+                [
+                    float(center_u),
+                    float(np.median([rho for rho, _ in group])),
+                    float(np.median([score for _, score in group])),
+                ]
+            )
     if len(samples) < config["boundary"]["profile_min_sections"]:
         return dict(accepted=False, reason="TOO_FEW_OCCUPIED_SECTIONS", samples=samples)
     xy = np.asarray(samples)
     fit = theilslopes(xy[:, 1], xy[:, 0])
-    residual = xy[:, 1] - (fit.intercept + fit.slope * xy[:, 0])
+    residual = xy[:, 1] - (fit[1] + fit[0] * xy[:, 0])
     dispersion = float(np.median(np.abs(residual)))
-    angle_deg = float(np.degrees(np.arctan(fit.slope)))
-    accepted = (dispersion <= config["boundary"]["corner_join_m"] and
-                abs(angle_deg) <= config["boundary"]["merge_angle_deg"] and
-                xy[-1, 0] - xy[0, 0] >= config["roi"]["min_deck_span_m"] *
-                config["boundary"]["profile_min_sections"])
-    return dict(accepted=bool(accepted),
-                reason="PERSISTENT_OPENING_TRANSITION" if accepted else
-                "DISPERSED_OR_SHORT_TRANSITION",
-                slope_deg=angle_deg, dispersion_m=dispersion,
-                median_contrast_m=float(np.median(xy[:, 2])), samples=samples)
+    angle_deg = float(np.degrees(np.arctan(fit[0])))
+    accepted = (
+        dispersion <= config["boundary"]["corner_join_m"]
+        and abs(angle_deg) <= config["boundary"]["merge_angle_deg"]
+        and xy[-1, 0] - xy[0, 0]
+        >= config["roi"]["min_deck_span_m"] * config["boundary"]["profile_min_sections"]
+    )
+    return dict(
+        accepted=bool(accepted),
+        reason=(
+            "PERSISTENT_OPENING_TRANSITION"
+            if accepted
+            else "DISPERSED_OR_SHORT_TRANSITION"
+        ),
+        slope_deg=angle_deg,
+        dispersion_m=dispersion,
+        median_contrast_m=float(np.median(xy[:, 2])),
+        samples=samples,
+    )
 
 
 def _guard_review_displacement(detail, current, side_id, bootstrap, config):
@@ -88,7 +123,8 @@ def _guard_review_displacement(detail, current, side_id, bootstrap, config):
     move = float(np.median(np.asarray(detail["samples"])[:, 1]) - current)
     inward = move if side_id == "V0" else -move
     if inward > config["boundary"]["corner_join_m"] or abs(move) > (
-            config["roi"]["boundary_search_m"] / 2):
+        config["roi"]["boundary_search_m"] / 2
+    ):
         detail["accepted"] = False
         detail["reason"] = "LARGE_MOVE_REQUIRES_STRUCTURAL_CORROBORATION"
     detail["candidate_delta_m"] = move
@@ -101,13 +137,27 @@ def refine_height_review(points, vessel, b2, b4, config):
     if not rectangles:
         return dict(status="NO_RECTANGLE", axis_delta_deg=0.0, rectangles={})
     ident = vessel["vessel_hypothesis_id"]
-    initial_axes = (next((np.asarray(row["axes"]) for row in b4["rectangles"] if
-                          row["vessel_hypothesis_id"] == ident), None)
-                    if b4 is not None else None)
+    initial_axes = (
+        next(
+            (
+                np.asarray(row["axes"])
+                for row in b4["rectangles"]
+                if row["vessel_hypothesis_id"] == ident
+            ),
+            None,
+        )
+        if b4 is not None
+        else None
+    )
     if initial_axes is None:
-        initial_axes = next((np.asarray(row["local_axes"]) for row in
-                             b2["scene"]["vessel_hypotheses"] if
-                             row["vessel_hypothesis_id"] == ident), None)
+        initial_axes = next(
+            (
+                np.asarray(row["local_axes"])
+                for row in b2["scene"]["vessel_hypotheses"]
+                if row["vessel_hypothesis_id"] == ident
+            ),
+            None,
+        )
     if initial_axes is None:
         return dict(status="NO_RECTANGLE_AXES", axis_delta_deg=0.0, rectangles={})
     grid = build_topview(points, initial_axes, config)["fine"]
@@ -121,11 +171,18 @@ def refine_height_review(points, vessel, b2, b4, config):
             # B5's prior stage can be a better search anchor than a later
             # constrained side, especially for a composite B2 seed.
             current = float(box[:, 1].min() if side_id == "V0" else box[:, 1].max())
-            prior = row.get("side_stage_arbitration", {}).get(side_id, {}).get("r2g_rho")
-            anchor = float(prior) if row["hatch_id"].startswith("I") and prior is not None else current
+            prior = (
+                row.get("side_stage_arbitration", {}).get(side_id, {}).get("r2g_rho")
+            )
+            anchor = (
+                float(prior)
+                if row["hatch_id"].startswith("I") and prior is not None
+                else current
+            )
             detail = _section_transition(grid, u_bounds, anchor, side_id, config)
             detail = _guard_review_displacement(
-                detail, current, side_id, row["hatch_id"].startswith("I"), config)
+                detail, current, side_id, row["hatch_id"].startswith("I"), config
+            )
             detail["rho_before_m"] = current
             detail["rho_search_anchor_m"] = anchor
             details[side_id] = detail
@@ -135,8 +192,12 @@ def refine_height_review(points, vessel, b2, b4, config):
     axis_delta = float(np.median(slopes)) if slopes else 0.0
     initial_angle = float(np.arctan2(initial_axes[0, 1], initial_axes[0, 0]))
     final_angle = initial_angle + np.radians(axis_delta)
-    axes = np.asarray([[np.cos(final_angle), np.sin(final_angle)],
-                       [-np.sin(final_angle), np.cos(final_angle)]])
+    axes = np.asarray(
+        [
+            [np.cos(final_angle), np.sin(final_angle)],
+            [-np.sin(final_angle), np.cos(final_angle)],
+        ]
+    )
     output = {}
     for row in rectangles:
         projected = np.asarray(row["polygon_after"]) @ axes.T
@@ -156,16 +217,24 @@ def refine_height_review(points, vessel, b2, b4, config):
                 v1 = rho
         if v1 <= v0 + config["boundary"]["corner_join_m"]:
             output[row["hatch_id"]] = dict(
-                status="REJECTED_DEGENERATE_GEOMETRY", polygon=row["polygon_after"],
-                axes=initial_axes.tolist(), sides=details)
+                status="REJECTED_DEGENERATE_GEOMETRY",
+                polygon=row["polygon_after"],
+                axes=initial_axes.tolist(),
+                sides=details,
+            )
             continue
         polygon = np.asarray([[u0, v0], [u1, v0], [u1, v1], [u0, v1]]) @ axes
         output[row["hatch_id"]] = dict(
             status="HEIGHT_TRANSITION_REVIEW_NOT_STEEL",
-            polygon=polygon.tolist(), axes=axes.tolist(), sides=details,
-            axis_delta_deg=axis_delta)
-    return dict(status="HEIGHT_TRANSITION_REVIEW_NOT_STEEL",
-                axis_initial_deg=float(np.degrees(initial_angle)),
-                axis_delta_deg=axis_delta,
-                axis_review_deg=float(np.degrees(final_angle)),
-                rectangles=output)
+            polygon=polygon.tolist(),
+            axes=axes.tolist(),
+            sides=details,
+            axis_delta_deg=axis_delta,
+        )
+    return dict(
+        status="HEIGHT_TRANSITION_REVIEW_NOT_STEEL",
+        axis_initial_deg=float(np.degrees(initial_angle)),
+        axis_delta_deg=axis_delta,
+        axis_review_deg=float(np.degrees(final_angle)),
+        rectangles=output,
+    )

@@ -16,6 +16,8 @@ class StageProgress:
         self.started = time.perf_counter()
         self.sequence = 0
         self.lock = threading.Lock()
+        self.elapsed_stages = {}
+        self.first_failed_stage = None
 
     def _write(self, message: str) -> None:
         with self.lock:
@@ -51,12 +53,17 @@ class StageProgress:
             yield
         except BaseException:
             state = "FAILED"
+            if self.first_failed_stage is None:
+                self.first_failed_stage = name
             raise
         finally:
             stop.set()
             if thread is not None:
                 thread.join()
             ended = time.perf_counter()
+            self.elapsed_stages[name] = (
+                self.elapsed_stages.get(name, 0.0) + ended - started
+            )
             self._write(
                 "{} {} stage_elapsed={:.2f}s total_elapsed={:.2f}s".format(
                     label, state, ended - started, ended - self.started
