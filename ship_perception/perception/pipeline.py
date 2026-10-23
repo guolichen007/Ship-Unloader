@@ -314,13 +314,14 @@ def _legacy_proposals(frame, context, config, research, timing, local_caches=Non
             [box[0] - margin, box[1] - margin, box[2] + margin, box[3] + margin],
         )
         sides = {}
+        row["measured_side_candidates"] = {}
         for name, axis, position in (
             ("U0", 0, 0),
             ("U1", 0, 2),
             ("V0", 1, 1),
             ("V1", 1, 3),
         ):
-            tolerance = config["boundary"]["corner_join_m"]
+            tolerance = config["roi"]["support_search_m"]
             modes = _side_modes(
                 observations,
                 axis,
@@ -328,6 +329,12 @@ def _legacy_proposals(frame, context, config, research, timing, local_caches=Non
                 (box[position] - tolerance, box[position] + tolerance),
                 config,
             )
+            row["measured_side_candidates"][name] = modes
+            modes = [
+                m
+                for m in modes
+                if abs(m["rho"] - box[position]) <= config["boundary"]["corner_join_m"]
+            ]
             minimum = config["roi"]["min_enclosure_ratio"]
             sides[name] = dict(
                 raw3d_support=any(m["primary_raw3d"] >= minimum for m in modes),
@@ -444,6 +451,9 @@ def run_perception(frame, progress=None, legacy_evidence=True):
                 refiner = FinalBoundaryRefiner(cache.xyz, [], config)
                 for proposal in selected:
                     try:
+                        proposal["measured_side_candidates"] = cache.side_candidates(
+                            proposal["bounds_axial"]
+                        )
                         result = refiner.refine(proposal, vessel.axes)
                         result.update(
                             proposal_id=proposal["proposal_id"],

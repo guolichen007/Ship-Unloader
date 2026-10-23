@@ -1,6 +1,8 @@
 """Single four-side refiner using existing raw and multi-section primitives."""
 
 import warnings
+import copy
+import json
 
 import numpy as np
 from scipy.stats import theilslopes
@@ -52,8 +54,44 @@ class FinalBoundaryRefiner:
     def __init__(self, xyz, observations, config):
         self.xyz, self.observations, self.config = xyz, observations, config
         self.raw_section_cache = {}
+        self.refinement_cache = {}
+        self.refinement_cache_bytes = 0
 
     def refine(self, proposal, axes):
+        # Different proposal paths can converge to the exact same physical
+        # query after separator discovery. Reuse that query, preserving each
+        # caller's proposal identity outside this immutable geometry result.
+        key = json.dumps(
+            [
+                np.asarray(axes).tolist(),
+                {
+                    k: proposal.get(k)
+                    for k in (
+                        "bounds_axial",
+                        "bounds_before_separator",
+                        "deck_ring",
+                        "measured_side_candidates",
+                        "vessel_hypothesis_id",
+                        "raw_support_scope",
+                    )
+                },
+            ],
+            sort_keys=True,
+        )
+        if key in self.refinement_cache:
+            return copy.deepcopy(self.refinement_cache[key][0])
+        result = self._refine_uncached(proposal, axes)
+        size = len(json.dumps(result).encode()) + len(key.encode())
+        budget = 64 * 1024 * 1024
+        while self.refinement_cache and self.refinement_cache_bytes + size > budget:
+            _, removed = self.refinement_cache.popitem()
+            self.refinement_cache_bytes -= removed[1]
+        if size <= budget:
+            self.refinement_cache[key] = (copy.deepcopy(result), size)
+            self.refinement_cache_bytes += size
+        return result
+
+    def _refine_uncached(self, proposal, axes):
         box = list(map(float, proposal["bounds_axial"]))
         guard_bounds = list(map(float, proposal.get("bounds_before_separator", box)))
         config = self.config
@@ -66,6 +104,13 @@ class FinalBoundaryRefiner:
             raise ValueError("INVALID_HATCH_AXES")
         cell = config["geometry"]["refine_voxel_m"]
         margin = config["roi"]["boundary_search_m"] + config["boundary"]["side_probe_m"]
+        # The inherited rectangle can be anchored on a shell rim. A structural
+        # proposal may nominate a different physical line within the existing
+        # support ROI; each nominated line still gets the unchanged raw search.
+        reanchors = self._inner_role_anchors(proposal, box, cell)
+        for name, _, position, _ in SIDE_SPECS:
+            if reanchors[name]["status"] == "CORROBORATED_INNER_STEP":
+                box[position] = reanchors[name]["rho"]
         points = self.xyz
         roi = points[
             (points[:, 0] >= box[0] - margin)
@@ -173,6 +218,7 @@ class FinalBoundaryRefiner:
                     s
                     for s in samples
                     if (s["raw_subvoxel"] or s["profile_observation_count"])
+                    and s["height"].get("transition", False)
                     and s["raw_search"]["status"] != "MULTIMODE_BOUNDARY_CONFLICT"
                 ]
                 estimate, fit = self._fit(good, box[position])
@@ -206,7 +252,9 @@ class FinalBoundaryRefiner:
                 sum(s["height"].get("transition", False) for s in r["samples"])
                 for r in runs
             )
-            conflict = any(
+            conflict = reanchors[name][
+                "status"
+            ] == "MULTIMODE_BOUNDARY_CONFLICT" or any(
                 r["fit"]["status"] == "MULTIMODE_BOUNDARY_CONFLICT"
                 or sum(
                     s["raw_search"]["status"] == "MULTIMODE_BOUNDARY_CONFLICT"
@@ -219,6 +267,7 @@ class FinalBoundaryRefiner:
             dual_provider = ring_side.get("raw3d_support", False) and ring_side.get(
                 "bev_support", False
             )
+            dual_provider |= reanchors[name]["status"] == "CORROBORATED_INNER_STEP"
             independent = raw_sections >= config["boundary"][
                 "profile_min_sections"
             ] and (
@@ -293,6 +342,7 @@ class FinalBoundaryRefiner:
                 ),
                 phase_runs=runs,
                 steel_edge_certified=False,
+                opening_role_reanchor=reanchors[name],
                 source_vessel_id=proposal["vessel_hypothesis_id"],
                 raw_source_scope=proposal.get(
                     "raw_support_scope", "FROZEN_VESSEL_OWNED_POINTS"
@@ -344,6 +394,108 @@ class FinalBoundaryRefiner:
             vessel_local_axes=np.asarray(axes).tolist(),
             geometry_role="REVIEW_NOT_CERTIFIED_STEEL",
         )
+
+    def _inner_role_anchors(self, proposal, box, cell):
+        """Reject wrong-polarity shell lines before counting geometric support.
+
+        A long profile line alone cannot turn an outward drop into a hatch rim.
+        A replacement requires same-vessel Raw3D+BEV and signed raw support in
+        the existing number of independent physical sections. Coordinates and
+        scene identity are never supplied as hints.
+        """
+        config = self.config
+        minimum = config["boundary"]["profile_min_sections"]
+        support = config["roi"]["min_enclosure_ratio"]
+        output = {}
+        for name, axis, position, sign in SIDE_SPECS:
+            span = (box[1 - axis], box[3 - axis])
+            edges = physical_sections(span, cell, config)
+            spans = list(zip(edges[:-1], edges[1:]))
+            points = self.xyz[
+                (self.xyz[:, 1 - axis] >= span[0])
+                & (self.xyz[:, 1 - axis] <= span[1])
+                & (
+                    abs(self.xyz[:, axis] - box[position])
+                    <= config["roi"]["support_search_m"]
+                    + config["roi"]["boundary_search_m"]
+                    + config["boundary"]["side_probe_m"]
+                )
+            ]
+            prior = [
+                robust_height_support(points, axis, box[position], s, sign, config)
+                for s in spans
+            ]
+            prior_positive = sum(s["transition"] for s in prior)
+            state = dict(
+                status="UNCHANGED_ANCHOR",
+                rho=box[position],
+                prior_positive_sections=prior_positive,
+            )
+            output[name] = state
+            if prior_positive >= minimum:
+                continue
+            candidates = proposal.get("measured_side_candidates", {}).get(name, [])
+            measured = []
+            for candidate in candidates:
+                anchor = candidate["rho"]
+                # A replacement belongs to this side's half of the opening.
+                middle = (box[axis] + box[axis + 2]) / 2
+                if (anchor - middle) * sign >= 0 or abs(
+                    anchor - box[position]
+                ) > config["roi"]["support_search_m"]:
+                    continue
+                if min(candidate["primary_raw3d"], candidate["primary_bev"]) < support:
+                    continue
+                positive = sum(
+                    robust_height_support(points, axis, anchor, s, sign, config)[
+                        "transition"
+                    ]
+                    for s in spans
+                )
+                if positive < minimum:
+                    continue
+                raw = [self._raw_section(points, axis, anchor, s, sign) for s in spans]
+                unique = [
+                    s
+                    for s in raw
+                    if s["status"] == "UNIQUE_SIGNED_RAW_STEP"
+                    and s["height"]["transition"]
+                    and s["continuous"][3]
+                ]
+                if len(unique) < minimum:
+                    continue
+                fit_rows = [
+                    dict(along=(span[0] + span[1]) / 2, rho=record["continuous"][0])
+                    for span, record in zip(spans, raw)
+                    if record in unique
+                ]
+                rho, fit = self._fit(fit_rows, anchor)
+                if fit["status"] != "CONSENSUS":
+                    continue
+                measured.append(
+                    dict(
+                        rho=rho,
+                        support_section_count=len(unique),
+                        provider_ids=candidate["provider_ids"],
+                        primary_raw3d=candidate["primary_raw3d"],
+                        primary_bev=candidate["primary_bev"],
+                    )
+                )
+            if not measured:
+                state["status"] = "NO_CORROBORATED_INNER_REPLACEMENT"
+                continue
+            positions = np.array([s["rho"] for s in measured])
+            if np.ptp(positions) > config["boundary"]["corner_join_m"]:
+                state.update(
+                    status="MULTIMODE_BOUNDARY_CONFLICT", measured_modes=measured
+                )
+                continue
+            state.update(
+                status="CORROBORATED_INNER_STEP",
+                rho=float(np.median(positions)),
+                measured_modes=measured,
+            )
+        return output
 
     def _raw_section(self, roi, axis, anchor, span, sign):
         """Search the physical ROI with the existing raw midpoint primitive.

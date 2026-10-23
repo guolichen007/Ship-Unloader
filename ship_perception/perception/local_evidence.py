@@ -88,6 +88,40 @@ class VesselLocalEvidence:
                 row["point_index_sha256"] = self.vessel.point_index_sha256
         return self.providers
 
+    def side_candidates(self, box):
+        from ship_perception.r1_static.r2h_b5_corner_forensics import _side_modes
+
+        lines = [
+            dict(
+                normal_axis=p["rho_or_region"]["normal_axis"],
+                rho=p["rho_or_region"]["rho"],
+                along=p["support_interval"],
+                provider_type=p["provider_type"],
+                provider_id=p["provider_id"],
+                source_vessel_id=self.vessel.vessel_id,
+                source_support_ids=p["source_support_ids"],
+                source_scope="SAME_VESSEL",
+                coverage=p["coverage"],
+            )
+            for p in self.structural_providers()
+        ]
+        search = self.config["roi"]["support_search_m"]
+        return {
+            name: _side_modes(
+                lines,
+                axis,
+                (box[1 - axis], box[3 - axis]),
+                (box[position] - search, box[position] + search),
+                self.config,
+            )
+            for name, axis, position in (
+                ("U0", 0, 0),
+                ("U1", 0, 2),
+                ("V0", 1, 1),
+                ("V1", 1, 3),
+            )
+        }
+
     def export_structural(self):
         """Transform cached measured lines for the independent legacy consumer."""
         if self.input_frame_providers is None:
