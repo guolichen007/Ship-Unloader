@@ -43,6 +43,16 @@ def execute(frame, args, progress):
         flush=True,
     )
     print("INTENSITY_STATUS=" + payload["intensity_status"]["status"], flush=True)
+    print(
+        "UNRESOLVED_PROPOSAL_COUNT="
+        + str(
+            sum(
+                v["unresolved_review_proposals"]["total_count"]
+                for v in payload["per_vessel_status"]
+            )
+        ),
+        flush=True,
+    )
     print("OUTPUT_DIR=" + str(directory), flush=True)
     return 0
 

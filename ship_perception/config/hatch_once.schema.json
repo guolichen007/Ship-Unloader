@@ -106,7 +106,58 @@
           "status",
           "independent_groups",
           "aggregate_summary"
-        ]
+        ],
+        "properties": {
+          "unresolved_review_proposals": {
+            "type": "object",
+            "required": [
+              "total_count",
+              "samples",
+              "omitted_count",
+              "all_records_sha256"
+            ],
+            "properties": {
+              "total_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "omitted_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "all_records_sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "samples": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "reason",
+                    "proposal_id",
+                    "geometry_role",
+                    "proposal_boundary_uv",
+                    "proposal_boundary_xy",
+                    "precision_admitted"
+                  ],
+                  "properties": {
+                    "status": {
+                      "const": "UNRESOLVED"
+                    },
+                    "geometry_role": {
+                      "const": "UNREFINED_REVIEW_PROPOSAL_NOT_STEEL"
+                    },
+                    "precision_admitted": {
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   },

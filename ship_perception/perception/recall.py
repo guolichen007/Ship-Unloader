@@ -103,13 +103,9 @@ def propose_openings(cache, research):
         if row["containment"]["status"] == "REJECT_OUTSIDE_VESSEL":
             rejected.append(dict(reason="REJECT_OUTSIDE_VESSEL", bounds_axial=box))
             continue
-        # A narrow raised strip surrounded by lower returns is a competing
-        # structural role. Keep the evidence, never number it as an opening.
-        if scored["opening_evidence"].get("raised_strip_with_lower_regions_both_sides"):
-            rejected.append(
-                dict(reason="RAISED_STRIP_ROLE_AMBIGUOUS", bounds_axial=box)
-            )
-            continue
+        # Raised interior is a role conflict, not proof of a narrow beam:
+        # a loaded enclosure can also be higher than both outside probes.
+        # Validation preserves that hypothesis as unresolved, never as a hatch.
         candidates.append(row)
     return candidates, dict(
         height=height_audit,
@@ -125,7 +121,30 @@ def validate_and_select(cache, candidates, exterior):
     """Conservative enclosures survive; large envelopes cannot swallow observed cells."""
     grid = cache.grid("fine")
     config = cache.config
-    eligible, rejected = [], []
+    eligible, rejected, unresolved = [], [], []
+
+    def defer(row, reason):
+        unresolved.append(
+            dict(
+                row,
+                status="UNRESOLVED",
+                reason=reason,
+                candidate_type="UNRESOLVED_ENCLOSURE_PROPOSAL",
+                geometry_role="UNREFINED_REVIEW_PROPOSAL_NOT_STEEL",
+                precision_admitted=False,
+                first_failure_stage="OPENING_TOPOLOGY_VALIDATION",
+            )
+        )
+        rejected.append(
+            dict(
+                proposal_id=row["proposal_id"],
+                reason=reason,
+                bounds_axial=row["bounds_axial"],
+                review_only=True,
+                retained_for_review=True,
+            )
+        )
+
     for row in candidates:
         box = row["bounds_axial"]
         opening = row["opening_evidence"]
@@ -147,6 +166,9 @@ def validate_and_select(cache, candidates, exterior):
                     exterior=row["exterior"],
                 )
             )
+            continue
+        if opening.get("raised_strip_with_lower_regions_both_sides"):
+            defer(row, "RAISED_INTERIOR_ROLE_AMBIGUOUS")
             continue
         ring = row["deck_ring"]
         u, v = grid.centers()
@@ -176,23 +198,10 @@ def validate_and_select(cache, candidates, exterior):
             largest < config["roi"]["min_opening_cells"]
             or largest * grid.cell_m**2 < config["roi"]["opening_min_area_m2"]
         ):
-            rejected.append(
-                dict(
-                    proposal_id=row["proposal_id"],
-                    reason="UNRESOLVED_NO_OBSERVED_OPENING_INTERIOR",
-                    bounds_axial=box,
-                    review_only=True,
-                )
-            )
+            defer(row, "UNRESOLVED_NO_OBSERVED_OPENING_INTERIOR")
             continue
         if ring["positive_height_side_count"] < 2 and not raised:
-            rejected.append(
-                dict(
-                    proposal_id=row["proposal_id"],
-                    reason="INSUFFICIENT_SAME_VESSEL_DECK_RING",
-                    bounds_axial=box,
-                )
-            )
+            defer(row, "INSUFFICIENT_SAME_VESSEL_DECK_RING")
             continue
         row["validation_status"] = (
             "PARTIAL_BOUNDARY_AMBIGUOUS"
@@ -285,5 +294,8 @@ def validate_and_select(cache, candidates, exterior):
         row["deck_ring"] = deck_ring(cache, row)
         row["opening_evidence"] = _opening_evidence(grid, row["bounds_axial"], config)
     return split_rows, dict(
-        rejected=rejected, suppressed=suppressed, independent_groups=len(split_rows)
+        rejected=rejected,
+        suppressed=suppressed,
+        independent_groups=len(split_rows),
+        unresolved_proposals=unresolved,
     )

@@ -24,7 +24,7 @@ from .context import SceneEvidenceContext, thaw
 from .local_evidence import VesselLocalEvidence
 from .recall import propose_openings, validate_and_select, box_overlap
 from .validation import ExteriorTopology, vessel_containment
-from .final_boundary import FinalBoundaryRefiner
+from .final_boundary import FinalBoundaryRefiner, polygon
 from .intensity import admission_stats
 from ship_perception.r1_static.intensity_evidence import AUX_WEIGHT
 
@@ -414,6 +414,7 @@ def run_perception(frame, progress=None, legacy_evidence=True):
             classification_status=vessel.public["classification_status"],
             hatches=[],
             unresolved_candidates=[],
+            unresolved_review_proposals=bounded([]),
             rejected_final_candidates=[],
             status="UNRESOLVED_VESSEL_REVIEW",
         )
@@ -435,6 +436,30 @@ def run_perception(frame, progress=None, legacy_evidence=True):
                 caches[ident], exteriors[ident] = cache, exterior
                 proposals, audit = propose_openings(cache, research)
                 selected, selection = validate_and_select(cache, proposals, exterior)
+                deferred = selection.pop("unresolved_proposals", [])
+                for proposal in deferred:
+                    boundary = polygon(proposal["bounds_axial"])
+                    proposal.update(
+                        proposal_boundary_uv=boundary.tolist(),
+                        proposal_boundary_xy=(boundary @ vessel.axes).tolist(),
+                        vessel_local_axes=vessel.axes.tolist(),
+                        input_frame=frame.frame_id,
+                        transform_provenance="FROZEN_VESSEL_CONTEXT; UV_TO_INPUT_XY",
+                    )
+                # Retain the physically qualified examples before weaker
+                # alternatives in the bounded audit; area/count never rank them.
+                deferred.sort(
+                    key=lambda p: (
+                        sum(
+                            s["vertical_face_support"]
+                            for s in p["deck_ring"]["sides"].values()
+                        ),
+                        p["deck_ring"]["measured_strong_side_count"],
+                        p["deck_ring"]["dual_provider_side_count"],
+                    ),
+                    reverse=True,
+                )
+                item["unresolved_review_proposals"] = bounded(deferred)
                 rejected.extend(audit["rejected_candidates"])
                 item.update(
                     recall_audit={
@@ -848,6 +873,13 @@ def run_perception(frame, progress=None, legacy_evidence=True):
                 else (
                     "OPENING_TOPOLOGY_VALIDATION"
                     if any(h.get("reason") == "HATCH_COUNT_AMBIGUOUS" for h in hatches)
+                    or (
+                        not hatches
+                        and any(
+                            v["unresolved_review_proposals"]["total_count"]
+                            for v in by_vessel
+                        )
+                    )
                     else "LOCAL_RECALL_VALIDATE_PRECISION" if not hatches else None
                 )
             ),
