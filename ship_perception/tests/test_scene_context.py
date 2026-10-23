@@ -1,0 +1,104 @@
+"""Frozen scene provenance and isolated geometry failures."""
+
+import json
+import unittest
+from dataclasses import replace
+from unittest import mock
+import numpy as np
+from ship_perception.io.frame import PointCloudFrame
+from ship_perception.perception.context import SceneEvidenceContext, freeze
+from ship_perception.r1_static.run import resolve_config
+
+
+class SceneContextContracts(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.config, _ = resolve_config()
+
+    def test_frozen_context_rejects_same_xyz_different_wire_identity(self):
+        from ship_perception.r1_static.heightmap_batch import RESEARCH_CONFIG
+
+        u, v = np.meshgrid(np.arange(0, 12, 0.2), np.arange(0, 8, 0.2))
+        points = np.column_stack(
+            (u.ravel(), v.ravel(), np.where(u < 5, -1.0, 0.0).ravel())
+        )
+        frame = PointCloudFrame(
+            points,
+            None,
+            "map",
+            1,
+            2,
+            "topic",
+            ("x", "y", "z"),
+            len(points),
+            json.dumps(dict(wire_sha256="first")),
+        )
+        context = SceneEvidenceContext.build(
+            frame,
+            self.config,
+            json.loads(RESEARCH_CONFIG.read_text()),
+            "config",
+            "software",
+        )
+        context.validate_frame(frame)
+        for vessel in context.vessels:
+            self.assertFalse(vessel.point_indexes.flags.writeable)
+            with self.assertRaises(ValueError):
+                vessel.point_indexes.setflags(write=True)
+            with self.assertRaises(TypeError):
+                vessel.public["local_axes"] = [[1, 0], [0, 1]]
+        other = replace(frame, provenance_json=json.dumps(dict(wire_sha256="second")))
+        self.assertEqual(frame.sha256, other.sha256)
+        with self.assertRaisesRegex(ValueError, "WIRE_IDENTITY_MISMATCH"):
+            context.validate_frame(other)
+
+    def test_legacy_vessel_ambiguity_preserves_sibling_and_context(self):
+        from types import SimpleNamespace
+        from ship_perception.r1_static.corner_topology_review import review_points
+
+        scene = dict(
+            vessel_hypotheses=[
+                dict(
+                    vessel_hypothesis_id=ident,
+                    point_count=1,
+                    classification_status="VESSEL_HYPOTHESIS",
+                )
+                for ident in ("V0", "V1")
+            ]
+        )
+        context = SimpleNamespace(
+            scene=freeze(scene),
+            vessels=tuple(
+                SimpleNamespace(vessel_id=ident, point_indexes=np.array([index]))
+                for index, ident in enumerate(("V0", "V1"))
+            ),
+        )
+
+        def solve(*args, **kwargs):
+            if args[4] == "V0":
+                raise ValueError("OPENING_U_STATION_TOPOLOGY_AMBIGUOUS")
+            return dict(vessel_hypothesis_id="V1", rectangles=[dict(hatch_id="kept")])
+
+        with mock.patch(
+            "ship_perception.r1_static.corner_topology_review.infer_scene_vessels",
+            side_effect=AssertionError("B1 must not repeat"),
+        ), mock.patch(
+            "ship_perception.r1_static.corner_topology_review.solve_vessel_openings",
+            side_effect=solve,
+        ):
+            report, _, _ = review_points(
+                "test",
+                np.zeros((2, 3)),
+                "sha",
+                dict(input_sha256="sha", scene=scene),
+                dict(rectangles=[]),
+                self.config,
+                {},
+                scene_context=context,
+            )
+        self.assertEqual(report["vessels"][0]["status"], "AMBIGUOUS_TOPOLOGY")
+        self.assertEqual(report["vessels"][1]["rectangles"][0]["hatch_id"], "kept")
+
+
+if __name__ == "__main__":
+    unittest.main()

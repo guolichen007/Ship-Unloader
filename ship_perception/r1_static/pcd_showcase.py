@@ -66,7 +66,9 @@ def run(pcd, scene_id, output, expected_sha256=None):
     return report
 
 
-def prepare_geometry(points, scene_id, digest, config, research, progress=None):
+def prepare_geometry(
+    points, scene_id, digest, config, research, progress=None, *, scene_context=None
+):
     """Share the unchanged XYZ providers between file and ROS entry points."""
 
     with stage(progress, "HEIGHT_PROVIDER"):
@@ -82,13 +84,27 @@ def prepare_geometry(points, scene_id, digest, config, research, progress=None):
             config,
         )
     with stage(progress, "RECTANGLE_REFINEMENT"):
-        r2g = refine_rectangles(
-            points, structural["segment_resolutions"], structural["edges"], r2f, config
+        r2g = (
+            refine_rectangles(
+                points,
+                structural["segment_resolutions"],
+                structural["edges"],
+                r2f,
+                config,
+            )
+            if r2f["rectangles"]
+            else dict(rectangles=[], status="NO_LEGACY_RECTANGLE")
         )
     r2g["input_pcd_sha256"] = digest
 
     with stage(progress, "SCENE_VESSEL_DISCOVERY"):
-        b2 = discover_scene_hatches(points, config, research)
+        b2 = (
+            discover_scene_hatches(points, config, research)
+            if scene_context is None
+            else discover_scene_hatches(
+                points, config, research, scene_context=scene_context
+            )
+        )
     b2.update(scene_id=scene_id, input_sha256=digest, raw_point_count=int(len(points)))
     with stage(progress, "OPENING_SIDE_REVIEW"):
         b4 = bridge_final_rectangles(points, r2g, b2, config)
