@@ -125,7 +125,11 @@ def annotate_result(
 
     for vessel in report["vessels"]:
         ident = vessel["vessel_hypothesis_id"]
-        axes, _ = _showcase_axes(ident, b2, b4)
+        vessel_axes, _ = _showcase_axes(ident, b2, b4)
+        vessel_axes = np.array(vessel_axes, dtype=float, copy=True)
+        vessel_axes.setflags(write=False)
+        scorers = {}
+        axes = vessel_axes
         indexes = private["vessel_point_indexes"][ident]
         scorer = (
             None
@@ -140,17 +144,18 @@ def annotate_result(
         vessel["normalized_intensity_stats"] = (
             scorer.stats if scorer else dict(status="UNAVAILABLE_OR_DISABLED")
         )
+        if scorer is not None:
+            scorers[tuple(axes.ravel())] = scorer
         for hatch in vessel["rectangles"]:
             review = hatch.get("height_review") or {}
-            local_axes = np.asarray(review.get("axes", axes))
-            if scorer is not None and not np.allclose(local_axes, axes):
-                scorer = IntensityEvidence(
-                    xyz[indexes],
-                    intensity[indexes],
-                    local_axes,
-                    config["geometry"]["candidate_voxel_m"],
-                )
-                axes = local_axes
+            local_axes = np.asarray(review.get("axes", vessel_axes))
+            key = tuple(local_axes.ravel())
+            if intensity is not None:
+                if key not in scorers:
+                    scorers[key] = IntensityEvidence(
+                        xyz[indexes], intensity[indexes], local_axes,
+                        config["geometry"]["candidate_voxel_m"])
+                scorer = scorers[key]
             box = (
                 np.asarray(review.get("polygon", hatch["polygon_after"])) @ local_axes.T
             )

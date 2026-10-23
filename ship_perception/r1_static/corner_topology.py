@@ -185,10 +185,11 @@ def _side_rank(row, relation, old_rho, config, side):
         if side == "V1" and height else 0.0,
         -round(row.get("height_distance_m") or 0.0, 3)
         if side == "V1" and height else 0.0,
-        round(relation["boundary_asymmetry"] + row.get("intensity_bonus", 0.0), 3),
+        round(relation["boundary_asymmetry"], 3),
         -round(abs(row["rho"] - old_rho), 3),
         round(min(dual, 1.0), 3),
         round(row["height_coverage"], 3),
+        round(row.get("intensity_bonus", 0.0), 3),
     )
 
 
@@ -554,15 +555,23 @@ def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config,
                 continue
         groups.append([hatch])
     if len(groups) > 1:
-        children = [solve_vessel_openings(
-            points, b2, dict(rectangles=group), private_indexes, vessel_id, config,
-            _opening_context=_opening_context, intensity=intensity)
-            for group in groups]
-        result = dict(children[0])
-        result["status"] = "INDEPENDENT_OPENING_GROUPS"
-        result["independent_groups"] = children
-        result["rectangles"] = [row for child in children for row in child["rectangles"]]
-        result["rejected_external_points"] = children[0]["rejected_external_points"]
+        children = []
+        for group in groups:
+            try:
+                child = solve_vessel_openings(
+                    points, b2, dict(rectangles=group), private_indexes, vessel_id, config,
+                    _opening_context=_opening_context, intensity=intensity)
+            except (ValueError, ArithmeticError) as error:
+                child = dict(status="AMBIGUOUS_TOPOLOGY", rectangles=[],
+                             error_code=str(error), vessel_hypothesis_id=vessel_id)
+            children.append(child)
+        result = dict(vessel_hypothesis_id=vessel_id,
+                      status="INDEPENDENT_OPENING_GROUPS", independent_groups=children,
+                      rectangles=[row for child in children for row in child["rectangles"]],
+                      u_boundary_chain=None, selected_pair=None, v0_candidates=None,
+                      v1_candidates=None, section_rho_consensus=None,
+                      aggregate_summary=dict(group_count=len(children),
+                          unresolved_group_count=sum(not c["rectangles"] for c in children)))
         lineage = audit_lineage(dict(rectangles=[
             dict(hatch, polygon_before=hatch["polygon_after"])
             for hatch in hatches]), b2, config)
@@ -597,7 +606,10 @@ def solve_vessel_openings(points, b2, b4, private_indexes, vessel_id, config,
             station_groups.append([value])
     u_stations = [float(np.median(group)) for group in station_groups]
     if len(u_stations) != len(hatches) + 1:
-        raise ValueError("OPENING_U_STATION_TOPOLOGY_AMBIGUOUS")
+        return dict(vessel_hypothesis_id=vessel_id, rectangles=[],
+                    status="AMBIGUOUS_TOPOLOGY",
+                    error_code="OPENING_U_STATION_TOPOLOGY_AMBIGUOUS",
+                    observed_u_stations=u_stations)
     u_chain = []
     for old in u_stations:
         nearby = _side_modes(observations, 0, (envelope[1], envelope[3]),

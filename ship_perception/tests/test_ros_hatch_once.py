@@ -195,9 +195,9 @@ class IntensityAuxiliary(unittest.TestCase):
         baseline = _side_rank(row, relation, 2.0, config, "V1")
         row["intensity_bonus"] = 0.05
         fusion = _side_rank(row, relation, 2.0, config, "V1")
-        self.assertEqual(baseline[:10], fusion[:10])
+        self.assertEqual(baseline[:-1], fusion[:-1])
         self.assertEqual(fusion[0], 0)
-        self.assertGreater(fusion[10], baseline[10])
+        self.assertGreater(fusion[-1], baseline[-1])
 
 
 class DualOutput(unittest.TestCase):
