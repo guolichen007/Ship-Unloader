@@ -60,7 +60,11 @@ class PointCloudFrame:
                 raise ValueError("INTENSITY_XYZ_ALIGNMENT_ERROR")
             if not copy_arrays and not values.flags.owndata:
                 raise ValueError("FRAME_REQUIRES_OWNED_ARRAYS")
-            values[~np.isfinite(values)] = np.nan
+            invalid = ~np.isfinite(values)
+            if invalid.any():
+                if not values.flags.writeable:
+                    values = values.copy()
+                values[invalid] = np.nan
             digest.update(memoryview(values).cast("B"))
             values.setflags(write=False)
             object.__setattr__(self, "intensity", values)

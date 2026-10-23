@@ -86,6 +86,9 @@ def decode_pointcloud2(message, topic="/ship_scan/map", max_points=12000000):
         wire_bytes=wire.nbytes,
         layout=descriptor,
         intensity_source_calibration="UNKNOWN",
+        intensity_dtype=(
+            dtype.fields["intensity"][0].str if "intensity" in fields else None
+        ),
     )
     identity["raw_message_identity_sha256"] = hashlib.sha256(
         json.dumps(identity, sort_keys=True).encode()
