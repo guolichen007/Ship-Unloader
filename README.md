@@ -51,7 +51,7 @@ output/YYYYMMDD_HHMMSS_microseconds/
 - 强度仍为 `AUX_WEIGHT=0.05` 的辅助；没有双雷达源标识时校准状态为 `UNKNOWN`，不靠强度判钢。
 - 没有独立钢内沿 Golden，不能声明厘米级精度、商业泛化或现场自动作业通过。未开舱船需人工确认范围，当前没有自动开闭舱分类。
 
-开发回归与正式验收、Windows 与 Ubuntu、Synthetic 与 SITE 的结论分别记录，见 [测试与验收](docs/04_测试与验收说明.md)。旧 C++ V1.5 Quick 的已知失败继续保留，Python 工具运行成功不覆盖该验收事实。
+当前 Normal6 召回门尚未通过。开发回归与正式验收、Windows 与 Ubuntu、Synthetic 与 SITE 的结论分别记录，见 [测试与验收](docs/04_测试与验收说明.md)。旧 C++ V1.5 Quick 的已知失败继续保留，Python 工具运行成功不覆盖该验收事实。
 
 ## ROS2 安装入口
 
