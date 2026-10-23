@@ -28,6 +28,13 @@ class R1HeightGrid:
             self.y0 + (rows + 0.5) * self.cell_m,
         )
 
+    def axis_centers(self):
+        """Equivalent coordinate vectors without allocating two dense grids."""
+        return (
+            self.x0 + (np.arange(self.count.shape[1]) + 0.5) * self.cell_m,
+            self.y0 + (np.arange(self.count.shape[0]) + 0.5) * self.cell_m,
+        )
+
     def cell_indices(self, xy):
         xy = np.asarray(xy)
         col = np.floor((xy[:, 0] - self.x0) / self.cell_m).astype(np.int64)

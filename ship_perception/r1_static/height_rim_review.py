@@ -19,8 +19,12 @@ def _section_transition(
     # Only one-dimensional coordinates and the searched normal band are used.
     # Computing whole-grid medians for every side/section repeats unrelated
     # interior work and does not contribute evidence to this physical query.
-    u = grid.x0 + (np.arange(grid.count.shape[1]) + 0.5) * grid.cell_m
-    v = grid.y0 + (np.arange(grid.count.shape[0]) + 0.5) * grid.cell_m
+    if hasattr(grid, "axis_centers"):
+        u, v = grid.axis_centers()
+    else:
+        # Preserve the existing centers-only grid protocol used by callers.
+        u, v = grid.centers()
+        u, v = u[0], v[:, 0]
     z, count = grid.median, grid.count
     half = config["boundary"]["profile_half_length_m"]
     step_u = 2 * half
