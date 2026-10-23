@@ -632,6 +632,11 @@ def run_perception(frame, progress=None, legacy_evidence=True):
                 )
                 continue
             if not result.get("boundary_xy"):
+                result.update(
+                    proposal_id=proposal["proposal_id"],
+                    vessel_hypothesis_id=ident,
+                    proposal_source=proposal["proposal_source"],
+                )
                 item["unresolved_candidates"].append(result)
                 continue
             boundary = np.asarray(result["boundary_xy"]) @ vessel.axes.T
