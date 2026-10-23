@@ -123,11 +123,17 @@ class FinalBoundaryRefiner:
         if len(roi) > config["geometry"]["max_candidate_points"]:
             raise ValueError("FINAL_ROI_POINT_LIMIT_EXCEEDED")
         raw_sections = {}
+        section_points = {}
         for name, axis, position, sign in SIDE_SPECS:
             edges = physical_sections((box[1 - axis], box[3 - axis]), cell, config)
             for index, span in enumerate(zip(edges[:-1], edges[1:])):
+                # Each primitive independently restricts the same along-line
+                # interval. Retain those exact points once for all grid phases.
+                section_points[name, index] = roi[
+                    (roi[:, 1 - axis] >= span[0]) & (roi[:, 1 - axis] <= span[1])
+                ]
                 raw_sections[name, index] = self._raw_section(
-                    roi, axis, box[position], span, sign
+                    section_points[name, index], axis, box[position], span, sign
                 )
         origin = roi[:, :2].min(0) - cell
         phases = [(0.0, 0.0), (0.5, 0.0), (0.0, 0.5), (0.5, 0.5)]
@@ -157,16 +163,24 @@ class FinalBoundaryRefiner:
                         if measured
                         else box[position]
                     )
-                    rho, uncertainty, raw_count, paired = _continuous_rho(
-                        roi, self.observations, axis, anchor, (begin, end), sign, config
-                    )
                     direct = raw_sections[name, index]
+                    raw_points = section_points[name, index]
                     if direct["status"] == "UNIQUE_SIGNED_RAW_STEP":
                         rho, uncertainty, raw_count, paired = direct["continuous"]
+                    else:
+                        rho, uncertainty, raw_count, paired = _continuous_rho(
+                            raw_points,
+                            self.observations,
+                            axis,
+                            anchor,
+                            (begin, end),
+                            sign,
+                            config,
+                        )
                     if not paired and anchor != box[position]:
                         prior_rho, prior_uncertainty, prior_count, prior_paired = (
                             _continuous_rho(
-                                roi,
+                                raw_points,
                                 self.observations,
                                 axis,
                                 box[position],
@@ -186,7 +200,7 @@ class FinalBoundaryRefiner:
                         direct["height"]
                         if direct["status"] == "UNIQUE_SIGNED_RAW_STEP"
                         else robust_height_support(
-                            roi, axis, rho, (begin, end), sign, config
+                            raw_points, axis, rho, (begin, end), sign, config
                         )
                     )
                     profiles = [

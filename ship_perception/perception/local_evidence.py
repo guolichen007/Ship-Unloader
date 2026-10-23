@@ -170,11 +170,11 @@ def local_height_recall(cache, research):
                     else (grid.median > level + config["roi"]["opening_drop_m"])
                 )
                 labels, count = ndimage.label(mask, structure=np.ones((3, 3), bool))
+                label_counts = np.bincount(labels.ravel())
                 for label, slices in enumerate(ndimage.find_objects(labels), 1):
                     if slices is None:
                         continue
-                    member = labels == label
-                    cells = int(member.sum())
+                    cells = int(label_counts[label])
                     area = cells * grid.cell_m**2
                     if (
                         cells < config["roi"]["min_opening_cells"]
@@ -200,6 +200,7 @@ def local_height_recall(cache, research):
                     if key in seen:
                         continue
                     seen.add(key)
+                    member = labels == label
                     ring = (
                         ndimage.binary_dilation(
                             member,

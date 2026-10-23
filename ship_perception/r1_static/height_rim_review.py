@@ -16,13 +16,22 @@ def _section_transition(
     grid, u_bounds, rho_anchor, side_id, config, *, section_edges=None
 ):
     """Return robust U-section transition samples near an existing side."""
-    u, v = grid.centers()
-    u, v = u[0], v[:, 0]
+    # Only one-dimensional coordinates and the searched normal band are used.
+    # Computing whole-grid medians for every side/section repeats unrelated
+    # interior work and does not contribute evidence to this physical query.
+    u = grid.x0 + (np.arange(grid.count.shape[1]) + 0.5) * grid.cell_m
+    v = grid.y0 + (np.arange(grid.count.shape[0]) + 0.5) * grid.cell_m
     z, count = grid.median, grid.count
     half = config["boundary"]["profile_half_length_m"]
     step_u = 2 * half
     step_v = max(1, int(round(config["boundary"]["side_probe_m"] / grid.cell_m)))
     search = config["roi"]["boundary_search_m"]
+    searched = np.flatnonzero(abs(v - rho_anchor) <= search)
+    if len(searched):
+        begin_row = max(0, int(searched[0]) - step_v)
+        end_row = min(len(v), int(searched[-1]) + step_v + 1)
+    else:
+        begin_row = end_row = 0
     direction = 1 if side_id == "V1" else -1
     samples = []
     spans = (
@@ -41,15 +50,22 @@ def _section_transition(
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             section_z = np.nanmedian(
-                np.where(count[:, columns] > 0, z[:, columns], np.nan), axis=1
+                np.where(
+                    count[begin_row:end_row, columns] > 0,
+                    z[begin_row:end_row, columns],
+                    np.nan,
+                ),
+                axis=1,
             )
         candidates = []
-        for index in np.flatnonzero(abs(v - rho_anchor) <= search):
+        for index in searched:
             inside = index - direction * step_v
             outside = index + direction * step_v
             if min(inside, outside) < 0 or max(inside, outside) >= len(v):
                 continue
-            if not np.isfinite(section_z[[inside, outside]]).all():
+            if not np.isfinite(
+                section_z[[inside - begin_row, outside - begin_row]]
+            ).all():
                 continue
             inside_fraction = np.mean(count[inside, columns] > 0)
             outside_fraction = np.mean(count[outside, columns] > 0)
@@ -58,7 +74,9 @@ def _section_transition(
                 < config["roi"]["min_enclosure_ratio"]
             ):
                 continue
-            contrast = float(section_z[outside] - section_z[inside])
+            contrast = float(
+                section_z[outside - begin_row] - section_z[inside - begin_row]
+            )
             if contrast < config["roi"]["opening_drop_m"]:
                 continue
             candidates.append((float(v[index]), contrast))
