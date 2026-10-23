@@ -77,6 +77,100 @@ class PipelineContracts(unittest.TestCase):
             [h["boundary_xy"] for h in hatches],
         )
 
+    def test_unresolved_legacy_evidence_is_retained_without_promotion(self):
+        xyz, _ = vessel_points(1, spacing=0.12)
+        frame = PointCloudFrame(xyz, None, "map", 0, 0, "", ("x", "y", "z"), len(xyz))
+        from ship_perception.perception.final_boundary import FinalBoundaryRefiner
+
+        original = FinalBoundaryRefiner.refine
+
+        def comparison(frame, context, *args):
+            vessel = max(context.vessels, key=lambda v: len(v.point_indexes))
+            uv = frame.xyz[frame.xyz[:, 2] < -1, :2] @ vessel.axes.T
+            return [
+                dict(
+                    proposal_id="legacy:weak",
+                    vessel_hypothesis_id=vessel.vessel_id,
+                    axes=vessel.axes.tolist(),
+                    bounds_axial=[*uv.min(0), *uv.max(0)],
+                    proposal_source="SYNTHETIC_COMPARISON",
+                    inherited_review_status="UNRESOLVED",
+                )
+            ], {}
+
+        def refine(refiner, proposal, axes):
+            result = original(refiner, proposal, axes)
+            if proposal["proposal_id"] == "legacy:weak":
+                for side in result["sides"].values():
+                    side["raw_subvoxel_section_count"] = 0
+            return result
+
+        with mock.patch(
+            "ship_perception.perception.pipeline._legacy_proposals",
+            side_effect=comparison,
+        ), mock.patch.object(FinalBoundaryRefiner, "refine", new=refine):
+            result = run_perception(frame, legacy_evidence=True)
+        unresolved = [
+            r
+            for v in result["per_vessel_status"]
+            for r in v["unresolved_candidates"]["samples"]
+            if r.get("proposal_id") == "legacy:weak"
+        ]
+        self.assertEqual(len(unresolved), 1)
+        self.assertEqual(unresolved[0]["status"], "UNRESOLVED")
+        self.assertFalse(
+            any(
+                r["proposal_id"] == "legacy:weak"
+                for r in result["geometry_only"]["hatches"]
+            )
+        )
+
+    def test_legacy_raw_failure_isolated_from_sibling_and_local_result(self):
+        xyz, _ = vessel_points(1, spacing=0.12)
+        frame = PointCloudFrame(xyz, None, "map", 0, 0, "", ("x", "y", "z"), len(xyz))
+        from ship_perception.perception.final_boundary import FinalBoundaryRefiner
+
+        original = FinalBoundaryRefiner.refine
+        visited = []
+
+        def comparison(frame, context, *args):
+            vessel = max(context.vessels, key=lambda v: len(v.point_indexes))
+            uv = frame.xyz[frame.xyz[:, 2] < -1, :2] @ vessel.axes.T
+            bounds = [*uv.min(0), *uv.max(0)]
+            rows = [
+                dict(
+                    proposal_id="legacy:" + name,
+                    vessel_hypothesis_id=vessel.vessel_id,
+                    axes=vessel.axes.tolist(),
+                    bounds_axial=bounds,
+                    proposal_source="SYNTHETIC_COMPARISON",
+                )
+                for name in ("bad", "good")
+            ]
+            return rows, {}
+
+        def refine(refiner, proposal, axes):
+            visited.append(proposal["proposal_id"])
+            if proposal["proposal_id"] == "legacy:bad":
+                raise ValueError("SYNTHETIC_LOCAL_RAW_FAILURE")
+            return original(refiner, proposal, axes)
+
+        with mock.patch(
+            "ship_perception.perception.pipeline._legacy_proposals",
+            side_effect=comparison,
+        ), mock.patch.object(FinalBoundaryRefiner, "refine", new=refine):
+            result = run_perception(frame, legacy_evidence=True)
+        self.assertIn("legacy:good", visited)
+        self.assertGreater(result["geometry_only"]["hatch_count"], 0)
+        failures = result["pipeline_health"]["isolated_failures"]
+        self.assertTrue(
+            any(
+                f.get("hatch") == "legacy:bad"
+                and f["stage"] == "COMPARISON_BOUNDARY_PRECISION"
+                for f in failures
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -241,7 +241,7 @@ def _legacy_proposals(frame, context, config, research, timing, local_caches=Non
             if r.get("vessel_hypothesis_id") == ident
         }
         for row in vessel["rectangles"]:
-            if not row["status"].startswith("PARTIAL"):
+            if not row["status"].startswith(("PARTIAL", "UNRESOLVED")):
                 continue
             original = originals[row["hatch_id"]]
             axes = np.asarray(original["axes"])
@@ -573,8 +573,30 @@ def run_perception(frame, progress=None, legacy_evidence=True):
             proposal["raw_support_scope"] = (
                 "OWNED_PLUS_UNRESOLVED_CONTEXT; OTHER_VESSELS_EXCLUDED"
             )
-            with timing.stage(ident + "_COMPARISON_BOUNDARY_PRECISION"):
-                result = shared_refiner.refine(proposal, axes)
+            try:
+                with timing.stage(ident + "_COMPARISON_BOUNDARY_PRECISION"):
+                    result = shared_refiner.refine(proposal, axes)
+            except (ValueError, ArithmeticError) as error:
+                if any(
+                    code in str(error)
+                    for code in ("PROVENANCE", "CONFIG", "INVALID_HATCH_AXES")
+                ):
+                    raise
+                failure = dict(
+                    vessel=ident,
+                    hatch=proposal["proposal_id"],
+                    stage="COMPARISON_BOUNDARY_PRECISION",
+                    code=str(error),
+                )
+                isolated.append(failure)
+                item["unresolved_candidates"].append(
+                    dict(
+                        status="UNRESOLVED",
+                        failure=failure,
+                        proposal_id=proposal["proposal_id"],
+                    )
+                )
+                continue
             if not result.get("boundary_xy"):
                 item["unresolved_candidates"].append(result)
                 continue
@@ -600,6 +622,7 @@ def run_perception(frame, progress=None, legacy_evidence=True):
                 separator_evidence=proposal.get("measured_separator_faces"),
                 boundary_before_separator_uv=proposal.get("bounds_before_separator"),
                 raw_roi_ownership="CORE_PLUS_UNRESOLVED_BOUNDARY_CONTEXT; NOT_CERTIFIED_STEEL",
+                inherited_review_status=proposal.get("inherited_review_status"),
             )
             if (
                 containment["status"] == "REJECT_OUTSIDE_VESSEL"
@@ -619,6 +642,28 @@ def run_perception(frame, progress=None, legacy_evidence=True):
                     )
                 )
                 continue
+            if proposal.get("inherited_review_status", "").startswith("UNRESOLVED"):
+                # Preserve historical uncertainty for inspection. It may only
+                # enter hatch output after the same raw support and topology
+                # requirements as a newly recalled local proposal.
+                review_sides = sum(
+                    min(
+                        s["raw_subvoxel_section_count"],
+                        s["positive_height_section_count"],
+                    )
+                    >= config["boundary"]["profile_min_sections"]
+                    for s in result["sides"].values()
+                )
+                if (
+                    review_sides < 3
+                    or containment["status"] != "CONTAINED"
+                    or exterior["status"] != "ENCLOSED_OBSERVED_LOW_COMPONENT"
+                ):
+                    result.update(
+                        status="UNRESOLVED", review_support_side_count=review_sides
+                    )
+                    item["unresolved_candidates"].append(result)
+                    continue
             if (
                 exterior["status"] != "ENCLOSED_OBSERVED_LOW_COMPONENT"
                 or result["undercoverage_risk"]
@@ -693,6 +738,11 @@ def run_perception(frame, progress=None, legacy_evidence=True):
             v0_candidates=None,
             v1_candidates=None,
             section_rho_consensus=None,
+        )
+        # Curated comparison uncertainty must not disappear behind the many
+        # coarse local alternatives in the bounded diagnostic sample.
+        item["unresolved_candidates"].sort(
+            key=lambda r: not r.get("proposal_id", "").startswith("legacy:")
         )
         item["unresolved_candidates"] = bounded(item["unresolved_candidates"])
     return dict(
