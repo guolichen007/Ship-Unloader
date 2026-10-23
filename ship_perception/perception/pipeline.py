@@ -24,7 +24,7 @@ from .context import SceneEvidenceContext, thaw
 from .local_evidence import VesselLocalEvidence
 from .recall import propose_openings, validate_and_select, box_overlap
 from .validation import ExteriorTopology, vessel_containment
-from .final_boundary import FinalBoundaryRefiner
+from .final_boundary import FinalBoundaryRefiner, polygon
 from .intensity import admission_stats
 from ship_perception.r1_static.intensity_evidence import AUX_WEIGHT
 
@@ -448,9 +448,42 @@ def run_perception(frame, progress=None, legacy_evidence=True):
                 )
                 rejected.extend(selection["rejected"])
             with timing.stage(ident + "_LOCAL_FOUR_SIDE_PRECISION"):
+                item["precision_admission"] = dict(
+                    validated_proposal_count=len(selected),
+                    deferred_ambiguous_topology_count=sum(
+                        p.get("topology_status") == "AMBIGUOUS_TOPOLOGY"
+                        for p in selected
+                    ),
+                    raw_refinement_attempt_count=0,
+                )
                 refiner = FinalBoundaryRefiner(cache.xyz, [], config)
                 for proposal in selected:
+                    if proposal.get("topology_status") == "AMBIGUOUS_TOPOLOGY":
+                        # A well-supported outer envelope cannot determine
+                        # whether its ambiguous internal band divides hatches.
+                        # Retain the proposal, but do not manufacture a final
+                        # boundary by refining that composite envelope.
+                        uv = polygon(proposal["bounds_axial"])
+                        item["unresolved_candidates"].append(
+                            dict(
+                                status="UNRESOLVED",
+                                reason="HATCH_COUNT_AMBIGUOUS",
+                                precision_status="DEFERRED_AMBIGUOUS_TOPOLOGY",
+                                proposal_id=proposal["proposal_id"],
+                                vessel_hypothesis_id=ident,
+                                proposal_source="VESSEL_LOCAL_RECALL",
+                                topology_status=proposal["topology_status"],
+                                proposal_boundary_uv=uv.tolist(),
+                                proposal_boundary_xy=(uv @ vessel.axes).tolist(),
+                                geometry_role="PROPOSAL_ONLY_NOT_FINAL_BOUNDARY",
+                                containment=proposal["containment"],
+                                exterior=proposal["exterior"],
+                                deck_ring=proposal["deck_ring"],
+                            )
+                        )
+                        continue
                     try:
+                        item["precision_admission"]["raw_refinement_attempt_count"] += 1
                         proposal["measured_side_candidates"] = cache.side_candidates(
                             proposal["bounds_axial"]
                         )
@@ -462,6 +495,8 @@ def run_perception(frame, progress=None, legacy_evidence=True):
                             exterior=proposal["exterior"],
                             deck_ring=proposal["deck_ring"],
                             proposal_source="VESSEL_LOCAL_RECALL",
+                            topology_status=proposal.get("topology_status"),
+                            separator_evidence=proposal.get("measured_separator_faces"),
                         )
                         measured = sum(
                             s["raw_subvoxel_section_count"]
@@ -491,7 +526,15 @@ def run_perception(frame, progress=None, legacy_evidence=True):
                             proposal["exterior"]["status"]
                             == "ENCLOSED_OBSERVED_LOW_COMPONENT"
                         )
-                        if review_sides >= 3 and contained and enclosed:
+                        ambiguous_topology = (
+                            proposal.get("topology_status") == "AMBIGUOUS_TOPOLOGY"
+                        )
+                        if (
+                            review_sides >= 3
+                            and contained
+                            and enclosed
+                            and not ambiguous_topology
+                        ):
                             if measured < 4 or result["undercoverage_risk"]:
                                 result["status"] = "PARTIAL_HATCH"
                             if (
@@ -503,8 +546,12 @@ def run_perception(frame, progress=None, legacy_evidence=True):
                             item["hatches"].append(result)
                         else:
                             result["status"] = (
-                                "PARTIAL_HATCH" if review_sides >= 3 else "UNRESOLVED"
+                                "PARTIAL_HATCH"
+                                if review_sides >= 3 and not ambiguous_topology
+                                else "UNRESOLVED"
                             )
+                            if ambiguous_topology:
+                                result["reason"] = "HATCH_COUNT_AMBIGUOUS"
                             item["unresolved_candidates"].append(result)
                     except (ValueError, ArithmeticError) as error:
                         isolated.append(

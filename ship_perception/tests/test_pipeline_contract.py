@@ -13,6 +13,42 @@ from ship_perception.tests.test_hatch_metamorphic import vessel_points
 
 
 class PipelineContracts(unittest.TestCase):
+    def test_supported_outer_edges_cannot_resolve_ambiguous_inner_topology(self):
+        from ship_perception.perception.recall import validate_and_select
+
+        xyz, _ = vessel_points(1, spacing=0.12)
+        frame = PointCloudFrame(xyz, None, "map", 0, 0, "", ("x", "y", "z"), len(xyz))
+
+        def unresolved_split(*args):
+            rows, audit = validate_and_select(*args)
+            for row in rows:
+                row["topology_status"] = "AMBIGUOUS_TOPOLOGY"
+            return rows, audit
+
+        with mock.patch(
+            "ship_perception.perception.pipeline.validate_and_select",
+            side_effect=unresolved_split,
+        ), mock.patch(
+            "ship_perception.perception.pipeline.FinalBoundaryRefiner.refine",
+            side_effect=AssertionError("ambiguous composite reached final precision"),
+        ):
+            result = run_perception(frame, legacy_evidence=False)
+        self.assertEqual(result["geometry_only"]["hatch_count"], 0)
+        candidates = [
+            r
+            for v in result["per_vessel_status"]
+            for r in v["unresolved_candidates"]["samples"]
+        ]
+        self.assertTrue(
+            any(
+                r.get("proposal_boundary_xy")
+                and r.get("reason") == "HATCH_COUNT_AMBIGUOUS"
+                for r in candidates
+            )
+        )
+        self.assertTrue(all(r["status"] == "UNRESOLVED" for r in candidates))
+        self.assertTrue(all("best_estimate_boundary_xy" not in r for r in candidates))
+
     def test_real_b1_and_structural_provider_reuse_with_legacy_enabled(self):
         xyz, _ = vessel_points(1, spacing=0.12)
         frame = PointCloudFrame(xyz, None, "map", 0, 0, "", ("x", "y", "z"), len(xyz))
