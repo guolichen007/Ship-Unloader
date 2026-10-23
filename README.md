@@ -57,6 +57,7 @@ output/YYYYMMDD_HHMMSS_microseconds/
 | Scene/Vessel 与逐船多源候选 | 已实现；多船最终开口召回仍有缺口，不自动选择作业船 |
 | 强度辅助 | 逐船 robust normalization，弱辅助评分，不单独生成舱或认证钢边 |
 | 开口边界 | 输出 PARTIAL/UNRESOLVED 等审查状态；候选数不等于确认舱数 |
+| 深舱料脊与完整开口初值 | 用实测周边高度补充包围候选，保留结构/角点门；展示包含未检区域 |
 | V1.4 船体跟踪 | 保留冻结代码及 Ubuntu20 历史合成验证；识别联动与现场为 SITE_PENDING |
 | 钢内沿厘米级精度、商业泛化、自动控制 | 尚未验收；无 PLC 或自动作业输出 |
 

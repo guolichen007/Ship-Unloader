@@ -76,6 +76,15 @@ def _strip_relation(grid, rho, span, axis, inside_sign, config):
     inside_z = float(np.median(grid.median[valid_inside])) if valid_inside.any() else None
     outside_z = float(np.median(grid.median[valid_outside])) if valid_outside.any() else None
     contrast = abs(inside_z - outside_z) if inside_z is not None and outside_z is not None else 0.0
+    # Both sides of a real opening can be densely observed: low hold returns
+    # inside and high deck returns outside. Equal occupancy alone cannot call
+    # that signed height transition an interior cargo ridge.
+    lower_interior = (
+        min(inside_fraction, outside_fraction) >= config["roi"]["min_enclosure_ratio"]
+        and inside_z is not None
+        and outside_z is not None
+        and outside_z - inside_z >= config["roi"]["opening_drop_m"]
+    )
     return dict(
         inside_occupancy_fraction=inside_fraction,
         outside_occupancy_fraction=outside_fraction,
@@ -83,12 +92,18 @@ def _strip_relation(grid, rho, span, axis, inside_sign, config):
         outside_median_z_m=outside_z,
         boundary_asymmetry=float(abs(inside_fraction - outside_fraction)),
         height_contrast_m=float(contrast),
-        opening_one_sided=(inside_fraction >= config["roi"]["min_enclosure_ratio"] and
-                           outside_fraction <= inside_fraction / 2),
-        interior_ridge=(min(inside_fraction, outside_fraction) >=
-                        config["roi"]["min_enclosure_ratio"] and
-                        abs(inside_fraction - outside_fraction) <
-                        config["roi"]["min_enclosure_ratio"] / 2),
+        opening_height_transition=bool(lower_interior),
+        opening_one_sided=(
+            inside_fraction >= config["roi"]["min_enclosure_ratio"]
+            and outside_fraction <= inside_fraction / 2
+        ),
+        interior_ridge=(
+            not lower_interior
+            and min(inside_fraction, outside_fraction)
+            >= config["roi"]["min_enclosure_ratio"]
+            and abs(inside_fraction - outside_fraction)
+            < config["roi"]["min_enclosure_ratio"] / 2
+        ),
     )
 
 
@@ -105,13 +120,30 @@ def _section_consensus(grid, rho, span, axis, inside_sign, config):
                relation["outside_occupancy_fraction"]) < config["roi"]["min_enclosure_ratio"]:
             continue
         sections.append(dict(start_m=float(start), end_m=float(end), **relation))
-    transitions = sum(row["opening_one_sided"] for row in sections)
+    transitions = sum(
+        row["opening_one_sided"] or row["opening_height_transition"] for row in sections
+    )
     ridges = sum(row["interior_ridge"] for row in sections)
-    return dict(section_count=len(sections), transition_count=transitions,
-                internal_ridge_section_count=ridges,
-                left_endpoint_support=bool(sections and sections[0]["opening_one_sided"]),
-                right_endpoint_support=bool(sections and sections[-1]["opening_one_sided"]),
-                sections=sections)
+    return dict(
+        section_count=len(sections),
+        transition_count=transitions,
+        internal_ridge_section_count=ridges,
+        left_endpoint_support=bool(
+            sections
+            and (
+                sections[0]["opening_one_sided"]
+                or sections[0]["opening_height_transition"]
+            )
+        ),
+        right_endpoint_support=bool(
+            sections
+            and (
+                sections[-1]["opening_one_sided"]
+                or sections[-1]["opening_height_transition"]
+            )
+        ),
+        sections=sections,
+    )
 
 
 def _side_rank(row, relation, old_rho, config, side):

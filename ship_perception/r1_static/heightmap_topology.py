@@ -274,6 +274,43 @@ def _box_corners(node):
             ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
 
 
+def _local_enclosure_nodes(
+    chosen, groups, grid, surface, valid, vessel, config, research
+):
+    """Recover enclosure proposals above a cargo ridge missed by global modes.
+
+    Local ring medians supply observed levels, never a steel edge. Keep only
+    new four-sided basins containing multiple selected fragments. The normal
+    rectangle solver still rejects internal structural separators and applies
+    its unchanged four-side evidence gate.
+    """
+    existing = [node for group in groups for node in group]
+    recovered = []
+    join = config["boundary"]["corner_join_m"]
+    levels = sorted(set(node.surrounding_height_m for node in chosen))
+    for index, level in enumerate(levels):
+        nodes = _nodes_at_level(
+            grid, surface, valid, vessel, level, len(groups) + index, config, research
+        )
+        for node in nodes:
+            if node.height_rise_side_count != 4:
+                continue
+            if any(
+                max(abs(a - b) for a, b in zip(node.bbox_xy, old.bbox_xy)) <= join
+                for old in existing + recovered
+            ):
+                continue
+            enclosed = [
+                child
+                for child in chosen
+                if np.count_nonzero(child.mask & node.mask)
+                == np.count_nonzero(child.mask)
+            ]
+            if len(enclosed) >= 2:
+                recovered.append(node)
+    return recovered
+
+
 def detect_regions(points, config, research, *, forensic_trace=None):
     """Locate coarse height basins; selected regions are proposals, never observed steel."""
     points = np.asarray(points, dtype=np.float32)
@@ -315,12 +352,18 @@ def detect_regions(points, config, research, *, forensic_trace=None):
                               height_regions_after_global_filter=[],
                               dropped_by_global_relative_score=[])
     if not np.any(vessel):
-        return dict(schema_version="ship_perception.v15r.heightmap_regions.1",
-                    status="NO_VESSEL_SUPPORT", coordinate_frame="RAW_INPUT_FRAME",
-                    region_count=0, regions=[], levels_m=[], level_hierarchy=[],
-                    target_vessel_status="UNVERIFIED_RESEARCH_HEURISTIC",
-                    limitation="HEIGHTMAP_REGION_BOXES_ARE_NOT_OBSERVED_STEEL_BOUNDARIES"), dict(
-            coarse=coarse, valid=valid, vessel=vessel, masks=[])
+        return dict(
+            schema_version="ship_perception.v15r.heightmap_regions.1",
+            status="NO_VESSEL_SUPPORT",
+            coordinate_frame="RAW_INPUT_FRAME",
+            region_count=0,
+            regions=[],
+            levels_m=[],
+            level_hierarchy=[],
+            local_enclosure_proposals=[],
+            target_vessel_status="UNVERIFIED_RESEARCH_HEURISTIC",
+            limitation="HEIGHTMAP_REGION_BOXES_ARE_NOT_OBSERVED_STEEL_BOUNDARIES",
+        ), dict(coarse=coarse, valid=valid, vessel=vessel, masks=[])
     # Raw cell medians preserve transverse deck ridges. Morphology bridges
     # missing cells after thresholding, without blurring those height modes.
     surface = coarse.median
@@ -345,6 +388,9 @@ def detect_regions(points, config, research, *, forensic_trace=None):
             row for row in forensic_trace["height_regions_before_global_filter"]
             if row["node_id"] not in kept]
     chosen = _combine_fragments(chosen, coarse, valid, vessel, config, research)
+    local_enclosures = _local_enclosure_nodes(
+        chosen, groups, coarse, surface, valid, vessel, config, research
+    )
     chosen.sort(key=lambda node: ((node.bbox_xy[0] + node.bbox_xy[2]) / 2,
                                   (node.bbox_xy[1] + node.bbox_xy[3]) / 2))
     fine = R1HeightGrid.from_points(points, config["geometry"]["candidate_voxel_m"])
@@ -418,13 +464,42 @@ def detect_regions(points, config, research, *, forensic_trace=None):
                       height_rise_side_count=node.height_rise_side_count,
                       child_ids=[child.node_id for child in node.children])
                  for group in groups for node in group]
-    return (dict(schema_version="ship_perception.v15r.heightmap_regions.1",
-                 status="REGION_CANDIDATES" if records else "NO_REGION_CANDIDATES",
-                 coordinate_frame="RAW_INPUT_FRAME", region_count=len(records),
-                 target_vessel_status="UNVERIFIED_RESEARCH_HEURISTIC",
-                 grid=dict(x0=coarse.x0, y0=coarse.y0, cell_m=coarse.cell_m,
-                           rows=int(coarse.count.shape[0]), cols=int(coarse.count.shape[1]),
-                           valid_cells=int(valid.sum()), vessel_support_cells=int(vessel.sum())),
-                 levels_m=levels, regions=records, level_hierarchy=hierarchy,
-                 limitation="HEIGHTMAP_REGION_BOXES_ARE_NOT_OBSERVED_STEEL_BOUNDARIES"),
-            dict(coarse=coarse, valid=valid, vessel=vessel, surface=surface, masks=masks))
+    enclosure_proposals = [
+        dict(
+            node_id=node.node_id,
+            level_m=node.level_m,
+            area_m2=node.area_m2,
+            score=node.score,
+            dominant_height_m=node.dominant_height_m,
+            bbox_xy=list(node.bbox_xy),
+            side_height_rises_m=list(node.side_height_rises_m),
+            height_rise_side_count=node.height_rise_side_count,
+            child_ids=[],
+            proposal_source="LOCAL_RING_HEIGHT_ENCLOSURE",
+        )
+        for node in local_enclosures
+    ]
+    return (
+        dict(
+            schema_version="ship_perception.v15r.heightmap_regions.1",
+            status="REGION_CANDIDATES" if records else "NO_REGION_CANDIDATES",
+            coordinate_frame="RAW_INPUT_FRAME",
+            region_count=len(records),
+            target_vessel_status="UNVERIFIED_RESEARCH_HEURISTIC",
+            grid=dict(
+                x0=coarse.x0,
+                y0=coarse.y0,
+                cell_m=coarse.cell_m,
+                rows=int(coarse.count.shape[0]),
+                cols=int(coarse.count.shape[1]),
+                valid_cells=int(valid.sum()),
+                vessel_support_cells=int(vessel.sum()),
+            ),
+            levels_m=levels,
+            regions=records,
+            level_hierarchy=hierarchy,
+            local_enclosure_proposals=enclosure_proposals,
+            limitation="HEIGHTMAP_REGION_BOXES_ARE_NOT_OBSERVED_STEEL_BOUNDARIES",
+        ),
+        dict(coarse=coarse, valid=valid, vessel=vessel, surface=surface, masks=masks),
+    )

@@ -78,7 +78,7 @@ def prepare_geometry(points, scene_id, digest, config, research, progress=None):
             points,
             structural["segment_resolutions"],
             structural["edges"],
-            height["level_hierarchy"],
+            height["level_hierarchy"] + height.get("local_enclosure_proposals", []),
             config,
         )
     with stage(progress, "RECTANGLE_REFINEMENT"):
@@ -97,6 +97,9 @@ def prepare_geometry(points, scene_id, digest, config, research, progress=None):
         b4,
         dict(
             height_region_count=height["region_count"],
+            local_enclosure_proposal_count=len(
+                height.get("local_enclosure_proposals", [])
+            ),
             r2f_rectangle_count=len(r2f["rectangles"]),
             r2g_rectangle_count=len(r2g["rectangles"]),
             b4_rectangle_count=len(b4["rectangles"]),

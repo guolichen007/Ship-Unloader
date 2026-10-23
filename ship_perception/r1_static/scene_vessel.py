@@ -10,6 +10,7 @@ import numpy as np
 from scipy import ndimage, signal
 
 from .height_grid import R1HeightGrid
+from .heightmap_topology import _side_height_rises
 from .raw_topview_evidence import raster_channels
 
 
@@ -135,8 +136,13 @@ def _seams(points, axes, config, research):
         radius = max(1, int(math.ceil(config["roi"]["support_connectivity_m"] / cell)))
         edge_coverage = float(np.max(line_coverage[max(0, valley - radius):
                                                      min(len(line_coverage), valley + radius + 1)]))
-        if (contrast >= config["roi"]["opening_drop_m"] and
-                edge_coverage >= config["roi"]["min_enclosure_ratio"]):
+        if (
+            contrast >= config["roi"]["opening_drop_m"]
+            and edge_coverage >= config["roi"]["min_enclosure_ratio"]
+            and not _enclosed_trough(
+                grid, valley, min(smooth[a], smooth[b]), central, config
+            )
+        ):
             candidates.append((valley, "HEIGHT_TROUGH", float(contrast), edge_coverage))
     for a, b in zip(distance_peaks, distance_peaks[1:]):
         valley = a + int(np.argmin(distance_profile[a:b + 1]))
@@ -156,6 +162,36 @@ def _seams(points, axes, config, research):
             for row in chosen], dict(
                 rectilinear_support=float(np.max(line_coverage)),
                 opening_contrast_m=float(np.nanmax(smooth) - np.nanmin(smooth)))
+
+
+def _enclosed_trough(grid, valley, shoulder_z, central, config):
+    """A low component enclosed on four sides is interior, not a ship seam.
+
+    A cross-axis median alone confuses two sides of an open hold with two
+    vessel cores. Two end caps alone can also bracket water or quay returns;
+    require measured height rises on all four sides of the connected basin.
+    This veto never manufactures hatch geometry.
+    """
+    low = grid.occupancy & (grid.median < shoulder_z - config["roi"]["opening_drop_m"])
+    minimum = config["roi"]["min_enclosure_ratio"]
+    labels, _ = ndimage.label(low, structure=np.ones((3, 3), bool))
+    for label in sorted(set(labels[valley, central]) - {0}):
+        if np.count_nonzero(labels[valley, central] == label) < minimum * central.sum():
+            continue
+        rows, cols = np.nonzero(labels == label)
+        box = [
+            grid.x0 + cols.min() * grid.cell_m,
+            grid.y0 + rows.min() * grid.cell_m,
+            grid.x0 + (cols.max() + 1) * grid.cell_m,
+            grid.y0 + (rows.max() + 1) * grid.cell_m,
+        ]
+        rises, _ = _side_height_rises(grid, grid.occupancy, box, config)
+        if all(
+            rise is not None and rise > config["roi"]["opening_drop_m"]
+            for rise in rises
+        ):
+            return True
+    return False
 
 
 def _merge_collinear(groups, points, config):

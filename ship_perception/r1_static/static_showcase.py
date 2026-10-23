@@ -80,6 +80,24 @@ def _showcase_axes(vessel_id, b2, b4):
     return np.asarray(vessel["local_axes"]), "B2_VESSEL_AXES"
 
 
+def _review_limits(axial, private, vessels, polygons, margin):
+    """Show measured vessel support even when its openings were not detected."""
+    indexes = private.get("vessel_point_indexes", {})
+    owned = [
+        np.asarray(indexes[row["vessel_hypothesis_id"]], dtype=int)
+        for row in vessels
+        if row["vessel_hypothesis_id"] in indexes
+    ]
+    support = axial[np.concatenate(owned)] if owned else axial
+    boxes = np.vstack([support] + [polygon for _, polygon in polygons])
+    return (
+        float(boxes[:, 0].min() - margin),
+        float(boxes[:, 0].max() + margin),
+        float(boxes[:, 1].min() - margin),
+        float(boxes[:, 1].max() + margin),
+    )
+
+
 def render_showcase(report, points, private, b2, b4, config, output,
                     height_only=False, image_only=False, image_name=None,
                     title=None, annotation=None):
@@ -123,9 +141,7 @@ def render_showcase(report, points, private, b2, b4, config, output,
         if height_only else row["polygon_after"]) @ axes.T)
                 for vessel in active for row in vessel["rectangles"]]
     margin = config["roi"]["support_search_m"] * 2
-    boxes = np.vstack([polygon for _, polygon in polygons]) if polygons else axial
-    limits = (boxes[:, 0].min() - margin, boxes[:, 0].max() + margin,
-              boxes[:, 1].min() - margin, boxes[:, 1].max() + margin)
+    limits = _review_limits(axial, private, report["vessels"], polygons, margin)
 
     def frame(title):
         fig, ax = plt.subplots(figsize=(16, 6), facecolor="white")
