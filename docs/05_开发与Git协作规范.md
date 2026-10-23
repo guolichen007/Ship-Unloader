@@ -39,7 +39,9 @@ README 只写当前用途、环境、入口、能力/限制、阅读顺序和目
 
 Git 只保存源码、配置/schema、测试、小型元数据、SHA 和当前文档。Raw PCD/PLY/ZIP、客户数据、build、validation、logs、临时包、私有模型、绝对开发机路径及秘密不新增 Git。已有受控合成夹具保留，不能把客户数据冒充夹具。数据与 Work/output 规则见[数据规范](03_数据与证据规范.md)。
 
-## C++17 与 Python 3.8
+## C++17 与 Python
+
+核心 Python 保持 3.8 语法兼容；ROS2 Humble 正式运行使用 Ubuntu22/Python3.10 与 requirements-ros.txt 隔离依赖，不能把新数值依赖直接安装到 Ubuntu20 历史冻结环境。
 
 正确性、追溯、安全失败优先于性能或代码短。物理量命名带单位，浮点比较用具名可配置 tolerance，不改既有阈值以过测试；位姿 double、Eigen::Isometry3d，方向 T_A_B，全部舱共用船体位姿。
 

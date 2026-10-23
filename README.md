@@ -2,33 +2,31 @@
 
 双激光雷达卸船机船舱识别与船体稳定跟踪系统。
 
-当前现场交付是 **ROS 1 单帧开舱候选识别与人工复核工具**。直接读取 `/ship_scan/map` 的拼接点云，对同一帧生成几何主算法和强度辅助两种结果。V1.4 刚体跟踪保留在仓库中，尚未与这个现场入口集成。
+当前现场入口是 **Ubuntu 22.04 / ROS2 Humble 的单帧开舱候选与人工复核工具**。读取 PCD 或 `/ship_scan/map` 后，使用同一条几何链输出边界、逐边证据、不确定性和两张复核图。结果不用于自动控制；V1.4 船体跟踪源码继续冻结保留，尚未与此入口联动。
 
-## 当前现场入口
+## 两个现场入口
 
-已经准备好 ROS 和 Python 依赖时，在仓库根目录运行：
-
-```bash
-source /opt/ros/noetic/setup.bash
-./scripts/run_ship_hatch_once.sh --save_snapshot
-```
-
-默认消息类型 `sensor_msgs/PointCloud2`，`x/y/z` 必需，`intensity` 可选。强度缺失或无效时明确回退到几何结果。脚本名、参数和终端提示均为英文，展示图保持中文。
-
-首次使用 Ubuntu 20.04 / Python 3.8 / ROS 1 Noetic：
+首次安装依赖见 [ROS2 现场说明](docs/02_ROS2现场一键识别运行说明.md)。在仓库根目录运行：
 
 ```bash
-git clone git@github.com:guolichen007/Ship-Unloader.git
-cd Ship-Unloader
-source /opt/ros/noetic/setup.bash
-sudo apt-get install python3-venv fonts-noto-cjk
-python3 -m venv --system-site-packages .local/ros-venv
-source .local/ros-venv/bin/activate
-python3 -m pip install -r requirements-ros.txt
-./scripts/run_ship_hatch_once.sh --save_snapshot
+source /opt/ros/humble/setup.bash
+source .local/ros2-venv/bin/activate
+
+# Offline PCD: no ROS runtime is required by this script.
+./scripts/run_ship_hatch_pcd.sh --pcd /data/map.pcd --save-snapshot
+
+# Capture exactly one ROS2 map message, then run the same algorithm.
+./scripts/run_ship_hatch_once.sh --save-snapshot
 ```
 
-建图发布器需要另行启动；如需工作空间环境，先 source 其 `devel/setup.bash`。后续继续激活同一 Python 环境。远程 ROS 网络、参数与错误处理见[现场运行说明](docs/02_ROS现场一键识别运行说明.md)。
+脚本名、参数、日志和图中说明使用英文。`x/y/z` 必需，`intensity` 可选。缺失或近似恒定的强度明确回退几何，第二张图标记 `Intensity unavailable - geometry result reused`，不重复运行整套几何复核。
+
+地图采集默认 `--topic /ship_scan/map --qos auto --timeout-sec 30`。AUTO 读取实际发布者 QoS；TransientLocal 地图支持晚加入订阅。Volatile 地图需要发布者再次发布，日志会说明等待原因。多个发布者、错误消息类型或超时生成独立失败诊断。
+
+```bash
+./scripts/run_ship_hatch_once.sh --topic /ship_scan/map --qos auto \
+  --timeout-sec 60 --output-dir ./output --save-snapshot
+```
 
 ## 输出与进度
 
@@ -38,57 +36,56 @@ output/YYYYMMDD_HHMMSS_microseconds/
 ├── 02_intensity_fusion.png
 ├── 03_results.json
 ├── 04_input_summary.txt
-└── input_snapshot.npz       # only with --save_snapshot
+└── input_snapshot.npz       # only with --save-snapshot
 ```
 
-每次只生成这两张展示图，诊断信息放入 JSON。终端按阶段显示 `START / RUNNING / DONE / FAILED`、阶段耗时和累计耗时，长阶段每 15 秒报告运行状态。只有完整结果才发布到正式目录；执行成功表示计算完成，不表示船舱已经确认。
+终端逐阶段显示 `START / RUNNING / DONE / FAILED`、阶段耗时与总耗时，长阶段每 15 秒报告仍在运行。正式目录只在四份产物全部写完后发布；失败另存 `failure_*/failure.json`。
+
+琥珀实线为最佳复核边界，点线为不确定性覆盖范围。`PARTIAL_HATCH`、`UNRESOLVED_VESSEL_REVIEW` 不能当作已确认船舱；矩形约束和缺测推断不能当作实测钢边。完整原始场景保留在背景中，避免漏检区域被绘图裁掉。
+
+## 当前技术路线与边界
+
+- 主链为输入检查 → 一次 B1 船体归属 → 冻结证据上下文 → 逐船 UVZ 召回 → 船外低区与包围验证 → 四边 Raw XYZ 精修 → 角点重建与防内裁。
+- 全局 Height/R2F/R2G 保留为可关闭的比较证据，不能限制逐船候选是否存在。`--no-legacy-evidence` 用于独立链验证；禁用后不代表所有真实船已完成召回验收。
+- 不通过固定水面 Z、船型尺寸或指定舱数补框。外部连通检查只经过实测低格，空白不充当通道。三边或裁剪不明时保留局部未决证据。
+- 强度仍为 `AUX_WEIGHT=0.05` 的辅助；没有双雷达源标识时校准状态为 `UNKNOWN`，不靠强度判钢。
+- 没有独立钢内沿 Golden，不能声明厘米级精度、商业泛化或现场自动作业通过。未开舱船需人工确认范围，当前没有自动开闭舱分类。
+
+开发回归与正式验收、Windows 与 Ubuntu、Synthetic 与 SITE 的结论分别记录，见 [测试与验收](docs/04_测试与验收说明.md)。旧 C++ V1.5 Quick 的已知失败继续保留，Python 工具运行成功不覆盖该验收事实。
+
+## ROS2 安装入口
+
+混合 C++ / Python 包采用 `ament_cmake` 与 `ament_cmake_python`，保留 standalone C++ 构建。完整依赖和构建命令见 [现场说明](docs/02_ROS2现场一键识别运行说明.md)。构建后支持：
 
 ```bash
-./scripts/run_ship_hatch_once.sh \
-  --topic /ship_scan/map --timeout_sec 60 --output_dir ./output --save_snapshot
+source install/setup.bash
+ros2 run ship_perception ship_hatch_once --save-snapshot
+ros2 run ship_perception ship_hatch_pcd --pcd /data/map.pcd
 ```
 
-## 当前真实能力
-
-| 能力 | 当前状态 |
-| --- | --- |
-| PointCloud2、XYZ/intensity 对齐和强度缺失回退 | 已实现；真实 ROS 发布器连接仍需现场确认 |
-| 几何与强度辅助双结果、两图及结果追溯 | 已实现，使用同一份输入点云 |
-| Scene/Vessel 与逐船多源候选 | 已实现；多船最终开口召回仍有缺口，不自动选择作业船 |
-| 强度辅助 | 逐船 robust normalization，弱辅助评分，不单独生成舱或认证钢边 |
-| 开口边界 | 输出 PARTIAL/UNRESOLVED 等审查状态；候选数不等于确认舱数 |
-| 深舱料脊与完整开口初值 | 用实测周边高度补充包围候选，保留结构/角点门；展示包含未检区域 |
-| V1.4 船体跟踪 | 保留冻结代码及 Ubuntu20 历史合成验证；识别联动与现场为 SITE_PENDING |
-| 钢内沿厘米级精度、商业泛化、自动控制 | 尚未验收；无 PLC 或自动作业输出 |
-
-本轮面向已开舱场景。未开舱船由现场人员确认并排除本轮开舱评估，程序尚无独立自动开/闭舱分类能力；人工范围说明不进入算法评分。
-
-正常六场景当前候选数为 `2/1/1/1/1/3`，只是开发回归覆盖。没有独立 opening inner-edge Golden，不能据此声明钢边精度通过。旧 C++ V1.5 Quick 的 real-smoke/integration 仍有失败，详见[测试说明](docs/04_测试与验收说明.md)。
+仓库脚本可直接使用源码，不要求先编译 C++。`ros2 run` 和 launch 入口需要先构建安装。
 
 ## 新工程师阅读顺序
 
-1. [系统架构与技术路线](docs/00_系统架构与技术路线.md)：职责、当前链路、坐标和证据。
-2. [ROS 现场运行](docs/02_ROS现场一键识别运行说明.md)：安装、启动、参数、输出、故障处理。
-3. [识别算法实现](docs/01_船舱识别算法实现说明.md)：模块及有效技术结论。
-4. [数据与证据规范](docs/03_数据与证据规范.md)：追溯、GT 隔离和数据暴露。
-5. [测试与验收](docs/04_测试与验收说明.md)：开发回归与正式放行。
-6. [开发与 Git 协作](docs/05_开发与Git协作规范.md)：提交、分支、PR、Tag 和代理规则。
-7. [V1.4 跟踪实现](docs/V1.4_船体稳定跟踪实现说明.md)及[Ubuntu20 验证记录](docs/V1.4_Ubuntu20验证记录.md)：历史技术基线。
-
-## 代码与数据位置
+1. [架构与技术路线](docs/00_系统架构与技术路线.md)：职责、主链、坐标和证据身份。
+2. [ROS2 现场运行](docs/02_ROS2现场一键识别运行说明.md)：依赖、两个脚本、QoS、故障处理。
+3. [算法实现](docs/01_船舱识别算法实现说明.md)：逐船召回、船外拒绝和四边精修。
+4. [数据与证据](docs/03_数据与证据规范.md)：原始身份、GT 隔离、admission 和 Golden。
+5. [测试与验收](docs/04_测试与验收说明.md)：开发回归、反证测试与放行边界。
+6. [开发与 Git 协作](docs/05_开发与Git协作规范.md)：分支、提交及代理执行规则。
+7. [V1.4 跟踪实现](docs/V1.4_船体稳定跟踪实现说明.md)和 [Ubuntu20 历史验证](docs/V1.4_Ubuntu20验证记录.md)。
 
 ```text
-scripts/run_ship_hatch_once.sh   # field launcher
-ship_perception/ros/            # one-frame ROS input and orchestration
-ship_perception/r1_static/      # geometry, intensity evidence, review and rendering
-ship_perception/src/            # C++ recognition and frozen V1.4 tracking
-ship_perception/config/         # configuration and schemas
-ship_perception/tests/          # unit, contract and synthetic gates
-Ship-Unloader-Data/             # private raw data; never pushed
-Ship-Unloader-Work/             # build, validation, logs; never pushed
-output/                        # field outputs; never pushed
+scripts/                        # English field launchers
+ship_perception/io/             # ROS-free PCD and PointCloud2 decoding
+ship_perception/perception/     # transport-neutral review pipeline
+ship_perception/ros2/           # graph/QoS discovery and one-frame capture
+ship_perception/r1_static/      # reused measured geometry primitives and legacy comparison
+ship_perception/legacy/ros1/    # historical comparison only
+ship_perception/evaluation/     # independent annotation evaluation; never imported by runtime
+ship_perception/src/            # C++ recognition and frozen V1.4 core
+Ship-Unloader-Data/              # private raw data; never pushed
+Ship-Unloader-Work/              # builds, logs and validation; never pushed
 ```
 
-现场 Python 入口不需要编译 C++。C++ 构建与正式复验见[工程构建入口](ship_perception/README.md)。客户数据不随 clone 提供；Git 只保存源码、配置、测试、小型元数据和当前文档。
-
-`main` 是当前工程与现场复核入口。正式历史跟踪 Tag 为 `baseline-v1.4-ubuntu20-20260919`；`archive/*` 仅用于追溯，不作为新开发起点。历史过程文档可从 Git 历史读取，HEAD 不再保存过程副本。
+正式历史跟踪 Tag `baseline-v1.4-ubuntu20-20260919` 保留。`archive/*` 只用于追溯；本轮不修改 main、不创建 PR、不 merge、不删分支或 Tag。

@@ -1,6 +1,6 @@
 # 工程构建入口
 
-现场 ROS 单帧工具使用 Python，无需编译 C++，先读[仓库 README](../README.md)和[现场运行说明](../docs/02_ROS现场一键识别运行说明.md)。本页用于 C++ 开发与 V1.4 复验。
+现场 ROS 单帧工具使用 Python，无需编译 C++，先读[仓库 README](../README.md)和[现场运行说明](../docs/02_ROS2现场一键识别运行说明.md)。本页用于 C++ 开发与 V1.4 复验。
 
 ## Ubuntu20 开发构建
 
