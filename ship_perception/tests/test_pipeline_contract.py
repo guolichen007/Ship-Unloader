@@ -13,6 +13,43 @@ from ship_perception.tests.test_hatch_metamorphic import vessel_points
 
 
 class PipelineContracts(unittest.TestCase):
+    def test_invalid_final_polygon_is_local_uncertainty_not_a_frame_failure(self):
+        from ship_perception.perception.final_boundary import FinalBoundaryRefiner
+
+        xyz, _ = vessel_points(2, spacing=0.12)
+        frame = PointCloudFrame(xyz, None, "map", 0, 0, "", ("x", "y", "z"), len(xyz))
+        original = FinalBoundaryRefiner.refine
+        failed = []
+
+        def invalid_once(refiner, proposal, axes):
+            result = original(refiner, proposal, axes)
+            measured = sum(
+                min(s["raw_subvoxel_section_count"], s["positive_height_section_count"])
+                >= 4
+                for s in result.get("sides", {}).values()
+            )
+            if not failed and measured >= 3:
+                failed.append(proposal["proposal_id"])
+                return dict(
+                    status="UNRESOLVED",
+                    error_code="DEGENERATE_FINAL_BOUNDARY",
+                    sides=result["sides"],
+                )
+            return result
+
+        with mock.patch.object(FinalBoundaryRefiner, "refine", new=invalid_once):
+            result = run_perception(frame, legacy_evidence=False)
+        self.assertEqual(len(failed), 1)
+        self.assertGreater(result["geometry_only"]["hatch_count"], 0)
+        unresolved = [
+            r
+            for v in result["per_vessel_status"]
+            for r in v["unresolved_candidates"]["samples"]
+        ]
+        self.assertTrue(
+            any(r.get("error_code") == "DEGENERATE_FINAL_BOUNDARY" for r in unresolved)
+        )
+
     def test_supported_outer_edges_cannot_resolve_ambiguous_inner_topology(self):
         from ship_perception.perception.recall import validate_and_select
 

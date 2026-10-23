@@ -14,9 +14,7 @@ from ship_perception.r1_static.rectangle_refinement import (
     _raw_edge_rho,
 )
 from .sections import physical_sections, robust_height_support
-
-
-SIDE_SPECS = (("U0", 0, 0, 1), ("U1", 0, 2, -1), ("V0", 1, 1, 1), ("V1", 1, 3, -1))
+from .line_geometry import SIDE_SPECS, guard_line_move, guarded_intersections
 
 
 def polygon(box):
@@ -247,13 +245,52 @@ class FinalBoundaryRefiner:
                         height_transition_reason=evidence["reason"],
                     )
                 )
-        sides, after, coverage = {}, box[:], box[:]
+        sides, after = {}, box[:]
         for name, axis, position, sign in SIDE_SPECS:
             runs = phase_results[name]
-            rhos = np.array([r["rho"] for r in runs])
+            reference = (box[1 - axis] + box[3 - axis]) / 2
+            span = (
+                min(box[1 - axis], guard_bounds[1 - axis]),
+                max(box[3 - axis], guard_bounds[3 - axis]),
+            )
+            phase_slopes = np.array(
+                [
+                    (
+                        r["fit"].get("slope", 0.0)
+                        if r["fit"]["status"] == "CONSENSUS"
+                        else 0.0
+                    )
+                    for r in runs
+                ]
+            )
+            rhos = np.array(
+                [
+                    (
+                        r["fit"]["rho_at_reference_m"]
+                        + m * (reference - r["fit"]["reference_along_m"])
+                        if r["fit"]["status"] == "CONSENSUS"
+                        else r["rho"]
+                    )
+                    for r, m in zip(runs, phase_slopes)
+                ]
+            )
             estimate = float(np.median(rhos))
+            proposed_slope = (
+                float(np.median(phase_slopes))
+                if all(r["fit"]["status"] == "CONSENSUS" for r in runs)
+                else 0.0
+            )
             mad = float(np.median(abs(rhos - estimate)))
             maximum = float(max(abs(rhos - estimate)))
+            proposed_endpoints = estimate + proposed_slope * (
+                np.asarray(span) - reference
+            )
+            phase_endpoints = rhos[:, None] + phase_slopes[:, None] * (
+                np.asarray(span)[None, :] - reference
+            )
+            endpoint_deviation = float(
+                np.max(abs(phase_endpoints - proposed_endpoints))
+            )
             minimum_sections = min(r["support_section_count"] for r in runs)
             raw_sections = min(
                 sum(s["raw_subvoxel"] for s in r["samples"]) for r in runs
@@ -291,9 +328,12 @@ class FinalBoundaryRefiner:
                 )
                 or profile_sections >= config["boundary"]["profile_min_sections"]
             )
-            rho, status, risk = guard_move(
+            rho, slope, status, risk = guard_line_move(
                 guard_bounds[position],
                 estimate,
+                proposed_slope,
+                reference,
+                span,
                 sign,
                 minimum_sections,
                 independent and not conflict,
@@ -306,6 +346,7 @@ class FinalBoundaryRefiner:
                     > config["boundary"]["corner_join_m"]
                     else box[position]
                 )
+                slope = 0.0
                 status, risk = "KEEP_CONSERVATIVE_PREVIOUS_BOUNDARY", True
             if conflict:
                 rho, status, risk = (
@@ -313,9 +354,24 @@ class FinalBoundaryRefiner:
                     "MULTIMODE_BOUNDARY_CONFLICT",
                     True,
                 )
+                slope = 0.0
+            applied_endpoints = rho + slope * (np.asarray(span) - reference)
+            sample_displacement = max(
+                (
+                    abs(s["rho"] - (rho + slope * (s["along"] - reference)))
+                    for r in runs
+                    for s in r["samples"]
+                    if s["height"].get("transition", False)
+                    and (s["raw_subvoxel"] or s["profile_observation_count"])
+                ),
+                default=0.0,
+            )
             uncertainty = max(
                 config["geometry"]["plane_inlier_m"],
                 maximum,
+                endpoint_deviation,
+                float(np.max(abs(proposed_endpoints - applied_endpoints))),
+                sample_displacement,
                 max(
                     (s["uncertainty_m"] for r in runs for s in r["samples"]),
                     default=cell,
@@ -325,16 +381,43 @@ class FinalBoundaryRefiner:
             if minimum_sections < config["boundary"]["profile_min_sections"]:
                 uncertainty = max(uncertainty, config["roi"]["boundary_search_m"])
             after[position] = rho
-            coverage[position] = (
-                min(guard_bounds[position], rho - uncertainty)
-                if sign == 1
-                else max(guard_bounds[position], rho + uncertainty)
-            )
             sides[name] = dict(
                 rho_before_m=guard_bounds[position],
                 rho_search_anchor_m=box[position],
                 rho_after_m=rho,
                 side_inward_move_m=(rho - guard_bounds[position]) * sign,
+                side_max_endpoint_inward_move_m=float(
+                    np.max(sign * (applied_endpoints - guard_bounds[position]))
+                ),
+                proposed_max_endpoint_inward_move_m=float(
+                    np.max(sign * (proposed_endpoints - guard_bounds[position]))
+                ),
+                independent_geometry_support=bool(
+                    independent
+                    and not conflict
+                    and minimum_sections >= config["boundary"]["profile_min_sections"]
+                ),
+                line=dict(
+                    normal_axis=axis,
+                    slope=slope,
+                    reference_along_m=reference,
+                    rho_at_reference_m=rho,
+                    source=(
+                        "RAW_SECTION_ROBUST_LINE"
+                        if minimum_sections
+                        >= config["boundary"]["profile_min_sections"]
+                        and not conflict
+                        and rho == estimate
+                        and slope == proposed_slope
+                        else "CONSERVATIVE_AXIS_LINE"
+                    ),
+                ),
+                proposed_line=dict(
+                    normal_axis=axis,
+                    slope=proposed_slope,
+                    reference_along_m=reference,
+                    rho_at_reference_m=estimate,
+                ),
                 support_section_count=minimum_sections,
                 support_section_ratio=minimum_sections
                 / max(1, runs[0]["physical_section_count"]),
@@ -347,12 +430,14 @@ class FinalBoundaryRefiner:
                 grid_phase=dict(
                     status=(
                         "GRID_PHASE_STABLE"
-                        if maximum <= config["boundary"]["line_inlier_m"]
+                        if max(maximum, endpoint_deviation)
+                        <= config["boundary"]["line_inlier_m"]
                         else "GRID_PHASE_SENSITIVE"
                     ),
                     median_m=estimate,
                     mad_m=mad,
                     max_deviation_m=maximum,
+                    endpoint_max_deviation_m=endpoint_deviation,
                 ),
                 phase_runs=runs,
                 steel_edge_certified=False,
@@ -366,18 +451,21 @@ class FinalBoundaryRefiner:
             return dict(
                 status="UNRESOLVED", error_code="DEGENERATE_FINAL_BOUNDARY", sides=sides
             )
-        # Four final constrained line intersections. The model constraint is
-        # explicit; it does not create observation for an unsupported side.
-        best, cover = polygon(after), polygon(coverage)
-        uncertainty = [
-            float(
-                np.hypot(
-                    sides[a]["boundary_uncertainty_m"],
-                    sides[b]["boundary_uncertainty_m"],
-                )
+        try:
+            best, radii, corner_geometry = guarded_intersections(
+                sides, guard_bounds, config
             )
-            for a, b in (("U0", "V0"), ("U1", "V0"), ("U1", "V1"), ("U0", "V1"))
-        ]
+        except ValueError as error:
+            return dict(status="UNRESOLVED", error_code=str(error), sides=sides)
+        uncertainty = np.linalg.norm(radii, axis=1).tolist()
+        # Coverage is an uncertainty envelope, never a replacement steel line.
+        original = polygon(guard_bounds)
+        cover = polygon(
+            [
+                *np.minimum(original.min(0), (best - radii).min(0)),
+                *np.maximum(original.max(0), (best + radii).max(0)),
+            ]
+        )
         return dict(
             status="HATCH_REVIEW_CANDIDATE",
             boundary_uv=best.tolist(),
@@ -399,12 +487,7 @@ class FinalBoundaryRefiner:
                 )
                 for xy, u in zip((best @ axes).tolist(), uncertainty)
             ],
-            corner_geometry=dict(
-                orthogonality_deg=90.0,
-                parallelism_deg=0.0,
-                rectangle_constraint_applied=True,
-                intersection_stable=True,
-            ),
+            corner_geometry=corner_geometry,
             vessel_local_axes=np.asarray(axes).tolist(),
             geometry_role="REVIEW_NOT_CERTIFIED_STEEL",
         )
@@ -486,6 +569,9 @@ class FinalBoundaryRefiner:
                 rho, fit = self._fit(fit_rows, anchor)
                 if fit["status"] != "CONSENSUS":
                     continue
+                rho += fit["slope"] * (
+                    (span[0] + span[1]) / 2 - fit["reference_along_m"]
+                )
                 measured.append(
                     dict(
                         rho=rho,
@@ -493,6 +579,7 @@ class FinalBoundaryRefiner:
                         provider_ids=candidate["provider_ids"],
                         primary_raw3d=candidate["primary_raw3d"],
                         primary_bev=candidate["primary_bev"],
+                        fit=fit,
                     )
                 )
             if not measured:
@@ -599,8 +686,14 @@ class FinalBoundaryRefiner:
             return float(np.median(y)), dict(status="INSUFFICIENT_SUPPORT")
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
-            fit = theilslopes(y, x)
-        residual = y - (fit[0] * x + fit[1])
+            reference, center_rho = float(np.median(x)), float(np.median(y))
+            fit = theilslopes(y - center_rho, x - reference)
+        if not np.isfinite(np.asarray(fit)).all():
+            return center_rho, dict(
+                status="MULTIMODE_BOUNDARY_CONFLICT", reason="DEGENERATE_SECTION_LINE"
+            )
+        rho_at_reference = center_rho + float(fit[1])
+        residual = y - (rho_at_reference + fit[0] * (x - reference))
         mad = float(np.median(abs(residual)))
         consistent = abs(residual) <= self.config["boundary"]["corner_join_m"]
         status = (
@@ -612,8 +705,13 @@ class FinalBoundaryRefiner:
             )
             else "MULTIMODE_BOUNDARY_CONFLICT"
         )
-        return float(np.median(y)), dict(
+        return rho_at_reference, dict(
             status=status,
+            slope=float(fit[0]),
+            low_slope=float(fit[2]),
+            high_slope=float(fit[3]),
+            reference_along_m=reference,
+            rho_at_reference_m=rho_at_reference,
             residual_mad_m=mad,
             unconstrained_slope_deg=float(np.degrees(np.arctan(fit[0]))),
             inlier_section_count=int(consistent.sum()),

@@ -475,6 +475,9 @@ def run_perception(frame, progress=None, legacy_evidence=True):
                             topology_ambiguity=proposal.get("topology_ambiguity"),
                             separator_evidence=proposal.get("measured_separator_faces"),
                         )
+                        if not result.get("boundary_xy"):
+                            item["unresolved_candidates"].append(result)
+                            continue
                         measured = sum(
                             s["raw_subvoxel_section_count"]
                             >= config["boundary"]["profile_min_sections"]
