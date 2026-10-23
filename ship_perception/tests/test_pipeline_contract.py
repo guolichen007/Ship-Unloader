@@ -18,6 +18,7 @@ class PipelineContracts(unittest.TestCase):
 
         xyz, _ = vessel_points(1, spacing=0.12)
         frame = PointCloudFrame(xyz, None, "map", 0, 0, "", ("x", "y", "z"), len(xyz))
+        baseline = run_perception(frame, legacy_evidence=False)
 
         def unresolved_split(*args):
             rows, audit = validate_and_select(*args)
@@ -28,26 +29,31 @@ class PipelineContracts(unittest.TestCase):
         with mock.patch(
             "ship_perception.perception.pipeline.validate_and_select",
             side_effect=unresolved_split,
-        ), mock.patch(
-            "ship_perception.perception.pipeline.FinalBoundaryRefiner.refine",
-            side_effect=AssertionError("ambiguous composite reached final precision"),
         ):
             result = run_perception(frame, legacy_evidence=False)
-        self.assertEqual(result["geometry_only"]["hatch_count"], 0)
-        candidates = [
-            r
-            for v in result["per_vessel_status"]
-            for r in v["unresolved_candidates"]["samples"]
-        ]
-        self.assertTrue(
-            any(
-                r.get("proposal_boundary_xy")
-                and r.get("reason") == "HATCH_COUNT_AMBIGUOUS"
-                for r in candidates
-            )
+        candidates = result["geometry_only"]["hatches"]
+        self.assertGreater(len(candidates), 0)
+        self.assertEqual(
+            [(r["boundary_xy"], r["per_side_uncertainty"]) for r in candidates],
+            [
+                (r["boundary_xy"], r["per_side_uncertainty"])
+                for r in baseline["geometry_only"]["hatches"]
+            ],
         )
-        self.assertTrue(all(r["status"] == "UNRESOLVED" for r in candidates))
-        self.assertTrue(all("best_estimate_boundary_xy" not in r for r in candidates))
+        self.assertEqual(result["geometry_only"]["hatch_count_status"], "AMBIGUOUS")
+        self.assertEqual(
+            result["pipeline_health"]["first_failure_stage"],
+            "OPENING_TOPOLOGY_VALIDATION",
+        )
+        self.assertTrue(all(r["status"].startswith("UNRESOLVED") for r in candidates))
+        self.assertTrue(all(r["reason"] == "HATCH_COUNT_AMBIGUOUS" for r in candidates))
+        self.assertTrue(all(r["individual_hatch_count"] is None for r in candidates))
+        self.assertTrue(
+            all("HATCH_COUNT_AMBIGUOUS" in r["candidate_blockers"] for r in candidates)
+        )
+        self.assertTrue(
+            all(r["geometry_role"] == "UNRESOLVED_ENCLOSURE_REVIEW" for r in candidates)
+        )
 
     def test_real_b1_and_structural_provider_reuse_with_legacy_enabled(self):
         xyz, _ = vessel_points(1, spacing=0.12)

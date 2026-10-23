@@ -269,6 +269,8 @@ def validate_and_select(cache, candidates, exterior):
                     if separator is not None
                     else "INDEPENDENT_OPENING_GROUP"
                 )
+                if separator is not None:
+                    item["topology_ambiguity"] = separator
                 split_rows.append(item)
     split_rows.sort(key=lambda r: (r["bounds_axial"][0], r["bounds_axial"][1]))
     for row in split_rows:

@@ -38,6 +38,10 @@ def execute(frame, args, progress):
     print(
         "HATCH_REVIEW_COUNT=" + str(payload["geometry_only"]["hatch_count"]), flush=True
     )
+    print(
+        "HATCH_COUNT_STATUS=" + payload["geometry_only"]["hatch_count_status"],
+        flush=True,
+    )
     print("INTENSITY_STATUS=" + payload["intensity_status"]["status"], flush=True)
     print("OUTPUT_DIR=" + str(directory), flush=True)
     return 0
