@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+from ship_perception.ros2.ship_scan_once import main
+raise SystemExit(main())

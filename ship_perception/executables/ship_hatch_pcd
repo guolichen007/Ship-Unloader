@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+from ship_perception.perception.cli import pcd_main
+raise SystemExit(pcd_main())
