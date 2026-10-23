@@ -186,35 +186,9 @@ def _raw3d_provider(points, vessel, config, *, coarse_grid=None):
     valid = grid.occupancy
     span = grid.q90 - grid.q10
     evidence = []
-    raw_xy = axial[:, :2]
+    from .raw_surface_normals import LocalSurfaceNormals
 
-    def verified_vertical_face(normal_axis, rho, interval):
-        normal = raw_xy[:, normal_axis]
-        along = raw_xy[:, 1 - normal_axis]
-        band = max(
-            config["geometry"]["refine_voxel_m"], config["boundary"]["profile_step_m"]
-        )
-        mask = (
-            (np.abs(normal - rho) <= band)
-            & (along >= interval[0])
-            & (along <= interval[1])
-        )
-        face_points = axial[mask]
-        if len(face_points) < config["geometry"]["min_plane_points"]:
-            return False
-        if np.ptp(face_points[:, 2]) < config["boundary"]["face_vertical_span_min_m"]:
-            return False
-        if len(face_points) > 3000:
-            face_points = face_points[
-                np.linspace(0, len(face_points) - 1, 3000).astype(int)
-            ]
-        _, _, vectors = np.linalg.svd(
-            face_points - face_points.mean(axis=0), full_matrices=False
-        )
-        return bool(
-            abs(vectors[-1, 2])
-            <= math.sin(math.radians(config["geometry"]["normal_angle_deg"]))
-        )
+    normals = LocalSurfaceNormals(axial, config)
 
     for normal_axis in (0, 1):
         if normal_axis == 0:
@@ -268,8 +242,9 @@ def _raw3d_provider(points, vessel, config, *, coarse_grid=None):
                     types.append("RAW3D_PROFILE_BREAK")
                 if np.any(face_line[indexes]):
                     types.append("RAW3D_VERTICAL_SPAN")
-                    if verified_vertical_face(normal_axis, rho, interval):
-                        types.append("RAW3D_VERIFIED_VERTICAL_FACE")
+                validation = normals.face_evidence(normal_axis, rho, interval)
+                if validation["status"] == "LOCAL_3D_NORMAL_FACE":
+                    types.append("RAW3D_VERIFIED_VERTICAL_FACE")
                 observed_along = along_origin + (indexes + 0.5) * grid.cell_m
                 evidence.append(
                     _record(
@@ -280,6 +255,7 @@ def _raw3d_provider(points, vessel, config, *, coarse_grid=None):
                         dict(
                             endpoints_xy=_world_line(axes, normal_axis, rho, *interval),
                             raw_section_count=int(len(indexes)),
+                            vertical_face_validation=validation,
                             observed_intervals=_measured_intervals(
                                 observed_along,
                                 config["boundary"]["max_support_gap_m"],
