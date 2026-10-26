@@ -15,7 +15,7 @@ from ship_perception.r1_static.hatch_proposal import (
     _raw3d_provider,
     _world_line,
 )
-from .context import BoundaryMeasurementContext, thaw
+from .context import thaw
 
 
 def cluster_levels(values, config, research):
@@ -61,7 +61,9 @@ class VesselLocalEvidence:
         uvz = np.column_stack((points[:, :2] @ vessel.axes.T, points[:, 2]))
         uvz.setflags(write=False)
         if measurement_context is None:
-            measurement_context = BoundaryMeasurementContext.build(vessel, [vessel])
+            # Standalone raw-geometry consumers need only their own point set;
+            # borrowing requires the explicit frozen scene context from B1.
+            return cls(vessel, uvz, config, context_xyz=uvz)
         if measurement_context.vessel_id != vessel.vessel_id:
             raise ValueError("LOCAL_MEASUREMENT_CONTEXT_VESSEL_MISMATCH")
         if measurement_context.point_index_sha256 == vessel.point_index_sha256:
