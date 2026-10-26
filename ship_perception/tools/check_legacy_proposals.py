@@ -23,6 +23,13 @@ def main():
     args = parser.parse_args()
     expected = json.loads(args.baseline.read_text(encoding="utf-8"))
     frame = read_pcd(args.pcd)
+    if "scenes" in expected:
+        matches = [
+            row for row in expected["scenes"] if row["semantic_sha256"] == frame.sha256
+        ]
+        if len(matches) != 1:
+            raise ValueError("LEGACY_REGRESSION_INPUT_NOT_UNIQUE")
+        expected = matches[0]
     config, sha = resolve_config()
     research = json.loads(RESEARCH_CONFIG.read_bytes())
     verify_legacy_sources()

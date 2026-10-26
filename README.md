@@ -2,7 +2,7 @@
 
 双激光雷达卸船机船舱识别与船体稳定跟踪系统。
 
-当前现场入口是 **Ubuntu 22.04 / ROS2 Humble 的单帧开舱候选与人工复核工具**。读取 PCD 或 `/ship_scan/map` 后，使用同一条几何链输出边界、逐边证据、不确定性和两张复核图。结果不用于自动控制；V1.4 船体跟踪源码继续冻结保留，尚未与此入口联动。
+本分支是 **V2 多专家船舱识别开发验证版**，运行环境为 Ubuntu 22.04 / ROS2 Humble。PCD 和 `/ship_scan/map` 共用纯 XYZ 主链，输出中文全景图、逐边证据、四角坐标与不确定性。真实历史场景的单调回归门尚未通过，不能替代 main 现场基线，也不用于自动控制。V1.4 船体跟踪源码继续冻结保留。
 
 ## 两个现场入口
 
@@ -19,7 +19,19 @@ source .local/ros2-venv/bin/activate
 ./scripts/run_ship_hatch_once.sh --save-snapshot
 ```
 
-脚本名、参数和日志使用英文，输出图的说明使用中文。`x/y/z` 必需，`intensity` 可选。缺失或近似恒定的强度明确回退几何，第二张图标记“强度不可用：复用几何识别结果”，不重复运行整套几何复核。
+脚本名、参数和日志使用英文，输出图的说明使用中文。`x/y/z` 必需，支持 ASCII、binary 与无损 binary_compressed PCD。V2 的 intensity 始终只记录状态，不建立强度 scorer，不执行第二套融合几何；第二张图标记“强度判定已关闭：复用纯几何复核结果”。
+
+## 靠岸作业船
+
+多船场景需要同一输入坐标系中的现场码头参考：修改 `config/site/berth_reference.yaml` 的码头直线、朝水方向与作业范围后启用，或传入经测量的外部配置。配置不得包含船尺寸、舱数或舱角坐标。离线坐标系可用 `--frame-id map` 显式指定。
+
+```bash
+./scripts/run_ship_hatch_pcd.sh --pcd /data/map.pcd --frame-id map \
+  --berth-reference /data/site/berth_reference.yaml
+./scripts/run_ship_hatch_once.sh --berth-reference /data/site/berth_reference.yaml
+```
+
+仓库模板默认关闭。自动码头检测需要可信的 `observer_xy`，不会把 map 原点当作雷达位置。无可靠参考且有多艘船时返回 `MULTI_VESSEL_BERTH_AMBIGUOUS`，不猜选、不合船；仍输出整幅场景和诊断。只有一个已分辨船体时允许未认证的单船复核，不据此声称靠岸选船已通过现场验收。
 
 地图采集默认 `--topic /ship_scan/map --qos auto --timeout-sec 30`。AUTO 读取实际发布者 QoS；TransientLocal 地图支持晚加入订阅。Volatile 地图需要发布者再次发布，日志会说明等待原因。多个发布者、错误消息类型或超时生成独立失败诊断。
 
@@ -50,13 +62,14 @@ output/YYYYMMDD_HHMMSS_microseconds/
 
 ## 当前技术路线与边界
 
-- 主链为输入检查 → 一次 B1 船体归属 → 冻结证据上下文 → 逐船 UVZ 召回 → 船外低区与包围验证 → 四边 Raw XYZ 精修 → 角点重建与防内裁。
-- 全局 Height/R2F/R2G 保留为可关闭的比较证据，不能限制逐船候选是否存在。`--no-legacy-evidence` 用于独立链验证；禁用后不代表所有真实船已完成召回验收。
-- 不通过固定水面 Z、船型尺寸或指定舱数补框。外部连通检查只经过实测低格，空白不充当通道。三边或裁剪不明时保留局部未决证据。
-- 强度仍为 `AUX_WEIGHT=0.05` 的辅助；没有双雷达源标识时校准状态为 `UNKNOWN`，不靠强度判钢。
+- V2 主链为一次 B1 → 靠岸船选择 → 原始索引工作区 → Legacy / Height Basin / Structural Line / Local Enclosure / Loaded Hold / Large Sand Hold 候选联合 → 物理查询去重 → 统一验证 → 一个共享四边精修器。Layout Recovery / Multi Hold 仅搜索和排序，不创造边。
+- Legacy 冻结 B2 候选及原始证据，旧 R2F/R2G/B4/B5 只保留在 `--pipeline v1-diagnostic` 历史诊断路径，不在 V2 中重复执行整套最终精修。历史旧路径的召回效果尚未全部迁入 V2，见验收说明。
+- `UNKNOWN_CONTEXT` 不作为强船外种子；缺少高度、一边缺测、装载高度不明和布局不一致不作为硬拒绝。只对明确物理矛盾拒绝；证据不足的候选保存为未决记录。
+- 最终 Raw 不降采样，保持原有 0.05 m 分辨率。共享排序空间索引、剖面、边模式、逐相位 Raw 测量与按需法向；冻结 Legacy provider 自身的法向资格计算仍保留。
+- 精修阶段设 20 秒协作式预算，核心预留绘图时间；超时保留已完成结果和全部原始提案。预算超限逐项记录，不代表识别成功或所有场景已经达到耗时目标。
 - 没有独立钢内沿 Golden，不能声明厘米级精度、商业泛化或现场自动作业通过。未开舱船需人工确认范围，当前没有自动开闭舱分类。
 
-当前 Normal6 召回门尚未通过。开发回归与正式验收、Windows 与 Ubuntu、Synthetic 与 SITE 的结论分别记录，见 [测试与验收](docs/04_测试与验收说明.md)。旧 C++ V1.5 Quick 的已知失败继续保留，Python 工具运行成功不覆盖该验收事实。
+当前 Normal6 与 V2 单调回归门均未通过。程序退出成功、复核对象数量和较快耗时不能代替完整开口覆盖与水面误检复核。开发回归与正式验收、Windows 与 Ubuntu、Synthetic 与 SITE 分别记录，见 [测试与验收](docs/04_测试与验收说明.md)。旧 C++ V1.5 Quick 的既有失败继续保留。
 
 ## ROS2 安装入口
 

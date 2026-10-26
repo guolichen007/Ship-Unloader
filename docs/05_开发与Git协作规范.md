@@ -7,6 +7,8 @@
 
 ## 分支、提交、PR 与 main
 
+2026-10-26 V2 任务仅授权推送 `codex/hatch-v2-multi-expert` 开发分支，明确不 merge main。真实单调回归或现场门失败时保留失败报告与独立历史，不把开发提交包装为生产放行，也不 force push、tag 或清理其他分支。
+
 main 保存已收口工程基线；常规研发使用短期 `feature/* / fix/* / docs/* / codex/*`，一个任务一个分支。任务合入后删除开发分支，独立历史先归档。不得在 main 连续开发、force push main、重写正式 Tag 或丢失独立提交。未经用户明确授权不 merge/tag/删分支。本轮 2026-10-15 收口已获用户明确授权，仍先审计、备份与验证。
 
 提交统一 `<type>(<scope>): <中文简述>`，type 为 feat/fix/refactor/test/docs/chore/perf/build/ci/revert。历史中英文类型不重写。正文包含背景、变更、验证、风险与 BASE_SHA；GitHub 面向人的描述中文，代码、命令、协议字段和分支名英文。一个逻辑一个 commit，不混合目录治理和算法调参、大规模格式化和功能改动、V1.4 frozen 和新识别开发。冻结文档整合单独 docs commit。
