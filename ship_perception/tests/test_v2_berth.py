@@ -58,6 +58,16 @@ def fixture(offset=0.0, yaw=0.0, translation=(0.0, 0.0)):
 
 
 class BerthContracts(unittest.TestCase):
+    def test_native_yaml_site_reference_is_loaded_in_its_explicit_frame(self):
+        text = "enabled: true\nframe_id: map\nquay_line: [[0, 0], [30, 0]]\nquay_normal_direction: [0, 1]\nworking_longitudinal_range: [0, 30]\nexpected_ship_side: WATER_SIDE\n"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "site.yaml"
+            path.write_text(text)
+            reference = load_berth_reference(path, "map")
+        self.assertEqual(reference["normal"], [0.0, 1.0])
+        self.assertEqual(reference["source"], "SURVEYED_SITE_REFERENCE")
+        self.assertEqual(len(reference["reference_sha256"]), 64)
+
     @classmethod
     def setUpClass(cls):
         cls.config, _ = resolve_config()
