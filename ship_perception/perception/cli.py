@@ -17,6 +17,17 @@ def parser(description):
     )
     command.add_argument("--save-snapshot", "--save_snapshot", action="store_true")
     command.add_argument(
+        "--berth-reference",
+        type=Path,
+        help="Surveyed site reference in the input frame; no ship priors",
+    )
+    command.add_argument(
+        "--pipeline",
+        choices=("v2", "v1-diagnostic"),
+        default="v2",
+        help="V2 production core or explicitly historical diagnostic comparison",
+    )
+    command.add_argument(
         "--no-legacy-evidence",
         action="store_true",
         help="Disable independent historical geometry comparison; local recall still runs",
@@ -25,11 +36,20 @@ def parser(description):
 
 
 def execute(frame, args, progress):
-    from .pipeline import run_perception, Timing
+    from .pipeline import Timing
+
+    if getattr(args, "pipeline", "v2") == "v1-diagnostic":
+        from .pipeline import run_perception
+
+        options = {}
+    else:
+        from .pipeline_v2 import run_perception
+
+        options = dict(berth_reference=getattr(args, "berth_reference", None))
     from .output import save_output
 
     payload = run_perception(
-        frame, progress, legacy_evidence=not args.no_legacy_evidence
+        frame, progress, legacy_evidence=not args.no_legacy_evidence, **options
     )
     directory = save_output(
         payload, frame, args.output_dir, args.save_snapshot, Timing(progress)

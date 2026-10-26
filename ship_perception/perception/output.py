@@ -20,6 +20,9 @@ def auxiliary_review(payload, frame, ownership_indexes):
     result = copy.deepcopy(payload["geometry_only"])
     stats = payload["intensity_status"]
     result.update(intensity_used=False, intensity_fusion_status=stats["status"])
+    if payload.get("production_geometry_mode") == "XYZ_ONLY":
+        result["intensity_fusion_status"] = "DISABLED_PRODUCTION_XYZ_ONLY"
+        return result
     if stats["status"] != "AVAILABLE":
         return result
     from ship_perception.r1_static.run import resolve_config
@@ -64,18 +67,18 @@ def auxiliary_review(payload, frame, ownership_indexes):
     return result
 
 
-def render(payload, frame, path, *, fusion=False):
+def render(payload, frame, path, *, fusion=False, grid=None):
     import matplotlib
 
     matplotlib.use("Agg")
     with matplotlib.rc_context(chinese_plot_style()):
-        _render_scene(payload, frame, path, fusion=fusion)
+        _render_scene(payload, frame, path, fusion=fusion, grid=grid)
 
 
-def _render_scene(payload, frame, path, *, fusion=False):
+def _render_scene(payload, frame, path, *, fusion=False, grid=None):
     import matplotlib.pyplot as plt
 
-    grid = R1HeightGrid.from_points(frame.xyz, 0.5)
+    grid = R1HeightGrid.from_points(frame.xyz, 0.5) if grid is None else grid
     step = max(1, int(np.ceil(max(grid.count.shape) / 1000)))
     display_aspect = grid.count.shape[0] / grid.count.shape[1]
     figure, ax = plt.subplots(figsize=(20, max(6, min(12, 20 * display_aspect + 1))))
@@ -116,6 +119,8 @@ def _render_scene(payload, frame, path, *, fusion=False):
             if payload["intensity_status"]["status"] != "AVAILABLE"
             else FIGURE_TEXT["intensity_available"]
         )
+        if payload.get("production_geometry_mode") == "XYZ_ONLY":
+            title = "强度判定已关闭：复用纯几何复核结果"
     ax.set(title=title, xlabel=FIGURE_TEXT["xlabel"], ylabel=FIGURE_TEXT["ylabel"])
     ax.text(
         0.01,
@@ -149,12 +154,20 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
             previous = os.environ.get("MPLCONFIGDIR")
             os.environ["MPLCONFIGDIR"] = mpl_cache
             try:
+                with timing.stage("RENDER_PREPARE"):
+                    display_grid = R1HeightGrid.from_points(frame.xyz, 0.5)
                 for fusion, filename in (
                     (False, "01_geometry_only.png"),
                     (True, "02_intensity_fusion.png"),
                 ):
                     with timing.stage("RENDER_" + filename[:2]):
-                        render(payload, frame, staged / filename, fusion=fusion)
+                        render(
+                            payload,
+                            frame,
+                            staged / filename,
+                            fusion=fusion,
+                            grid=display_grid,
+                        )
                     payload["intensity_fusion" if fusion else "geometry_only"][
                         "image_path"
                     ] = str(final / filename)
@@ -174,6 +187,29 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
                     metadata=json.dumps(payload["input"], allow_nan=False),
                 )
         with timing.stage("SAVE_RESULTS"):
+            if "performance_budget" in payload:
+                report = payload["performance_budget"]
+                elapsed = sum(
+                    value
+                    for key, value in timing.elapsed.items()
+                    if key.startswith("RENDER")
+                )
+                report["stages"].append(
+                    dict(
+                        stage="RENDER",
+                        elapsed_s=elapsed,
+                        budget_s=5.0,
+                        status=(
+                            "PERFORMANCE_BUDGET_EXCEEDED"
+                            if elapsed > 5.0
+                            else "WITHIN_BUDGET"
+                        ),
+                    )
+                )
+                report["total_elapsed_s"] += elapsed
+                report["total_budget_exceeded"] = (
+                    report["total_elapsed_s"] > report["total_budget_s"]
+                )
             payload["stage_elapsed"].update(timing.elapsed)
             if timing.progress is not None:
                 payload["stage_elapsed"].update(timing.progress.elapsed_stages)

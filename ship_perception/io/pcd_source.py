@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import struct
 from pathlib import Path
 
 import numpy as np
@@ -107,6 +108,33 @@ def read_pcd(path, frame_id="pcd", max_points=12000000):
                     raise ValueError("UNAUTHORIZED_PCD_TRAILING_BYTES")
             # Map unknown/padding fields instead of allocating their whole payload.
             records = np.memmap(path, dtype=dtype, mode="r", offset=offset, shape=(n,))
+        elif header["DATA"] == ["binary_compressed"]:
+            from .lzf import decompress
+
+            sizes_header = stream.read(8)
+            if len(sizes_header) != 8:
+                raise ValueError("PCD_COMPRESSED_HEADER_TRUNCATED")
+            compressed_size, raw_size = struct.unpack("<II", sizes_header)
+            expected = n * sum(
+                size * count
+                for name, size, count in zip(names, sizes, counts)
+                if name != "_"
+            )
+            if raw_size != expected or expected > 1024 * 1024 * 1024:
+                raise ValueError("PCD_COMPRESSED_SIZE_INVALID")
+            if compressed_size != path.stat().st_size - stream.tell():
+                raise ValueError("PCD_COMPRESSED_PAYLOAD_SIZE_MISMATCH")
+            payload = decompress(stream.read(compressed_size), expected)
+            records = {}
+            offset = 0
+            for name, size, count in zip(names, sizes, counts):
+                if name == "_":
+                    continue
+                if name in ("x", "y", "z", "intensity"):
+                    records[name] = np.frombuffer(
+                        payload, dtype=dtype.fields[name][0], count=n, offset=offset
+                    )
+                offset += n * size * count
         elif header["DATA"] == ["ascii"] and all(c == 1 for c in counts):
             selected = [name for name in ("x", "y", "z", "intensity") if name in names]
 

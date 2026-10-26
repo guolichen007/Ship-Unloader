@@ -55,7 +55,11 @@ def source_identity():
         p
         for folder in ("perception", "io", "r1_static", "ros2", "tools")
         for p in (package / folder).rglob("*.py")
-    ] + list((package / "config").glob("*.json"))
+    ] + [
+        p
+        for p in (package / "config").rglob("*")
+        if p.suffix in (".json", ".yaml", ".yml")
+    ]
     for path in sorted(paths):
         digest.update(path.relative_to(package).as_posix().encode())
         digest.update(b"\0")
