@@ -3,7 +3,7 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.substitutions import LaunchConfiguration
-from launch_ros.substitutions import FindPackagePrefix
+from launch_ros.substitutions import FindPackagePrefix, FindPackageShare
 from launch.substitutions import PathJoinSubstitution
 
 
@@ -12,6 +12,17 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("topic", default_value="/ship_scan/map"),
             DeclareLaunchArgument("output_dir", default_value="output"),
+            DeclareLaunchArgument(
+                "berth_reference",
+                default_value=PathJoinSubstitution(
+                    [
+                        FindPackageShare("ship_perception"),
+                        "config",
+                        "site",
+                        "berth_reference.yaml",
+                    ]
+                ),
+            ),
             ExecuteProcess(
                 cmd=[
                     PathJoinSubstitution(
@@ -26,6 +37,8 @@ def generate_launch_description():
                     LaunchConfiguration("topic"),
                     "--output-dir",
                     LaunchConfiguration("output_dir"),
+                    "--berth-reference",
+                    LaunchConfiguration("berth_reference"),
                 ],
                 output="screen",
             ),

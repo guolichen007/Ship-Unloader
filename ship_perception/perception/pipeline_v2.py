@@ -77,6 +77,32 @@ def _canonical_queries(proposals, cache):
     return tuple(output)
 
 
+def final_support_sides(result, config):
+    """Count applied, independently supported sides, never empty sections.
+
+    A span shorter than one physical section has no support. In particular,
+    len([])-1 must not become a negative admission requirement. A guarded or
+    conflicting line remains unresolved even if its search found raw points.
+    """
+    supported = []
+    for name, side in result.get("sides", {}).items():
+        runs = side.get("phase_runs", [])
+        physical = min((r.get("physical_section_count", 0) for r in runs), default=0)
+        if physical <= 0 or not side.get("independent_geometry_support", False):
+            continue
+        required = min(config["boundary"]["profile_min_sections"], physical)
+        if (
+            min(
+                side.get("raw_subvoxel_section_count", 0),
+                side.get("positive_height_section_count", 0),
+                side.get("support_section_count", 0),
+            )
+            >= required
+        ):
+            supported.append(name)
+    return supported
+
+
 def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=None):
     timing = Timing(progress)
     # Reserve the documented five seconds for rendering outside this core.
@@ -365,17 +391,8 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                             _deferred(row, vessel.axes, "RAW_PRECISION_UNRESOLVED")
                         )
                         continue
-                    support = sum(
-                        min(
-                            side["raw_subvoxel_section_count"],
-                            side["positive_height_section_count"],
-                        )
-                        >= min(
-                            config["boundary"]["profile_min_sections"],
-                            side["phase_runs"][0]["physical_section_count"],
-                        )
-                        for side in result["sides"].values()
-                    )
+                    supported_sides = final_support_sides(result, config)
+                    support = len(supported_sides)
                     result.update(
                         proposal_id=query.query_id,
                         vessel_hypothesis_id=active,
@@ -388,6 +405,9 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                         deck_ring=row["deck_ring"],
                         layout=row["layout"],
                         review_support_side_count=support,
+                        independently_supported_sides=supported_sides,
+                        coverage_status="FULL_OPENING_COVERAGE_UNVERIFIED",
+                        individual_hatch_count=None,
                     )
                     if support < 3:
                         deferred.append(
@@ -518,7 +538,12 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                 input_frame=frame.frame_id,
                 transform_provenance="FROZEN_SELECTED_VESSEL_UV_TO_INPUT_XY",
                 candidate_blockers=["STEEL_INNER_EDGE_UNVERIFIED"]
-                + (["UNDER_COVERAGE_RISK"] if result["undercoverage_risk"] else []),
+                + (["UNDER_COVERAGE_RISK"] if result["undercoverage_risk"] else [])
+                + (
+                    ["INCOMPLETE_FOUR_SIDE_PHYSICAL_SUPPORT"]
+                    if result["review_support_side_count"] < 4
+                    else []
+                ),
             )
             hatches.append(result)
         item["independent_groups"] = [

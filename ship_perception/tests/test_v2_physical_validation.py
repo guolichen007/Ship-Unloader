@@ -16,6 +16,28 @@ from ship_perception.r1_static.run import resolve_config
 
 
 class PhysicalValidationContracts(unittest.TestCase):
+    def test_empty_short_side_and_guarded_search_do_not_count_as_raw_support(self):
+        from ship_perception.perception.pipeline_v2 import final_support_sides
+
+        config, _ = resolve_config()
+        valid = dict(
+            independent_geometry_support=True,
+            raw_subvoxel_section_count=3,
+            positive_height_section_count=3,
+            support_section_count=3,
+            phase_runs=[dict(physical_section_count=3)],
+        )
+        empty = dict(
+            valid,
+            raw_subvoxel_section_count=0,
+            positive_height_section_count=0,
+            support_section_count=0,
+            phase_runs=[dict(physical_section_count=-1)],
+        )
+        guarded = dict(valid, independent_geometry_support=False)
+        result = dict(sides=dict(U0=empty, U1=guarded, V0=valid, V1=valid))
+        self.assertEqual(final_support_sides(result, config), ["V0", "V1"])
+
     def test_loaded_enclosure_can_be_investigated_without_becoming_validated(self):
         config, _ = resolve_config()
         u, v = np.meshgrid(np.arange(0, 25, 0.5), np.arange(0, 12, 0.5))

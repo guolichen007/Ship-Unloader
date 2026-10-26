@@ -31,7 +31,9 @@ class V2Pipeline(unittest.TestCase):
         self.assertEqual(result["geometry_only"]["hatch_count"], 3)
         self.assertFalse(result["intensity_status"]["used"])
         profile = result["precision_profiler"]
-        self.assertGreaterEqual(profile["proposal_count"], profile["physical_query_count"])
+        self.assertGreaterEqual(
+            profile["proposal_count"], profile["physical_query_count"]
+        )
         self.assertGreaterEqual(profile["raw_profile_cache_hit"], 1)
         self.assertEqual(profile["normal_points_evaluated"], 0)
         actual = sorted(
