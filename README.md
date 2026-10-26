@@ -19,7 +19,7 @@ source .local/ros2-venv/bin/activate
 ./scripts/run_ship_hatch_once.sh --save-snapshot
 ```
 
-脚本名、参数、日志和图中说明使用英文。`x/y/z` 必需，`intensity` 可选。缺失或近似恒定的强度明确回退几何，第二张图标记 `Intensity unavailable - geometry result reused`，不重复运行整套几何复核。
+脚本名、参数和日志使用英文，输出图的说明使用中文。`x/y/z` 必需，`intensity` 可选。缺失或近似恒定的强度明确回退几何，第二张图标记“强度不可用：复用几何识别结果”，不重复运行整套几何复核。
 
 地图采集默认 `--topic /ship_scan/map --qos auto --timeout-sec 30`。AUTO 读取实际发布者 QoS；TransientLocal 地图支持晚加入订阅。Volatile 地图需要发布者再次发布，日志会说明等待原因。多个发布者、错误消息类型或超时生成独立失败诊断。
 
@@ -44,7 +44,7 @@ output/YYYYMMDD_HHMMSS_microseconds/
 
 `05_hatch_corners.json` 单列整幅场景中所有最终复核对象的四角坐标，使用原始输入 frame 的 XY、单位米；每角含 `x_m`、`y_m`、相交边名称及不确定性。它与全局图使用同一份最终几何，不补造 Z，也不把 `UNRESOLVED` 包围组当作单个已确认船舱。
 
-两张全船图均在角点附近标注 `P1～P4` 的输入 XY 坐标，并在每舱中央显示 `L / W`。JSON 的 `C0～C3` 依次对应图中 `P1～P4`，`dimensions` 同时保存长、宽及四条边的实长。长度为两条 U 向边实长的平均，宽度为两条 V 向边实长的平均；不使用旋转后的 XY 包围框尺寸。显示保留三位小数只是数值格式，不代表毫米级精度认证。
+两张全船图均在角点附近标注 `P1～P4` 的输入 XY 坐标，并在每舱中央显示“长 / 宽”。JSON 的 `C0～C3` 依次对应图中 `P1～P4`，`dimensions` 同时保存长、宽及四条边的实长。长度为两条 U 向边实长的平均，宽度为两条 V 向边实长的平均；不使用旋转后的 XY 包围框尺寸。显示保留三位小数只是数值格式，不代表毫米级精度认证。
 
 琥珀实线为最佳复核边界，点线为不确定性覆盖范围。`PARTIAL_HATCH`、`UNRESOLVED_VESSEL_REVIEW` 不能当作已确认船舱；矩形约束和缺测推断不能当作实测钢边。完整原始场景保留在背景中，避免漏检区域被绘图裁掉。
 
