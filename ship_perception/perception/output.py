@@ -13,7 +13,7 @@ from ship_perception.r1_static.height_grid import R1HeightGrid
 from ship_perception.r1_static.intensity_evidence import IntensityEvidence, AUX_WEIGHT
 from ship_perception.r1_static.run import _atomic_json
 from .pipeline import _json_default
-from .review_labels import annotate_measurements
+from .review_labels import FIGURE_TEXT, annotate_measurements, chinese_plot_style
 
 
 def auxiliary_review(payload, frame, ownership_indexes):
@@ -68,6 +68,11 @@ def render(payload, frame, path, *, fusion=False):
     import matplotlib
 
     matplotlib.use("Agg")
+    with matplotlib.rc_context(chinese_plot_style()):
+        _render_scene(payload, frame, path, fusion=fusion)
+
+
+def _render_scene(payload, frame, path, *, fusion=False):
     import matplotlib.pyplot as plt
 
     grid = R1HeightGrid.from_points(frame.xyz, 0.5)
@@ -88,7 +93,7 @@ def render(payload, frame, path, *, fusion=False):
         cmap="viridis",
         aspect="equal",
     )
-    figure.colorbar(image, ax=ax, label="Raw Z median (m)")
+    figure.colorbar(image, ax=ax, label=FIGURE_TEXT["colorbar"])
     # Leave room for corner labels while retaining every measured scene cell.
     y_low, y_high = ax.get_ylim()
     ax.set_ylim(y_low - 0.1 * (y_high - y_low), y_high + 0.04 * (y_high - y_low))
@@ -104,18 +109,18 @@ def render(payload, frame, path, *, fusion=False):
             ls=":",
             alpha=0.6,
         )
-    title = "Geometry review candidates - raw input frame"
+    title = FIGURE_TEXT["geometry_title"]
     if fusion:
         title = (
-            "Intensity unavailable - geometry result reused"
+            FIGURE_TEXT["intensity_unavailable"]
             if payload["intensity_status"]["status"] != "AVAILABLE"
-            else "Geometry with optional intensity evidence - source calibration UNKNOWN"
+            else FIGURE_TEXT["intensity_available"]
         )
-    ax.set(title=title, xlabel="Input X (m)", ylabel="Input Y (m)")
+    ax.set(title=title, xlabel=FIGURE_TEXT["xlabel"], ylabel=FIGURE_TEXT["ylabel"])
     ax.text(
         0.01,
         -0.12,
-        "Amber: review boundary | Dotted: uncertainty coverage | Steel precision unverified",
+        FIGURE_TEXT["legend"],
         transform=ax.transAxes,
         fontsize=8,
         bbox=dict(facecolor="white", alpha=0.85),

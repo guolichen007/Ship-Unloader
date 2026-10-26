@@ -5,6 +5,56 @@ import numpy as np
 from .coordinates import boundary_dimensions
 
 
+FIGURE_TEXT = dict(
+    geometry_title="原始点云高度与船舱边界（几何复核）",
+    intensity_unavailable="强度不可用：复用几何识别结果",
+    intensity_available="几何与强度辅助复核（强度源标定未知）",
+    xlabel="输入坐标 X（米）",
+    ylabel="输入坐标 Y（米）",
+    colorbar="原始点云 Z 中位高度（米）",
+    legend="琥珀实线：复核边界｜点线：不确定范围｜钢边精度尚未验证",
+)
+STATUS_LABELS = {
+    "HATCH_REVIEW_CANDIDATE": "船舱候选",
+    "PARTIAL_HATCH": "部分边界待复核",
+    "UNRESOLVED": "待复核",
+    "UNRESOLVED_VESSEL_REVIEW": "船体归属待定",
+}
+
+
+def chinese_plot_style():
+    """Choose an installed CJK font with coverage for every displayed label."""
+    from matplotlib import font_manager, ft2font
+
+    required = {
+        ord(character)
+        for character in (
+            "".join(FIGURE_TEXT.values())
+            + "".join(STATUS_LABELS.values())
+            + "开口组舱数未定状态待核对角点长宽米"
+        )
+        if ord(character) > 127
+    }
+    available = {font.name for font in font_manager.fontManager.ttflist}
+    for family in (
+        "Noto Sans CJK SC",
+        "Noto Sans SC",
+        "Source Han Sans SC",
+        "Microsoft YaHei",
+        "SimHei",
+        "WenQuanYi Zen Hei",
+        "Noto Sans CJK JP",
+    ):
+        if family not in available:
+            continue
+        path = font_manager.findfont(
+            font_manager.FontProperties(family=family), fallback_to_default=False
+        )
+        if required.issubset(ft2font.FT2Font(path).get_charmap()):
+            return {"font.family": family, "axes.unicode_minus": False}
+    raise ValueError("CHINESE_PLOT_FONT_NOT_FOUND: install fonts-noto-cjk")
+
+
 def annotate_measurements(ax, hatches):
     """Label every corner in the original input frame and every review object.
 
@@ -16,13 +66,18 @@ def annotate_measurements(ax, hatches):
     for hatch in hatches:
         polygon = np.asarray(hatch["boundary_xy"], dtype=float)
         dimensions = boundary_dimensions(polygon)
+        status = (
+            "开口组（舱数未定）"
+            if hatch.get("candidate_type") == "UNRESOLVED_OPENING_GROUP"
+            else STATUS_LABELS.get(hatch["status"], "状态待核对")
+        )
         centers.append(
             ax.text(
                 *polygon.mean(0),
                 hatch["hatch_id"]
                 + " | "
-                + hatch["status"]
-                + "\nL={length_m:.3f} m | W={width_m:.3f} m".format(**dimensions),
+                + status
+                + "\n长={length_m:.3f}米｜宽={width_m:.3f}米".format(**dimensions),
                 ha="center",
                 va="center",
                 fontsize=8,
@@ -48,7 +103,7 @@ def annotate_measurements(ax, hatches):
             sign_y = -1 if below else 1
             x_offset = 4 if left else -4
             label = ax.annotate(
-                "{} P{}\nX={:.3f} m\nY={:.3f} m".format(
+                "{} 角点P{}\nX={:.3f}米\nY={:.3f}米".format(
                     hatch["hatch_id"], index + 1, point[0], point[1]
                 ),
                 xy=point,
