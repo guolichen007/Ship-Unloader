@@ -15,6 +15,14 @@ from ship_perception.r1_static.rectangle_refinement import (
 )
 from .sections import physical_sections, robust_height_support
 from .line_geometry import SIDE_SPECS, guard_line_move, guarded_intersections
+from .raw_face_refinement import (
+    measured_faces,
+    core_adjacency,
+    same_face,
+    public_face,
+    face_position,
+    raw_face_section,
+)
 
 
 def polygon(box):
@@ -54,6 +62,7 @@ class FinalBoundaryRefiner:
         self.raw_section_cache = {}
         self.refinement_cache = {}
         self.refinement_cache_bytes = 0
+        self.face_normals = None
 
     def refine(self, proposal, axes):
         # Different proposal paths can converge to the exact same physical
@@ -71,6 +80,7 @@ class FinalBoundaryRefiner:
                         "measured_side_candidates",
                         "vessel_hypothesis_id",
                         "raw_support_scope",
+                        "opening_evidence",
                     )
                 },
             ],
@@ -106,6 +116,9 @@ class FinalBoundaryRefiner:
         # proposal may nominate a different physical line within the existing
         # support ROI; each nominated line still gets the unchanged raw search.
         reanchors = self._inner_role_anchors(proposal, box, cell)
+        measured_faces_by_side = {
+            name: row.pop("_raw_normal_face", None) for name, row in reanchors.items()
+        }
         for name, _, position, _ in SIDE_SPECS:
             if reanchors[name]["status"] == "CORROBORATED_INNER_STEP":
                 box[position] = reanchors[name]["rho"]
@@ -131,7 +144,12 @@ class FinalBoundaryRefiner:
                     (roi[:, 1 - axis] >= span[0]) & (roi[:, 1 - axis] <= span[1])
                 ]
                 raw_sections[name, index] = self._raw_section(
-                    section_points[name, index], axis, box[position], span, sign
+                    section_points[name, index],
+                    axis,
+                    box[position],
+                    span,
+                    sign,
+                    measured_face=measured_faces_by_side[name],
                 )
         origin = roi[:, :2].min(0) - cell
         phases = [(0.0, 0.0), (0.5, 0.0), (0.0, 0.5), (0.5, 0.5)]
@@ -217,7 +235,17 @@ class FinalBoundaryRefiner:
                             rho=rho,
                             uncertainty_m=uncertainty,
                             raw_point_count=raw_count,
-                            raw_subvoxel=paired,
+                            raw_subvoxel=bool(
+                                direct.get("raw_measurement_present", paired)
+                            ),
+                            surface_pair_present=bool(paired),
+                            raw_normal_face_count=direct.get(
+                                "raw_normal_face_count", 0
+                            ),
+                            measurement_source=direct.get(
+                                "measurement_source",
+                                "PAIRED_RAW_SURFACES" if paired else "PROFILE_OR_GRID",
+                            ),
                             profile_observation_count=len(profiles),
                             profile_observation_ids=[
                                 r["observation_id"] for r in profiles
@@ -294,6 +322,16 @@ class FinalBoundaryRefiner:
             minimum_sections = min(r["support_section_count"] for r in runs)
             raw_sections = min(
                 sum(s["raw_subvoxel"] for s in r["samples"]) for r in runs
+            )
+            normal_face_sections = min(
+                sum(
+                    s["raw_normal_face_count"] >= config["boundary"]["line_min_points"]
+                    for s in r["samples"]
+                )
+                for r in runs
+            )
+            paired_surface_sections = min(
+                sum(s["surface_pair_present"] for s in r["samples"]) for r in runs
             )
             profile_sections = min(
                 sum(s["profile_observation_count"] > 0 for s in r["samples"])
@@ -422,6 +460,8 @@ class FinalBoundaryRefiner:
                 support_section_ratio=minimum_sections
                 / max(1, runs[0]["physical_section_count"]),
                 raw_subvoxel_section_count=raw_sections,
+                raw_normal_face_section_count=normal_face_sections,
+                paired_surface_section_count=paired_surface_sections,
                 independent_profile_section_count=profile_sections,
                 positive_height_section_count=positive_sections,
                 boundary_uncertainty_m=uncertainty,
@@ -514,7 +554,10 @@ class FinalBoundaryRefiner:
                 & (
                     abs(self.xyz[:, axis] - box[position])
                     <= config["roi"]["support_search_m"]
-                    + config["roi"]["boundary_search_m"]
+                    + max(
+                        config["roi"]["boundary_search_m"],
+                        config["roi"]["support_search_m"] / 2,
+                    )
                     + config["boundary"]["side_probe_m"]
                 )
             ]
@@ -529,10 +572,32 @@ class FinalBoundaryRefiner:
                 prior_positive_sections=prior_positive,
             )
             output[name] = state
-            if prior_positive >= minimum:
+            opening = proposal.get("opening_evidence", {})
+            has_low_context = opening.get("status") == "OPENING_LOWER"
+            prior_face = dict(
+                normal_axis=axis,
+                a_xy=(
+                    [box[position], span[0]] if axis == 0 else [span[0], box[position]]
+                ),
+                b_xy=(
+                    [box[position], span[1]] if axis == 0 else [span[1], box[position]]
+                ),
+            )
+            prior_adjacent = (
+                not has_low_context
+                or sum(
+                    r["supported"]
+                    for r in core_adjacency(
+                        points, prior_face, box, spans, sign, config, opening
+                    )
+                )
+                >= minimum
+            )
+            if prior_positive >= minimum and prior_adjacent:
                 continue
             candidates = proposal.get("measured_side_candidates", {}).get(name, [])
             measured = []
+            candidate_heights = {}
             for candidate in candidates:
                 anchor = candidate["rho"]
                 # A replacement belongs to this side's half of the opening.
@@ -543,12 +608,12 @@ class FinalBoundaryRefiner:
                     continue
                 if min(candidate["primary_raw3d"], candidate["primary_bev"]) < support:
                     continue
-                positive = sum(
-                    robust_height_support(points, axis, anchor, s, sign, config)[
-                        "transition"
-                    ]
+                heights = [
+                    robust_height_support(points, axis, anchor, s, sign, config)
                     for s in spans
-                )
+                ]
+                candidate_heights[anchor] = heights
+                positive = sum(h["transition"] for h in heights)
                 if positive < minimum:
                     continue
                 raw = [self._raw_section(points, axis, anchor, s, sign) for s in spans]
@@ -572,6 +637,26 @@ class FinalBoundaryRefiner:
                 rho += fit["slope"] * (
                     (span[0] + span[1]) / 2 - fit["reference_along_m"]
                 )
+                if has_low_context:
+                    ends = [
+                        rho + fit["slope"] * (along - (span[0] + span[1]) / 2)
+                        for along in span
+                    ]
+                    fitted_face = dict(
+                        normal_axis=axis,
+                        a_xy=([ends[0], span[0]] if axis == 0 else [span[0], ends[0]]),
+                        b_xy=([ends[1], span[1]] if axis == 0 else [span[1], ends[1]]),
+                    )
+                    if (
+                        sum(
+                            r["supported"]
+                            for r in core_adjacency(
+                                points, fitted_face, box, spans, sign, config, opening
+                            )
+                        )
+                        < minimum
+                    ):
+                        continue
                 measured.append(
                     dict(
                         rho=rho,
@@ -583,6 +668,31 @@ class FinalBoundaryRefiner:
                     )
                 )
             if not measured:
+                face = self._normal_face_reanchor(
+                    proposal,
+                    name,
+                    axis,
+                    box,
+                    spans,
+                    sign,
+                    candidates,
+                    candidate_heights,
+                    points,
+                )
+                if face is not None:
+                    if "unresolved_face_candidates" in face:
+                        state.update(
+                            status="MULTIMODE_BOUNDARY_CONFLICT",
+                            raw_normal_face_modes=face["unresolved_face_candidates"],
+                        )
+                        continue
+                    state.update(
+                        status="CORROBORATED_INNER_STEP",
+                        rho=face_position(face, (span[0] + span[1]) / 2),
+                        raw_normal_face=public_face(face),
+                        _raw_normal_face=face,
+                    )
+                    continue
                 state["status"] = "NO_CORROBORATED_INNER_REPLACEMENT"
                 continue
             positions = np.array([s["rho"] for s in measured])
@@ -598,16 +708,122 @@ class FinalBoundaryRefiner:
             )
         return output
 
-    def _raw_section(self, roi, axis, anchor, span, sign):
+    def _normal_face_reanchor(
+        self,
+        proposal,
+        name,
+        axis,
+        box,
+        spans,
+        sign,
+        candidates,
+        candidate_heights,
+        points,
+    ):
+        """Use a unique observed 3D face when mixed returns veto paired profiles."""
+        if proposal.get("opening_evidence", {}).get("status") != "OPENING_LOWER":
+            return None
+        minimum = self.config["boundary"]["profile_min_sections"]
+        support = self.config["roi"]["min_enclosure_ratio"]
+        span = (box[1 - axis], box[3 - axis])
+        qualified = []
+        face_lines = None
+        for candidate in candidates:
+            anchor = candidate["rho"]
+            middle = (box[axis] + box[axis + 2]) / 2
+            position = 0 if name in ("U0", "V0") else 2
+            position += axis
+            if (anchor - middle) * sign >= 0 or abs(
+                anchor - box[position]
+            ) > self.config["roi"]["support_search_m"]:
+                continue
+            if min(candidate["primary_raw3d"], candidate["primary_bev"]) < support:
+                continue
+            heights = candidate_heights.get(anchor, [])
+            usable = sum(
+                h["transition"]
+                or (
+                    h.get("z_mad_m") is not None
+                    and h["signed_contrast_m"] - sum(h["z_mad_m"])
+                    >= self.config["roi"]["opening_drop_m"]
+                )
+                for h in heights
+            )
+            if usable < minimum:
+                continue
+            # This query is lazy and cached per refiner, never per grid phase.
+            if self.face_normals is None:
+                from ship_perception.r1_static.raw_surface_normals import (
+                    LocalSurfaceNormals,
+                )
+
+                self.face_normals = LocalSurfaceNormals(self.xyz, self.config)
+            if face_lines is None:
+                face_lines = measured_faces(
+                    self.face_normals, axis, box[position], span, spans, self.config
+                )
+            for face in face_lines:
+                if (
+                    abs(face_position(face, (span[0] + span[1]) / 2) - anchor)
+                    > self.config["boundary"]["corner_join_m"]
+                ):
+                    continue
+                adjacency = core_adjacency(
+                    points,
+                    face,
+                    box,
+                    spans,
+                    sign,
+                    self.config,
+                    proposal["opening_evidence"],
+                )
+                if sum(r["supported"] for r in adjacency) < minimum:
+                    continue
+                if (
+                    sum(
+                        raw_face_section(points, face, axis, s, sign, self.config)
+                        is not None
+                        for s in spans
+                    )
+                    < minimum
+                ):
+                    continue
+                face.update(
+                    core_adjacency=adjacency,
+                    provider_ids=candidate["provider_ids"],
+                    primary_raw3d=candidate["primary_raw3d"],
+                    primary_bev=candidate["primary_bev"],
+                )
+                if not any(same_face(face, prior) for prior in qualified):
+                    qualified.append(face)
+        # A different observed face remains an unresolved physical alternative.
+        if len(qualified) > 1:
+            return dict(unresolved_face_candidates=[public_face(f) for f in qualified])
+        return qualified[0] if qualified else None
+
+    def _raw_section(self, roi, axis, anchor, span, sign, measured_face=None):
         """Search the physical ROI with the existing raw midpoint primitive.
 
         The fine raster only suggests a band. It cannot veto sparse raw pairs.
         Distinct measured modes are retained and never averaged together.
         """
         config = self.config
-        key = (axis, anchor, span[0], span[1], sign)
+        key = (
+            axis,
+            anchor,
+            span[0],
+            span[1],
+            sign,
+            None if measured_face is None else measured_face["point_index_sha256"],
+        )
         if key not in self.raw_section_cache:
-            result = self._search_raw_section(roi, axis, anchor, span, sign)
+            result = (
+                None
+                if measured_face is None
+                else raw_face_section(roi, measured_face, axis, span, sign, config)
+            )
+            if result is None:
+                result = self._search_raw_section(roi, axis, anchor, span, sign)
             # Eviction only repeats measurements. It never changes a gate or
             # removes a candidate. Cache scalars/diagnostics, not point arrays.
             if len(self.raw_section_cache) >= 8192:

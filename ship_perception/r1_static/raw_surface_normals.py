@@ -56,11 +56,12 @@ class LocalSurfaceNormals:
             self.normals[ids] = vectors[:, :, 0]
             self.computed[ids] = True
 
-    def face_evidence(self, axis, rho, interval):
+    def vertical_points(self, axis, rho, interval, *, band_m=None):
+        """Return actual qualified raw points and canonical indexes, not samples."""
         geometry, boundary = self.config["geometry"], self.config["boundary"]
         # The coarse nomination's existing half-cell uncertainty locates the
         # query. It does not restrict any point's 3D normal neighbourhood.
-        band = geometry["coarse_voxel_m"] / 2
+        band = geometry["coarse_voxel_m"] / 2 if band_m is None else band_m
         positions = self.axis_positions[axis]
         lo = np.searchsorted(positions, rho - band, side="left")
         hi = np.searchsorted(positions, rho + band, side="right")
@@ -74,6 +75,11 @@ class LocalSurfaceNormals:
             & (np.abs(self.normals[ids, 2]) <= np.sin(angle))
             & (np.abs(self.normals[ids, axis]) >= np.cos(angle))
         ]
+        return self.xyz[live], live, ids
+
+    def face_evidence(self, axis, rho, interval):
+        geometry, boundary = self.config["geometry"], self.config["boundary"]
+        _, live, ids = self.vertical_points(axis, rho, interval)
         vertical_span = float(np.ptp(self.xyz[live, 2])) if len(live) else 0.0
         along_span = float(np.ptp(self.xyz[live, 1 - axis])) if len(live) else 0.0
         accepted = bool(
