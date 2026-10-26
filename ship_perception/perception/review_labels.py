@@ -38,12 +38,14 @@ def chinese_plot_style():
     available = {font.name for font in font_manager.fontManager.ttflist}
     for family in (
         "Noto Sans CJK SC",
-        "Noto Sans SC",
+        "Noto Sans CJK JP",
         "Source Han Sans SC",
         "Microsoft YaHei",
         "SimHei",
         "WenQuanYi Zen Hei",
-        "Noto Sans CJK JP",
+        # Some variable Noto SC files expose only their Thin default to
+        # Matplotlib. Prefer installed static CJK families when available.
+        "Noto Sans SC",
     ):
         if family not in available:
             continue
