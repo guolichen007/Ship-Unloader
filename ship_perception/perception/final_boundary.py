@@ -3,6 +3,10 @@
 import warnings
 import copy
 import json
+import time
+from contextlib import contextmanager
+
+from .measurement import RawSpatialIndex, RawSectionProfile
 
 import numpy as np
 from scipy.stats import theilslopes
@@ -47,7 +51,7 @@ def transpose_grid(grid):
 def guard_move(before, estimate, sign, sections, independent, config):
     inward = (estimate - before) * sign
     supported = sections >= config["boundary"]["profile_min_sections"] and independent
-    if inward > config["boundary"]["corner_join_m"] and not supported:
+    if abs(inward) > config["boundary"]["corner_join_m"] and not supported:
         return before, "KEEP_CONSERVATIVE_PREVIOUS_BOUNDARY", True
     return (
         estimate,
@@ -57,14 +61,38 @@ def guard_move(before, estimate, sign, sections, independent, config):
 
 
 class FinalBoundaryRefiner:
-    def __init__(self, xyz, observations, config):
+    def __init__(self, xyz, observations, config, measurement_context=None):
         self.xyz, self.observations, self.config = xyz, observations, config
         self.raw_section_cache = {}
         self.refinement_cache = {}
         self.refinement_cache_bytes = 0
         self.face_normals = None
+        self.measurement_context = measurement_context
+        self.profiler = (
+            measurement_context.counters if measurement_context is not None else {}
+        )
+        self.spatial = (
+            measurement_context.spatial
+            if measurement_context is not None
+            else RawSpatialIndex(xyz, self.profiler)
+        )
+        self.continuous_cache = {}
+        self.height_cache = {}
+        self.budget = getattr(measurement_context, "budget", None)
+        self.side_elapsed = {}
+
+    @contextmanager
+    def _timed_side(self, name, scope):
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            scopes = self.side_elapsed.setdefault(name, {})
+            scopes[scope] = scopes.get(scope, 0.0) + time.perf_counter() - started
 
     def refine(self, proposal, axes):
+        if self.budget is not None:
+            self.budget.check()
         # Different proposal paths can converge to the exact same physical
         # query after separator discovery. Reuse that query, preserving each
         # caller's proposal identity outside this immutable geometry result.
@@ -88,7 +116,25 @@ class FinalBoundaryRefiner:
         )
         if key in self.refinement_cache:
             return copy.deepcopy(self.refinement_cache[key][0])
+        started = time.perf_counter()
+        self.side_elapsed = {}
+        previous_counters = dict(self.profiler)
         result = self._refine_uncached(proposal, axes)
+        result["precision_profiler"] = dict(
+            per_candidate_elapsed_s=time.perf_counter() - started,
+            per_side_elapsed_s={
+                key: sum(value.values()) for key, value in self.side_elapsed.items()
+            },
+            per_side_elapsed_breakdown_s=copy.deepcopy(self.side_elapsed),
+            per_side_raw_measurement_elapsed_s=self.profiler.get(
+                "last_raw_side_elapsed_s", {}
+            ),
+            **{
+                key: value - previous_counters.get(key, 0)
+                for key, value in self.profiler.items()
+                if isinstance(value, (int, float))
+            },
+        )
         size = len(json.dumps(result).encode()) + len(key.encode())
         budget = 64 * 1024 * 1024
         while self.refinement_cache and self.refinement_cache_bytes + size > budget:
@@ -123,19 +169,22 @@ class FinalBoundaryRefiner:
             if reanchors[name]["status"] == "CORROBORATED_INNER_STEP":
                 box[position] = reanchors[name]["rho"]
         points = self.xyz
-        roi = points[
-            (points[:, 0] >= box[0] - margin)
-            & (points[:, 0] <= box[2] + margin)
-            & (points[:, 1] >= box[1] - margin)
-            & (points[:, 1] <= box[3] + margin)
-        ]
+        roi = self.spatial.query(
+            [box[0] - margin, box[1] - margin, box[2] + margin, box[3] + margin]
+        )
         if not len(roi):
             return dict(status="UNRESOLVED", error_code="NO_RAW_ROI_SUPPORT", sides={})
         if len(roi) > config["geometry"]["max_candidate_points"]:
             raise ValueError("FINAL_ROI_POINT_LIMIT_EXCEEDED")
         raw_sections = {}
         section_points = {}
+        side_elapsed = {}
         for name, axis, position, sign in SIDE_SPECS:
+            if self.budget is not None:
+                self.budget.check()
+            if self.budget is not None:
+                self.budget.check()
+            side_started = time.perf_counter()
             edges = physical_sections((box[1 - axis], box[3 - axis]), cell, config)
             for index, span in enumerate(zip(edges[:-1], edges[1:])):
                 # Each primitive independently restricts the same along-line
@@ -151,342 +200,389 @@ class FinalBoundaryRefiner:
                     sign,
                     measured_face=measured_faces_by_side[name],
                 )
+            side_elapsed[name] = time.perf_counter() - side_started
+        for name, elapsed in side_elapsed.items():
+            self.side_elapsed.setdefault(name, {})["RAW_MEASUREMENT"] = elapsed
+        self.profiler["last_raw_side_elapsed_s"] = side_elapsed
+        # Raster phases only query boundary bands. All original raw points
+        # remain available to the spatial index and raw section measurements.
+        raster_roi = roi[
+            (abs(roi[:, 0] - box[0]) <= margin)
+            | (abs(roi[:, 0] - box[2]) <= margin)
+            | (abs(roi[:, 1] - box[1]) <= margin)
+            | (abs(roi[:, 1] - box[3]) <= margin)
+        ]
         origin = roi[:, :2].min(0) - cell
         phases = [(0.0, 0.0), (0.5, 0.0), (0.0, 0.5), (0.5, 0.5)]
         phase_results = {name: [] for name, *_ in SIDE_SPECS}
         for phase in phases:
+            if self.budget is not None:
+                self.budget.check()
             grid = R1HeightGrid.from_points(
-                roi, cell, origin_xy=origin + np.array(phase) * cell
+                raster_roi, cell, origin_xy=origin + np.array(phase) * cell
             )
             for name, axis, position, sign in SIDE_SPECS:
-                span = (box[1 - axis], box[3 - axis])
-                edges = physical_sections(span, cell, config)
-                evidence = _section_transition(
-                    transpose_grid(grid) if axis == 0 else grid,
-                    span,
-                    box[position],
-                    "V0" if sign == 1 else "V1",
-                    config,
-                    section_edges=edges,
-                )
-                samples = []
-                for index, (begin, end) in enumerate(zip(edges[:-1], edges[1:])):
-                    measured = [s for s in evidence["samples"] if begin <= s[0] <= end]
-                    # A sparse 0.05 m raster may have no paired occupied rows.
-                    # It must not veto an observed raw step at the proposal.
-                    anchor = (
-                        float(np.median(np.array(measured)[:, 1]))
-                        if measured
-                        else box[position]
+                with self._timed_side(name, "RASTER_EVIDENCE"):
+                    span = (box[1 - axis], box[3 - axis])
+                    edges = physical_sections(span, cell, config)
+                    evidence = _section_transition(
+                        transpose_grid(grid) if axis == 0 else grid,
+                        span,
+                        box[position],
+                        "V0" if sign == 1 else "V1",
+                        config,
+                        section_edges=edges,
                     )
-                    direct = raw_sections[name, index]
-                    raw_points = section_points[name, index]
-                    if direct["status"] == "UNIQUE_SIGNED_RAW_STEP":
-                        rho, uncertainty, raw_count, paired = direct["continuous"]
-                    else:
-                        rho, uncertainty, raw_count, paired = _continuous_rho(
-                            raw_points,
-                            self.observations,
-                            axis,
-                            anchor,
-                            (begin, end),
-                            sign,
-                            config,
+                    samples = []
+                    for index, (begin, end) in enumerate(zip(edges[:-1], edges[1:])):
+                        measured = [
+                            s for s in evidence["samples"] if begin <= s[0] <= end
+                        ]
+                        # A sparse 0.05 m raster may have no paired occupied rows.
+                        # It must not veto an observed raw step at the proposal.
+                        anchor = (
+                            float(np.median(np.array(measured)[:, 1]))
+                            if measured
+                            else box[position]
                         )
-                    if not paired and anchor != box[position]:
-                        prior_rho, prior_uncertainty, prior_count, prior_paired = (
-                            _continuous_rho(
-                                raw_points,
-                                self.observations,
-                                axis,
-                                box[position],
-                                (begin, end),
-                                sign,
-                                config,
-                            )
-                        )
-                        if prior_paired:
+                        direct = raw_sections[name, index]
+                        raw_points = section_points[name, index]
+                        if direct["status"] == "UNIQUE_SIGNED_RAW_STEP":
+                            rho, uncertainty, raw_count, paired = direct["continuous"]
+                        else:
                             rho, uncertainty, raw_count, paired = (
-                                prior_rho,
-                                prior_uncertainty,
-                                prior_count,
-                                prior_paired,
+                                self._continuous_measurement(
+                                    raw_points,
+                                    self.observations,
+                                    axis,
+                                    box[position],
+                                    (begin, end),
+                                    sign,
+                                    config,
+                                )
                             )
-                    height = (
-                        direct["height"]
-                        if direct["status"] == "UNIQUE_SIGNED_RAW_STEP"
-                        else robust_height_support(
-                            raw_points, axis, rho, (begin, end), sign, config
+                        if not paired and anchor != box[position]:
+                            prior_rho, prior_uncertainty, prior_count, prior_paired = (
+                                self._continuous_measurement(
+                                    raw_points,
+                                    self.observations,
+                                    axis,
+                                    box[position],
+                                    (begin, end),
+                                    sign,
+                                    config,
+                                )
+                            )
+                            if prior_paired:
+                                rho, uncertainty, raw_count, paired = (
+                                    prior_rho,
+                                    prior_uncertainty,
+                                    prior_count,
+                                    prior_paired,
+                                )
+                        height = (
+                            direct["height"]
+                            if direct["status"] == "UNIQUE_SIGNED_RAW_STEP"
+                            else self._height_measurement(
+                                raw_points, axis, rho, (begin, end), sign, config
+                            )
                         )
+                        profiles = [
+                            r
+                            for r in self.observations
+                            if r.get("reference_role")
+                            not in ("INTERIOR_SURFACE", "ROLE_AMBIGUOUS_OVERFLOW")
+                            and begin <= r["xy"][1 - axis] <= end
+                            and abs(r["xy"][axis] - rho)
+                            <= config["boundary"]["corner_join_m"]
+                        ]
+                        samples.append(
+                            dict(
+                                section=index,
+                                along=(begin + end) / 2,
+                                rho=rho,
+                                uncertainty_m=uncertainty,
+                                raw_point_count=raw_count,
+                                raw_subvoxel=bool(
+                                    direct.get("raw_measurement_present", paired)
+                                ),
+                                surface_pair_present=bool(paired),
+                                raw_normal_face_count=direct.get(
+                                    "raw_normal_face_count", 0
+                                ),
+                                measurement_source=direct.get(
+                                    "measurement_source",
+                                    (
+                                        "PAIRED_RAW_SURFACES"
+                                        if paired
+                                        else "PROFILE_OR_GRID"
+                                    ),
+                                ),
+                                profile_observation_count=len(profiles),
+                                profile_observation_ids=[
+                                    r["observation_id"] for r in profiles
+                                ],
+                                height=height,
+                                raw_search=direct,
+                                raster_transition_support=bool(measured),
+                            )
+                        )
+                    ring_side = (
+                        proposal.get("deck_ring", {}).get("sides", {}).get(name, {})
                     )
-                    profiles = [
-                        r
-                        for r in self.observations
-                        if r.get("reference_role")
-                        not in ("INTERIOR_SURFACE", "ROLE_AMBIGUOUS_OVERFLOW")
-                        and begin <= r["xy"][1 - axis] <= end
-                        and abs(r["xy"][axis] - rho)
-                        <= config["boundary"]["corner_join_m"]
+                    for sample in samples:
+                        sample["height_bev_corroborated"] = bool(
+                            ring_side.get("bev_support")
+                            and sample["height"].get("transition")
+                            and min(sample["height"].get("counts", [0, 0]))
+                            >= config["boundary"]["profile_min_points"]
+                            and sample["raster_transition_support"]
+                        )
+                        if (
+                            sample["height_bev_corroborated"]
+                            and not sample["raw_subvoxel"]
+                        ):
+                            sample["measurement_source"] = "RAW_HEIGHT_PROFILE_AND_BEV"
+                    good = [
+                        s
+                        for s in samples
+                        if (
+                            s["raw_subvoxel"]
+                            or s["profile_observation_count"]
+                            or s["height_bev_corroborated"]
+                        )
+                        and s["height"].get("transition", False)
+                        and s["raw_search"]["status"] != "MULTIMODE_BOUNDARY_CONFLICT"
                     ]
-                    samples.append(
+                    estimate, fit = self._fit(good, box[position])
+                    phase_results[name].append(
                         dict(
-                            section=index,
-                            along=(begin + end) / 2,
-                            rho=rho,
-                            uncertainty_m=uncertainty,
-                            raw_point_count=raw_count,
-                            raw_subvoxel=bool(
-                                direct.get("raw_measurement_present", paired)
-                            ),
-                            surface_pair_present=bool(paired),
-                            raw_normal_face_count=direct.get(
-                                "raw_normal_face_count", 0
-                            ),
-                            measurement_source=direct.get(
-                                "measurement_source",
-                                "PAIRED_RAW_SURFACES" if paired else "PROFILE_OR_GRID",
-                            ),
-                            profile_observation_count=len(profiles),
-                            profile_observation_ids=[
-                                r["observation_id"] for r in profiles
-                            ],
-                            height=height,
-                            raw_search=direct,
+                            phase=list(phase),
+                            rho=estimate,
+                            samples=samples,
+                            physical_section_count=len(edges) - 1,
+                            support_section_count=len(good),
+                            fit=fit,
+                            height_transition_reason=evidence["reason"],
                         )
                     )
-                good = [
-                    s
-                    for s in samples
-                    if (s["raw_subvoxel"] or s["profile_observation_count"])
-                    and s["height"].get("transition", False)
-                    and s["raw_search"]["status"] != "MULTIMODE_BOUNDARY_CONFLICT"
-                ]
-                estimate, fit = self._fit(good, box[position])
-                phase_results[name].append(
-                    dict(
-                        phase=list(phase),
-                        rho=estimate,
-                        samples=samples,
-                        physical_section_count=len(edges) - 1,
-                        support_section_count=len(good),
-                        fit=fit,
-                        height_transition_reason=evidence["reason"],
-                    )
-                )
         sides, after = {}, box[:]
         for name, axis, position, sign in SIDE_SPECS:
-            runs = phase_results[name]
-            reference = (box[1 - axis] + box[3 - axis]) / 2
-            span = (
-                min(box[1 - axis], guard_bounds[1 - axis]),
-                max(box[3 - axis], guard_bounds[3 - axis]),
-            )
-            phase_slopes = np.array(
-                [
-                    (
-                        r["fit"].get("slope", 0.0)
-                        if r["fit"]["status"] == "CONSENSUS"
-                        else 0.0
+            with self._timed_side(name, "LINE_FIT_AND_GUARDS"):
+                runs = phase_results[name]
+                reference = (box[1 - axis] + box[3 - axis]) / 2
+                span = (
+                    min(box[1 - axis], guard_bounds[1 - axis]),
+                    max(box[3 - axis], guard_bounds[3 - axis]),
+                )
+                phase_slopes = np.array(
+                    [
+                        (
+                            r["fit"].get("slope", 0.0)
+                            if r["fit"]["status"] == "CONSENSUS"
+                            else 0.0
+                        )
+                        for r in runs
+                    ]
+                )
+                rhos = np.array(
+                    [
+                        (
+                            r["fit"]["rho_at_reference_m"]
+                            + m * (reference - r["fit"]["reference_along_m"])
+                            if r["fit"]["status"] == "CONSENSUS"
+                            else r["rho"]
+                        )
+                        for r, m in zip(runs, phase_slopes)
+                    ]
+                )
+                estimate = float(np.median(rhos))
+                proposed_slope = (
+                    float(np.median(phase_slopes))
+                    if all(r["fit"]["status"] == "CONSENSUS" for r in runs)
+                    else 0.0
+                )
+                mad = float(np.median(abs(rhos - estimate)))
+                maximum = float(max(abs(rhos - estimate)))
+                proposed_endpoints = estimate + proposed_slope * (
+                    np.asarray(span) - reference
+                )
+                phase_endpoints = rhos[:, None] + phase_slopes[:, None] * (
+                    np.asarray(span)[None, :] - reference
+                )
+                endpoint_deviation = float(
+                    np.max(abs(phase_endpoints - proposed_endpoints))
+                )
+                minimum_sections = min(r["support_section_count"] for r in runs)
+                raw_sections = min(
+                    sum(s["raw_subvoxel"] for s in r["samples"]) for r in runs
+                )
+                normal_face_sections = min(
+                    sum(
+                        s["raw_normal_face_count"]
+                        >= config["boundary"]["line_min_points"]
+                        for s in r["samples"]
                     )
                     for r in runs
-                ]
-            )
-            rhos = np.array(
-                [
-                    (
-                        r["fit"]["rho_at_reference_m"]
-                        + m * (reference - r["fit"]["reference_along_m"])
-                        if r["fit"]["status"] == "CONSENSUS"
-                        else r["rho"]
+                )
+                paired_surface_sections = min(
+                    sum(s["surface_pair_present"] for s in r["samples"]) for r in runs
+                )
+                profile_sections = min(
+                    sum(s["profile_observation_count"] > 0 for s in r["samples"])
+                    for r in runs
+                )
+                positive_sections = min(
+                    sum(s["height"].get("transition", False) for s in r["samples"])
+                    for r in runs
+                )
+                conflict = reanchors[name][
+                    "status"
+                ] == "MULTIMODE_BOUNDARY_CONFLICT" or any(
+                    r["fit"]["status"] == "MULTIMODE_BOUNDARY_CONFLICT"
+                    or sum(
+                        s["raw_search"]["status"] == "MULTIMODE_BOUNDARY_CONFLICT"
+                        for s in r["samples"]
                     )
-                    for r, m in zip(runs, phase_slopes)
-                ]
-            )
-            estimate = float(np.median(rhos))
-            proposed_slope = (
-                float(np.median(phase_slopes))
-                if all(r["fit"]["status"] == "CONSENSUS" for r in runs)
-                else 0.0
-            )
-            mad = float(np.median(abs(rhos - estimate)))
-            maximum = float(max(abs(rhos - estimate)))
-            proposed_endpoints = estimate + proposed_slope * (
-                np.asarray(span) - reference
-            )
-            phase_endpoints = rhos[:, None] + phase_slopes[:, None] * (
-                np.asarray(span)[None, :] - reference
-            )
-            endpoint_deviation = float(
-                np.max(abs(phase_endpoints - proposed_endpoints))
-            )
-            minimum_sections = min(r["support_section_count"] for r in runs)
-            raw_sections = min(
-                sum(s["raw_subvoxel"] for s in r["samples"]) for r in runs
-            )
-            normal_face_sections = min(
-                sum(
-                    s["raw_normal_face_count"] >= config["boundary"]["line_min_points"]
-                    for s in r["samples"]
+                    >= config["boundary"]["profile_min_sections"]
+                    for r in runs
                 )
-                for r in runs
-            )
-            paired_surface_sections = min(
-                sum(s["surface_pair_present"] for s in r["samples"]) for r in runs
-            )
-            profile_sections = min(
-                sum(s["profile_observation_count"] > 0 for s in r["samples"])
-                for r in runs
-            )
-            positive_sections = min(
-                sum(s["height"].get("transition", False) for s in r["samples"])
-                for r in runs
-            )
-            conflict = reanchors[name][
-                "status"
-            ] == "MULTIMODE_BOUNDARY_CONFLICT" or any(
-                r["fit"]["status"] == "MULTIMODE_BOUNDARY_CONFLICT"
-                or sum(
-                    s["raw_search"]["status"] == "MULTIMODE_BOUNDARY_CONFLICT"
-                    for s in r["samples"]
+                ring_side = proposal.get("deck_ring", {}).get("sides", {}).get(name, {})
+                dual_provider = ring_side.get("raw3d_support", False) and ring_side.get(
+                    "bev_support", False
                 )
-                >= config["boundary"]["profile_min_sections"]
-                for r in runs
-            )
-            ring_side = proposal.get("deck_ring", {}).get("sides", {}).get(name, {})
-            dual_provider = ring_side.get("raw3d_support", False) and ring_side.get(
-                "bev_support", False
-            )
-            dual_provider |= reanchors[name]["status"] == "CORROBORATED_INNER_STEP"
-            independent = raw_sections >= config["boundary"][
-                "profile_min_sections"
-            ] and (
-                (
-                    positive_sections >= config["boundary"]["profile_min_sections"]
-                    and dual_provider
+                dual_provider |= reanchors[name]["status"] == "CORROBORATED_INNER_STEP"
+                independent = raw_sections >= config["boundary"][
+                    "profile_min_sections"
+                ] and (
+                    (
+                        positive_sections >= config["boundary"]["profile_min_sections"]
+                        and dual_provider
+                    )
+                    or profile_sections >= config["boundary"]["profile_min_sections"]
                 )
-                or profile_sections >= config["boundary"]["profile_min_sections"]
-            )
-            rho, slope, status, risk = guard_line_move(
-                guard_bounds[position],
-                estimate,
-                proposed_slope,
-                reference,
-                span,
-                sign,
-                minimum_sections,
-                independent and not conflict,
-                config,
-            )
-            if minimum_sections < config["boundary"]["profile_min_sections"]:
-                rho = (
-                    guard_bounds[position]
-                    if (box[position] - guard_bounds[position]) * sign
-                    > config["boundary"]["corner_join_m"]
-                    else box[position]
-                )
-                slope = 0.0
-                status, risk = "KEEP_CONSERVATIVE_PREVIOUS_BOUNDARY", True
-            if conflict:
-                rho, status, risk = (
+                rho, slope, status, risk = guard_line_move(
                     guard_bounds[position],
-                    "MULTIMODE_BOUNDARY_CONFLICT",
-                    True,
+                    estimate,
+                    proposed_slope,
+                    reference,
+                    span,
+                    sign,
+                    minimum_sections,
+                    independent and not conflict,
+                    config,
                 )
-                slope = 0.0
-            applied_endpoints = rho + slope * (np.asarray(span) - reference)
-            sample_displacement = max(
-                (
-                    abs(s["rho"] - (rho + slope * (s["along"] - reference)))
-                    for r in runs
-                    for s in r["samples"]
-                    if s["height"].get("transition", False)
-                    and (s["raw_subvoxel"] or s["profile_observation_count"])
-                ),
-                default=0.0,
-            )
-            uncertainty = max(
-                config["geometry"]["plane_inlier_m"],
-                maximum,
-                endpoint_deviation,
-                float(np.max(abs(proposed_endpoints - applied_endpoints))),
-                sample_displacement,
-                max(
-                    (s["uncertainty_m"] for r in runs for s in r["samples"]),
-                    default=cell,
-                ),
-                abs(estimate - rho),
-            )
-            if minimum_sections < config["boundary"]["profile_min_sections"]:
-                uncertainty = max(uncertainty, config["roi"]["boundary_search_m"])
-            after[position] = rho
-            sides[name] = dict(
-                rho_before_m=guard_bounds[position],
-                rho_search_anchor_m=box[position],
-                rho_after_m=rho,
-                side_inward_move_m=(rho - guard_bounds[position]) * sign,
-                side_max_endpoint_inward_move_m=float(
-                    np.max(sign * (applied_endpoints - guard_bounds[position]))
-                ),
-                proposed_max_endpoint_inward_move_m=float(
-                    np.max(sign * (proposed_endpoints - guard_bounds[position]))
-                ),
-                independent_geometry_support=bool(
-                    independent
-                    and not conflict
-                    and minimum_sections >= config["boundary"]["profile_min_sections"]
-                ),
-                line=dict(
-                    normal_axis=axis,
-                    slope=slope,
-                    reference_along_m=reference,
-                    rho_at_reference_m=rho,
-                    source=(
-                        "RAW_SECTION_ROBUST_LINE"
-                        if minimum_sections
-                        >= config["boundary"]["profile_min_sections"]
+                if minimum_sections < config["boundary"]["profile_min_sections"]:
+                    rho = (
+                        guard_bounds[position]
+                        if abs(box[position] - guard_bounds[position])
+                        > config["boundary"]["corner_join_m"]
+                        else box[position]
+                    )
+                    slope = 0.0
+                    status, risk = "KEEP_CONSERVATIVE_PREVIOUS_BOUNDARY", True
+                if conflict:
+                    rho, status, risk = (
+                        guard_bounds[position],
+                        "MULTIMODE_BOUNDARY_CONFLICT",
+                        True,
+                    )
+                    slope = 0.0
+                applied_endpoints = rho + slope * (np.asarray(span) - reference)
+                sample_displacement = max(
+                    (
+                        abs(s["rho"] - (rho + slope * (s["along"] - reference)))
+                        for r in runs
+                        for s in r["samples"]
+                        if s["height"].get("transition", False)
+                        and (s["raw_subvoxel"] or s["profile_observation_count"])
+                    ),
+                    default=0.0,
+                )
+                uncertainty = max(
+                    config["geometry"]["plane_inlier_m"],
+                    maximum,
+                    endpoint_deviation,
+                    float(np.max(abs(proposed_endpoints - applied_endpoints))),
+                    sample_displacement,
+                    max(
+                        (s["uncertainty_m"] for r in runs for s in r["samples"]),
+                        default=cell,
+                    ),
+                    abs(estimate - rho),
+                )
+                if minimum_sections < config["boundary"]["profile_min_sections"]:
+                    uncertainty = max(uncertainty, config["roi"]["boundary_search_m"])
+                after[position] = rho
+                sides[name] = dict(
+                    rho_before_m=guard_bounds[position],
+                    rho_search_anchor_m=box[position],
+                    rho_after_m=rho,
+                    side_inward_move_m=(rho - guard_bounds[position]) * sign,
+                    side_max_endpoint_inward_move_m=float(
+                        np.max(sign * (applied_endpoints - guard_bounds[position]))
+                    ),
+                    proposed_max_endpoint_inward_move_m=float(
+                        np.max(sign * (proposed_endpoints - guard_bounds[position]))
+                    ),
+                    independent_geometry_support=bool(
+                        independent
                         and not conflict
-                        and rho == estimate
-                        and slope == proposed_slope
-                        else "CONSERVATIVE_AXIS_LINE"
+                        and minimum_sections
+                        >= config["boundary"]["profile_min_sections"]
                     ),
-                ),
-                proposed_line=dict(
-                    normal_axis=axis,
-                    slope=proposed_slope,
-                    reference_along_m=reference,
-                    rho_at_reference_m=estimate,
-                ),
-                support_section_count=minimum_sections,
-                support_section_ratio=minimum_sections
-                / max(1, runs[0]["physical_section_count"]),
-                raw_subvoxel_section_count=raw_sections,
-                raw_normal_face_section_count=normal_face_sections,
-                paired_surface_section_count=paired_surface_sections,
-                independent_profile_section_count=profile_sections,
-                positive_height_section_count=positive_sections,
-                boundary_uncertainty_m=uncertainty,
-                undercoverage_risk=risk,
-                status=status,
-                grid_phase=dict(
-                    status=(
-                        "GRID_PHASE_STABLE"
-                        if max(maximum, endpoint_deviation)
-                        <= config["boundary"]["line_inlier_m"]
-                        else "GRID_PHASE_SENSITIVE"
+                    line=dict(
+                        normal_axis=axis,
+                        slope=slope,
+                        reference_along_m=reference,
+                        rho_at_reference_m=rho,
+                        source=(
+                            "RAW_SECTION_ROBUST_LINE"
+                            if minimum_sections
+                            >= config["boundary"]["profile_min_sections"]
+                            and not conflict
+                            and rho == estimate
+                            and slope == proposed_slope
+                            else "CONSERVATIVE_AXIS_LINE"
+                        ),
                     ),
-                    median_m=estimate,
-                    mad_m=mad,
-                    max_deviation_m=maximum,
-                    endpoint_max_deviation_m=endpoint_deviation,
-                ),
-                phase_runs=runs,
-                steel_edge_certified=False,
-                opening_role_reanchor=reanchors[name],
-                source_vessel_id=proposal["vessel_hypothesis_id"],
-                raw_source_scope=proposal.get(
-                    "raw_support_scope", "FROZEN_VESSEL_OWNED_POINTS"
-                ),
-            )
+                    proposed_line=dict(
+                        normal_axis=axis,
+                        slope=proposed_slope,
+                        reference_along_m=reference,
+                        rho_at_reference_m=estimate,
+                    ),
+                    support_section_count=minimum_sections,
+                    support_section_ratio=minimum_sections
+                    / max(1, runs[0]["physical_section_count"]),
+                    raw_subvoxel_section_count=raw_sections,
+                    raw_normal_face_section_count=normal_face_sections,
+                    paired_surface_section_count=paired_surface_sections,
+                    independent_profile_section_count=profile_sections,
+                    positive_height_section_count=positive_sections,
+                    boundary_uncertainty_m=uncertainty,
+                    undercoverage_risk=risk,
+                    status=status,
+                    grid_phase=dict(
+                        status=(
+                            "GRID_PHASE_STABLE"
+                            if max(maximum, endpoint_deviation)
+                            <= config["boundary"]["line_inlier_m"]
+                            else "GRID_PHASE_SENSITIVE"
+                        ),
+                        median_m=estimate,
+                        mad_m=mad,
+                        max_deviation_m=maximum,
+                        endpoint_max_deviation_m=endpoint_deviation,
+                    ),
+                    phase_runs=runs,
+                    steel_edge_certified=False,
+                    opening_role_reanchor=reanchors[name],
+                    source_vessel_id=proposal["vessel_hypothesis_id"],
+                    raw_source_scope=proposal.get(
+                        "raw_support_scope", "FROZEN_VESSEL_OWNED_POINTS"
+                    ),
+                )
         if after[0] >= after[2] or after[1] >= after[3]:
             return dict(
                 status="UNRESOLVED", error_code="DEGENERATE_FINAL_BOUNDARY", sides=sides
@@ -545,167 +641,195 @@ class FinalBoundaryRefiner:
         support = config["roi"]["min_enclosure_ratio"]
         output = {}
         for name, axis, position, sign in SIDE_SPECS:
-            span = (box[1 - axis], box[3 - axis])
-            edges = physical_sections(span, cell, config)
-            spans = list(zip(edges[:-1], edges[1:]))
-            points = self.xyz[
-                (self.xyz[:, 1 - axis] >= span[0])
-                & (self.xyz[:, 1 - axis] <= span[1])
-                & (
-                    abs(self.xyz[:, axis] - box[position])
-                    <= config["roi"]["support_search_m"]
+            with self._timed_side(name, "ANCHOR_ROLE"):
+                span = (box[1 - axis], box[3 - axis])
+                edges = physical_sections(span, cell, config)
+                spans = list(zip(edges[:-1], edges[1:]))
+                band = (
+                    config["roi"]["support_search_m"]
                     + max(
                         config["roi"]["boundary_search_m"],
                         config["roi"]["support_search_m"] / 2,
                     )
                     + config["boundary"]["side_probe_m"]
                 )
-            ]
-            prior = [
-                robust_height_support(points, axis, box[position], s, sign, config)
-                for s in spans
-            ]
-            prior_positive = sum(s["transition"] for s in prior)
-            state = dict(
-                status="UNCHANGED_ANCHOR",
-                rho=box[position],
-                prior_positive_sections=prior_positive,
-            )
-            output[name] = state
-            opening = proposal.get("opening_evidence", {})
-            has_low_context = opening.get("status") == "OPENING_LOWER"
-            prior_face = dict(
-                normal_axis=axis,
-                a_xy=(
-                    [box[position], span[0]] if axis == 0 else [span[0], box[position]]
-                ),
-                b_xy=(
-                    [box[position], span[1]] if axis == 0 else [span[1], box[position]]
-                ),
-            )
-            prior_adjacent = (
-                not has_low_context
-                or sum(
-                    r["supported"]
-                    for r in core_adjacency(
-                        points, prior_face, box, spans, sign, config, opening
-                    )
+                query_box = [0.0, 0.0, 0.0, 0.0]
+                query_box[axis], query_box[axis + 2] = (
+                    box[position] - band,
+                    box[position] + band,
                 )
-                >= minimum
-            )
-            if prior_positive >= minimum and prior_adjacent:
-                continue
-            candidates = proposal.get("measured_side_candidates", {}).get(name, [])
-            measured = []
-            candidate_heights = {}
-            for candidate in candidates:
-                anchor = candidate["rho"]
-                # A replacement belongs to this side's half of the opening.
-                middle = (box[axis] + box[axis + 2]) / 2
-                if (anchor - middle) * sign >= 0 or abs(
-                    anchor - box[position]
-                ) > config["roi"]["support_search_m"]:
-                    continue
-                if min(candidate["primary_raw3d"], candidate["primary_bev"]) < support:
-                    continue
-                heights = [
-                    robust_height_support(points, axis, anchor, s, sign, config)
+                query_box[1 - axis], query_box[3 - axis] = span
+                points = self.spatial.query(query_box)
+                prior = [
+                    self._height_measurement(
+                        points, axis, box[position], s, sign, config
+                    )
                     for s in spans
                 ]
-                candidate_heights[anchor] = heights
-                positive = sum(h["transition"] for h in heights)
-                if positive < minimum:
-                    continue
-                raw = [self._raw_section(points, axis, anchor, s, sign) for s in spans]
-                unique = [
-                    s
-                    for s in raw
-                    if s["status"] == "UNIQUE_SIGNED_RAW_STEP"
-                    and s["height"]["transition"]
-                    and s["continuous"][3]
-                ]
-                if len(unique) < minimum:
-                    continue
-                fit_rows = [
-                    dict(along=(span[0] + span[1]) / 2, rho=record["continuous"][0])
-                    for span, record in zip(spans, raw)
-                    if record in unique
-                ]
-                rho, fit = self._fit(fit_rows, anchor)
-                if fit["status"] != "CONSENSUS":
-                    continue
-                rho += fit["slope"] * (
-                    (span[0] + span[1]) / 2 - fit["reference_along_m"]
+                prior_positive = sum(s["transition"] for s in prior)
+                state = dict(
+                    status="UNCHANGED_ANCHOR",
+                    rho=box[position],
+                    prior_positive_sections=prior_positive,
                 )
-                if has_low_context:
-                    ends = [
-                        rho + fit["slope"] * (along - (span[0] + span[1]) / 2)
-                        for along in span
-                    ]
-                    fitted_face = dict(
-                        normal_axis=axis,
-                        a_xy=([ends[0], span[0]] if axis == 0 else [span[0], ends[0]]),
-                        b_xy=([ends[1], span[1]] if axis == 0 else [span[1], ends[1]]),
-                    )
-                    if (
-                        sum(
-                            r["supported"]
-                            for r in core_adjacency(
-                                points, fitted_face, box, spans, sign, config, opening
-                            )
+                output[name] = state
+                opening = proposal.get("opening_evidence", {})
+                has_low_context = opening.get("status") == "OPENING_LOWER"
+                prior_face = dict(
+                    normal_axis=axis,
+                    a_xy=(
+                        [box[position], span[0]]
+                        if axis == 0
+                        else [span[0], box[position]]
+                    ),
+                    b_xy=(
+                        [box[position], span[1]]
+                        if axis == 0
+                        else [span[1], box[position]]
+                    ),
+                )
+                prior_adjacent = (
+                    not has_low_context
+                    or sum(
+                        r["supported"]
+                        for r in core_adjacency(
+                            points, prior_face, box, spans, sign, config, opening
                         )
-                        < minimum
+                    )
+                    >= minimum
+                )
+                if prior_positive >= minimum and prior_adjacent:
+                    continue
+                candidates = proposal.get("measured_side_candidates", {}).get(name, [])
+                measured = []
+                candidate_heights = {}
+                for candidate in candidates:
+                    if self.budget is not None:
+                        self.budget.check()
+                    anchor = candidate["rho"]
+                    # A replacement belongs to this side's half of the opening.
+                    middle = (box[axis] + box[axis + 2]) / 2
+                    if (anchor - middle) * sign >= 0 or abs(
+                        anchor - box[position]
+                    ) > config["roi"]["support_search_m"]:
+                        continue
+                    if (
+                        min(candidate["primary_raw3d"], candidate["primary_bev"])
+                        < support
                     ):
                         continue
-                measured.append(
-                    dict(
-                        rho=rho,
-                        support_section_count=len(unique),
-                        provider_ids=candidate["provider_ids"],
-                        primary_raw3d=candidate["primary_raw3d"],
-                        primary_bev=candidate["primary_bev"],
-                        fit=fit,
+                    heights = [
+                        self._height_measurement(points, axis, anchor, s, sign, config)
+                        for s in spans
+                    ]
+                    candidate_heights[anchor] = heights
+                    positive = sum(h["transition"] for h in heights)
+                    if positive < minimum:
+                        continue
+                    raw = [
+                        self._raw_section(points, axis, anchor, s, sign) for s in spans
+                    ]
+                    unique = [
+                        s
+                        for s in raw
+                        if s["status"] == "UNIQUE_SIGNED_RAW_STEP"
+                        and s["height"]["transition"]
+                        and s["continuous"][3]
+                    ]
+                    if len(unique) < minimum:
+                        continue
+                    fit_rows = [
+                        dict(along=(span[0] + span[1]) / 2, rho=record["continuous"][0])
+                        for span, record in zip(spans, raw)
+                        if record in unique
+                    ]
+                    rho, fit = self._fit(fit_rows, anchor)
+                    if fit["status"] != "CONSENSUS":
+                        continue
+                    rho += fit["slope"] * (
+                        (span[0] + span[1]) / 2 - fit["reference_along_m"]
                     )
-                )
-            if not measured:
-                face = self._normal_face_reanchor(
-                    proposal,
-                    name,
-                    axis,
-                    box,
-                    spans,
-                    sign,
-                    candidates,
-                    candidate_heights,
-                    points,
-                )
-                if face is not None:
-                    if "unresolved_face_candidates" in face:
+                    if has_low_context:
+                        ends = [
+                            rho + fit["slope"] * (along - (span[0] + span[1]) / 2)
+                            for along in span
+                        ]
+                        fitted_face = dict(
+                            normal_axis=axis,
+                            a_xy=(
+                                [ends[0], span[0]] if axis == 0 else [span[0], ends[0]]
+                            ),
+                            b_xy=(
+                                [ends[1], span[1]] if axis == 0 else [span[1], ends[1]]
+                            ),
+                        )
+                        if (
+                            sum(
+                                r["supported"]
+                                for r in core_adjacency(
+                                    points,
+                                    fitted_face,
+                                    box,
+                                    spans,
+                                    sign,
+                                    config,
+                                    opening,
+                                )
+                            )
+                            < minimum
+                        ):
+                            continue
+                    measured.append(
+                        dict(
+                            rho=rho,
+                            support_section_count=len(unique),
+                            provider_ids=candidate["provider_ids"],
+                            primary_raw3d=candidate["primary_raw3d"],
+                            primary_bev=candidate["primary_bev"],
+                            fit=fit,
+                        )
+                    )
+                if not measured:
+                    face = self._normal_face_reanchor(
+                        proposal,
+                        name,
+                        axis,
+                        box,
+                        spans,
+                        sign,
+                        candidates,
+                        candidate_heights,
+                        points,
+                    )
+                    if face is not None:
+                        if "unresolved_face_candidates" in face:
+                            state.update(
+                                status="MULTIMODE_BOUNDARY_CONFLICT",
+                                raw_normal_face_modes=face[
+                                    "unresolved_face_candidates"
+                                ],
+                            )
+                            continue
                         state.update(
-                            status="MULTIMODE_BOUNDARY_CONFLICT",
-                            raw_normal_face_modes=face["unresolved_face_candidates"],
+                            status="CORROBORATED_INNER_STEP",
+                            rho=face_position(face, (span[0] + span[1]) / 2),
+                            raw_normal_face=public_face(face),
+                            _raw_normal_face=face,
                         )
                         continue
+                    state["status"] = "NO_CORROBORATED_INNER_REPLACEMENT"
+                    continue
+                positions = np.array([s["rho"] for s in measured])
+                if np.ptp(positions) > config["boundary"]["corner_join_m"]:
                     state.update(
-                        status="CORROBORATED_INNER_STEP",
-                        rho=face_position(face, (span[0] + span[1]) / 2),
-                        raw_normal_face=public_face(face),
-                        _raw_normal_face=face,
+                        status="MULTIMODE_BOUNDARY_CONFLICT", measured_modes=measured
                     )
                     continue
-                state["status"] = "NO_CORROBORATED_INNER_REPLACEMENT"
-                continue
-            positions = np.array([s["rho"] for s in measured])
-            if np.ptp(positions) > config["boundary"]["corner_join_m"]:
                 state.update(
-                    status="MULTIMODE_BOUNDARY_CONFLICT", measured_modes=measured
+                    status="CORROBORATED_INNER_STEP",
+                    rho=float(np.median(positions)),
+                    measured_modes=measured,
                 )
-                continue
-            state.update(
-                status="CORROBORATED_INNER_STEP",
-                rho=float(np.median(positions)),
-                measured_modes=measured,
-            )
         return output
 
     def _normal_face_reanchor(
@@ -757,11 +881,46 @@ class FinalBoundaryRefiner:
                     LocalSurfaceNormals,
                 )
 
-                self.face_normals = LocalSurfaceNormals(self.xyz, self.config)
-            if face_lines is None:
-                face_lines = measured_faces(
-                    self.face_normals, axis, box[position], span, spans, self.config
+                self.face_normals = (
+                    self.measurement_context.local_surface_normals
+                    if self.measurement_context is not None
+                    else None
                 )
+                if self.face_normals is None:
+                    self.face_normals = LocalSurfaceNormals(self.xyz, self.config)
+                    if self.measurement_context is not None:
+                        self.measurement_context.local_surface_normals = (
+                            self.face_normals
+                        )
+            if face_lines is None:
+                key = (axis, box[position], tuple(span), tuple(spans))
+                faces = (
+                    self.measurement_context.face_evidence
+                    if self.measurement_context is not None
+                    else {}
+                )
+                if key not in faces:
+                    if self.budget is not None:
+                        self.budget.check()
+                    self.profiler["normal_query_count"] = (
+                        self.profiler.get("normal_query_count", 0) + 1
+                    )
+                    before_normal = int(np.count_nonzero(self.face_normals.computed))
+                    faces[key] = measured_faces(
+                        self.face_normals, axis, box[position], span, spans, self.config
+                    )
+                    self.profiler["normal_points_evaluated"] = self.profiler.get(
+                        "normal_points_evaluated", 0
+                    ) + max(
+                        0,
+                        int(np.count_nonzero(self.face_normals.computed))
+                        - before_normal,
+                    )
+                else:
+                    self.profiler["normal_face_cache_hit"] = (
+                        self.profiler.get("normal_face_cache_hit", 0) + 1
+                    )
+                face_lines = copy.deepcopy(faces[key])
             for face in face_lines:
                 if (
                     abs(face_position(face, (span[0] + span[1]) / 2) - anchor)
@@ -829,9 +988,95 @@ class FinalBoundaryRefiner:
             if len(self.raw_section_cache) >= 8192:
                 self.raw_section_cache.pop(next(iter(self.raw_section_cache)))
             self.raw_section_cache[key] = result
+        else:
+            self.profiler["raw_profile_cache_hit"] = (
+                self.profiler.get("raw_profile_cache_hit", 0) + 1
+            )
         return self.raw_section_cache[key]
 
     def _search_raw_section(self, roi, axis, anchor, span, sign):
+        config = self.config
+        search = config["roi"]["boundary_search_m"]
+        band = search + config["boundary"]["side_probe_m"]
+        # One original-point extraction, followed by one normal-coordinate sort.
+        selected = roi[
+            (abs(roi[:, axis] - anchor) <= band)
+            & (roi[:, 1 - axis] >= span[0])
+            & (roi[:, 1 - axis] <= span[1])
+        ]
+        if (
+            not len(selected)
+            or np.ptp(selected[:, 2]) < config["boundary"]["profile_min_drop_m"]
+        ):
+            return dict(status="INSUFFICIENT_RAW_SUPPORT", modes=[])
+        profile = RawSectionProfile(selected, axis, tuple(span), config)
+        self.profiler["raw_profile_build_count"] = (
+            self.profiler.get("raw_profile_build_count", 0) + 1
+        )
+        nominated = profile.edge_modes(anchor, sign)
+        self.profiler["raw_edge_mode_count"] = self.profiler.get(
+            "raw_edge_mode_count", 0
+        ) + len(nominated)
+        modes = []
+        for mode in nominated:
+            if self.budget is not None:
+                self.budget.check()
+            # Several distinct modes are retained. Only a small number of exact
+            # paired-return refinements are needed for each measured change.
+            for rho in dict.fromkeys((mode["center_rho"], mode["peak_rho"])):
+                width = config["geometry"]["candidate_voxel_m"]
+                points = profile.window(rho - width, rho + width)
+                self.profiler["continuous_refinement_count"] = (
+                    self.profiler.get("continuous_refinement_count", 0) + 1
+                )
+                raw, count = _raw_edge_rho(points, axis, rho, span, sign, config)
+                if raw is not None and profile.height(raw, sign)["transition"]:
+                    if not any(
+                        abs(raw - old) <= config["geometry"]["plane_inlier_m"]
+                        for old in modes
+                    ):
+                        modes.append(float(raw))
+                    break
+        groups = []
+        for rho in sorted(modes):
+            if groups and rho - groups[-1][0] <= config["boundary"]["corner_join_m"]:
+                groups[-1].append(rho)
+            else:
+                groups.append([rho])
+        measured = [float(np.median(group)) for group in groups]
+        if len(measured) != 1:
+            return dict(
+                status=(
+                    "MULTIMODE_BOUNDARY_CONFLICT"
+                    if measured
+                    else "INSUFFICIENT_RAW_SUPPORT"
+                ),
+                modes=measured,
+            )
+        width = config["geometry"]["candidate_voxel_m"]
+        continuous = _continuous_rho(
+            profile.window(measured[0] - width, measured[0] + width),
+            self.observations,
+            axis,
+            measured[0],
+            span,
+            sign,
+            config,
+        )
+        if continuous[1] > config["boundary"]["corner_join_m"]:
+            return dict(
+                status="MULTIMODE_BOUNDARY_CONFLICT", modes=[measured[0], continuous[0]]
+            )
+        return dict(
+            status="UNIQUE_SIGNED_RAW_STEP",
+            rho=measured[0],
+            modes=measured,
+            continuous=list(continuous),
+            height=profile.height(continuous[0], sign),
+            profile_method="SORTED_RAW_PROFILE_WITH_PAIRED_MODE_REFINEMENT",
+        )
+
+    def _search_raw_section_v1(self, roi, axis, anchor, span, sign):
         config = self.config
         search = config["roi"]["boundary_search_m"]
         selected = roi[
@@ -893,42 +1138,25 @@ class FinalBoundaryRefiner:
             ),
         )
 
+    def _height_measurement(self, points, axis, rho, span, sign, config):
+        key = (axis, float(rho), tuple(span), sign)
+        if key not in self.height_cache:
+            self.height_cache[key] = robust_height_support(
+                points, axis, rho, span, sign, config
+            )
+        return self.height_cache[key]
+
+    def _continuous_measurement(
+        self, points, observations, axis, rho, span, sign, config
+    ):
+        key = (axis, float(rho), tuple(span), sign)
+        if key not in self.continuous_cache:
+            self.continuous_cache[key] = _continuous_rho(
+                points, observations, axis, rho, span, sign, config
+            )
+        return self.continuous_cache[key]
+
     def _fit(self, rows, fallback):
-        if not rows:
-            return fallback, dict(status="INSUFFICIENT_SUPPORT")
-        x = np.array([r["along"] for r in rows])
-        y = np.array([r["rho"] for r in rows])
-        if len(rows) < self.config["boundary"]["profile_min_sections"]:
-            return float(np.median(y)), dict(status="INSUFFICIENT_SUPPORT")
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", RuntimeWarning)
-            reference, center_rho = float(np.median(x)), float(np.median(y))
-            fit = theilslopes(y - center_rho, x - reference)
-        if not np.isfinite(np.asarray(fit)).all():
-            return center_rho, dict(
-                status="MULTIMODE_BOUNDARY_CONFLICT", reason="DEGENERATE_SECTION_LINE"
-            )
-        rho_at_reference = center_rho + float(fit[1])
-        residual = y - (rho_at_reference + fit[0] * (x - reference))
-        mad = float(np.median(abs(residual)))
-        consistent = abs(residual) <= self.config["boundary"]["corner_join_m"]
-        status = (
-            "CONSENSUS"
-            if (
-                consistent.all()
-                and abs(np.degrees(np.arctan(fit[0])))
-                <= self.config["boundary"]["merge_angle_deg"]
-            )
-            else "MULTIMODE_BOUNDARY_CONFLICT"
-        )
-        return rho_at_reference, dict(
-            status=status,
-            slope=float(fit[0]),
-            low_slope=float(fit[2]),
-            high_slope=float(fit[3]),
-            reference_along_m=reference,
-            rho_at_reference_m=rho_at_reference,
-            residual_mad_m=mad,
-            unconstrained_slope_deg=float(np.degrees(np.arctan(fit[0]))),
-            inlier_section_count=int(consistent.sum()),
-        )
+        from .consensus import SpatialEvidenceConsensus
+
+        return SpatialEvidenceConsensus(self.config).fit(rows, fallback)

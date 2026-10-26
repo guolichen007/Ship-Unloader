@@ -12,7 +12,16 @@ import numpy as np
 
 
 def canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    def convert(item):
+        if isinstance(item, np.ndarray):
+            return item.tolist()
+        if isinstance(item, np.generic):
+            return item.item()
+        raise TypeError(type(item).__name__)
+
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), allow_nan=False, default=convert
+    )
 
 
 @dataclass(frozen=True)
@@ -71,6 +80,8 @@ def physical_queries(proposals, config, mode_resolver=None):
     Distinct separator hypotheses and vessels always remain separate.
     """
     groups = []
+    complete_index = {}
+    partial_index = {}
     tolerance = config["geometry"]["plane_inlier_m"]
     for proposal in proposals:
         row = proposal.evidence()
@@ -79,24 +90,19 @@ def physical_queries(proposals, config, mode_resolver=None):
         )
         modes = tuple(mode_resolver(proposal)) if mode_resolver else ()
         complete = len(modes) == 4 and all(m is not None for m in modes)
-        group = next(
-            (
+        key = (proposal.vessel_id, topology, modes)
+        group = complete_index.get(key) if complete else None
+        bucket = int(np.floor(proposal.bounds[0] / tolerance))
+        if not complete:
+            nearby = []
+            for b in (bucket - 1, bucket, bucket + 1):
+                nearby.extend(partial_index.get((proposal.vessel_id, topology, b), ()))
+            matches = [
                 g
-                for g in groups
-                if g["vessel"] == proposal.vessel_id
-                and g["topology"] == topology
-                and (
-                    (complete and g["complete"] and modes == g["modes"])
-                    or (
-                        not complete
-                        and not g["complete"]
-                        and np.max(abs(np.asarray(g["bounds"]) - proposal.bounds))
-                        <= tolerance
-                    )
-                )
-            ),
-            None,
-        )
+                for g in nearby
+                if np.max(abs(np.asarray(g["bounds"]) - proposal.bounds)) <= tolerance
+            ]
+            group = min(matches, key=lambda g: g["index"]) if matches else None
         if group is None:
             group = dict(
                 vessel=proposal.vessel_id,
@@ -106,7 +112,14 @@ def physical_queries(proposals, config, mode_resolver=None):
                 complete=complete,
                 members=[],
             )
+            group["index"] = len(groups)
             groups.append(group)
+            if complete:
+                complete_index[key] = group
+            else:
+                partial_index.setdefault(
+                    (proposal.vessel_id, topology, bucket), []
+                ).append(group)
         group["members"].append(proposal)
     result = []
     for g in groups:

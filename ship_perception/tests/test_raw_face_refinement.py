@@ -74,6 +74,10 @@ class RawFaceRefinement(unittest.TestCase):
         cfg, cache, proposal = context(terrace_scene())
         with mock.patch.object(
             FinalBoundaryRefiner, "_normal_face_reanchor", return_value=None
+        ), mock.patch.object(
+            FinalBoundaryRefiner,
+            "_search_raw_section",
+            FinalBoundaryRefiner._search_raw_section_v1,
         ):
             previous = FinalBoundaryRefiner(cache.xyz, [], cfg).refine(
                 proposal, np.eye(2)
@@ -85,12 +89,21 @@ class RawFaceRefinement(unittest.TestCase):
             current["sides"]["U1"]["support_section_count"],
             cfg["boundary"]["profile_min_sections"],
         )
-        self.assertEqual(
-            current["sides"]["U1"]["opening_role_reanchor"]["raw_normal_face"][
-                "physical_role"
-            ],
-            "UNKNOWN",
-        )
+        side = current["sides"]["U1"]
+        face = side["opening_role_reanchor"].get("raw_normal_face")
+        if face is not None:
+            self.assertEqual(face["physical_role"], "UNKNOWN")
+        else:
+            # A unique paired raw profile now avoids an unnecessary normal
+            # fallback. The same measured inner-face geometry is still required.
+            self.assertGreaterEqual(
+                side["positive_height_section_count"],
+                cfg["boundary"]["profile_min_sections"],
+            )
+            self.assertGreaterEqual(
+                side["raw_subvoxel_section_count"],
+                cfg["boundary"]["profile_min_sections"],
+            )
         self.assertFalse(current["sides"]["U1"]["steel_edge_certified"])
 
     def test_independent_vertical_cargo_face_cannot_cut_away_the_opening(self):
