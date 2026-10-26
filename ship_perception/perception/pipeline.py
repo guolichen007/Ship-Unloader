@@ -121,6 +121,9 @@ def _json_default(value):
 
 def precision_suppression(rows, vessel_axes, config):
     """Compare physical side support after precision, never coarse box size."""
+    from .opening_partitions import explained_envelopes
+
+    rows, explained = explained_envelopes(rows, vessel_axes, config)
 
     def quality(row):
         sides = list(row["sides"].values())
@@ -141,7 +144,7 @@ def precision_suppression(rows, vessel_axes, config):
             not row["undercoverage_risk"],
         )
 
-    selected, suppressed = [], []
+    selected, suppressed = [], list(explained)
 
     def bounds(row):
         uv = np.asarray(row["boundary_xy"]) @ vessel_axes.T
