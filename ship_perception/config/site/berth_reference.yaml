@@ -1,0 +1,12 @@
+{
+  "schema": "ship_perception.berth_reference.1",
+  "enabled": false,
+  "frame_id": "map",
+  "quay_line": null,
+  "quay_normal_direction": null,
+  "working_longitudinal_range": null,
+  "working_polygon": null,
+  "expected_ship_side": "WATER_SIDE",
+  "observer_xy": null,
+  "provenance": "UNCONFIGURED: supply surveyed site geometry, never hatch coordinates or vessel dimensions"
+}
