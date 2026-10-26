@@ -44,6 +44,8 @@ output/YYYYMMDD_HHMMSS_microseconds/
 
 `05_hatch_corners.json` 单列整幅场景中所有最终复核对象的四角坐标，使用原始输入 frame 的 XY、单位米；每角含 `x_m`、`y_m`、相交边名称及不确定性。它与全局图使用同一份最终几何，不补造 Z，也不把 `UNRESOLVED` 包围组当作单个已确认船舱。
 
+两张全船图均在角点附近标注 `P1～P4` 的输入 XY 坐标，并在每舱中央显示 `L / W`。JSON 的 `C0～C3` 依次对应图中 `P1～P4`，`dimensions` 同时保存长、宽及四条边的实长。长度为两条 U 向边实长的平均，宽度为两条 V 向边实长的平均；不使用旋转后的 XY 包围框尺寸。显示保留三位小数只是数值格式，不代表毫米级精度认证。
+
 琥珀实线为最佳复核边界，点线为不确定性覆盖范围。`PARTIAL_HATCH`、`UNRESOLVED_VESSEL_REVIEW` 不能当作已确认船舱；矩形约束和缺测推断不能当作实测钢边。完整原始场景保留在背景中，避免漏检区域被绘图裁掉。
 
 ## 当前技术路线与边界
@@ -91,4 +93,4 @@ Ship-Unloader-Data/              # private raw data; never pushed
 Ship-Unloader-Work/              # builds, logs and validation; never pushed
 ```
 
-正式历史跟踪 Tag `baseline-v1.4-ubuntu20-20260919` 保留。`archive/*` 只用于追溯；本轮不修改 main、不创建 PR、不 merge、不删分支或 Tag。
+正式历史跟踪 Tag `baseline-v1.4-ubuntu20-20260919` 保留。`archive/*` 只用于追溯；开发、合入和历史保全遵守[开发与 Git 协作规范](docs/05_开发与Git协作规范.md)。
