@@ -23,7 +23,7 @@ from ship_perception.r1_static.height_grid import R1HeightGrid
 from .context import SceneEvidenceContext, thaw
 from .local_evidence import VesselLocalEvidence
 from .recall import propose_openings, validate_and_select, box_overlap
-from .validation import ExteriorTopology, vessel_containment
+from .validation import ExteriorTopology, vessel_containment, partial_context_review
 from .final_boundary import FinalBoundaryRefiner, polygon
 from .intensity import admission_stats
 from ship_perception.r1_static.intensity_evidence import AUX_WEIGHT
@@ -434,8 +434,12 @@ def run_perception(frame, progress=None, legacy_evidence=True):
             continue
         try:
             with timing.stage(ident + "_LOCAL_RECALL_VALIDATE"):
-                cache = VesselLocalEvidence.build(frame, vessel, config)
-                exterior = ExteriorTopology.build(frame, vessel, config)
+                cache = VesselLocalEvidence.build(
+                    frame, vessel, config, context.boundary_context(ident)
+                )
+                exterior = ExteriorTopology.build(
+                    frame, vessel, config, context.boundary_context(ident)
+                )
                 caches[ident], exteriors[ident] = cache, exterior
                 proposals, audit = propose_openings(cache, research)
                 selected, selection = validate_and_select(cache, proposals, exterior)
@@ -537,9 +541,26 @@ def run_perception(frame, progress=None, legacy_evidence=True):
                         ambiguous_topology = (
                             proposal.get("topology_status") == "AMBIGUOUS_TOPOLOGY"
                         )
-                        if review_sides >= 3 and contained and enclosed:
+                        contextual = (
+                            partial_context_review(
+                                cache,
+                                result["boundary_xy"],
+                                proposal["containment"],
+                                proposal["exterior"],
+                            )
+                            if review_sides >= 3 and not (contained and enclosed)
+                            else None
+                        )
+                        if review_sides >= 3 and (
+                            (contained and enclosed) or contextual
+                        ):
                             if measured < 4 or result["undercoverage_risk"]:
                                 result["status"] = "PARTIAL_HATCH"
+                            if contextual:
+                                result.update(
+                                    status="PARTIAL_HATCH",
+                                    boundary_context_review=contextual,
+                                )
                             if ambiguous_topology:
                                 # Its measured outer edges remain useful, but
                                 # cannot prove this group is one hatch. Dropping
@@ -619,21 +640,16 @@ def run_perception(frame, progress=None, legacy_evidence=True):
             axes = np.asarray(proposal["axes"])
             key = (ident, tuple(axes.ravel()))
             if key != previous_key:
-                allowed = np.ones(len(frame.xyz), dtype=bool)
-                for other in context.vessels:
-                    if (
-                        other.vessel_id != ident
-                        and other.public["classification_status"] == "VESSEL_HYPOTHESIS"
-                    ):
-                        allowed[other.point_indexes] = False
-                points = frame.xyz[allowed]
+                # A review may use eligible unresolved sibling measurements,
+                # never every unresolved point in the whole scene.
+                points = frame.xyz[caches[ident].measurement_context.point_indexes]
                 uvz = np.column_stack((points[:, :2] @ axes.T, points[:, 2]))
                 shared_refiner = FinalBoundaryRefiner(
                     uvz, proposal.get("profile_observations", []), config
                 )
                 previous_key = key
             proposal["raw_support_scope"] = (
-                "OWNED_PLUS_UNRESOLVED_CONTEXT; OTHER_VESSELS_EXCLUDED"
+                "FROZEN_CORE_AND_ELIGIBLE_UNRESOLVED_SIBLINGS; OTHER_SUPPORTS_EXCLUDED"
             )
             try:
                 with timing.stage(ident + "_COMPARISON_BOUNDARY_PRECISION"):
@@ -673,7 +689,7 @@ def run_perception(frame, progress=None, legacy_evidence=True):
             # The ring's own observed exterior level is used, never a fixed Z.
             from ship_perception.r1_static.hatch_proposal import _opening_evidence
 
-            opening = _opening_evidence(caches[ident].grid("fine"), box, config)
+            opening = _opening_evidence(caches[ident].context_grid("fine"), box, config)
             levels = [
                 v for v in opening.get("outside_side_median_z", []) if v is not None
             ]
@@ -690,6 +706,19 @@ def run_perception(frame, progress=None, legacy_evidence=True):
                 boundary_before_separator_uv=proposal.get("bounds_before_separator"),
                 raw_roi_ownership="CORE_PLUS_UNRESOLVED_BOUNDARY_CONTEXT; NOT_CERTIFIED_STEEL",
                 inherited_review_status=proposal.get("inherited_review_status"),
+            )
+            review_sides = sum(
+                min(s["raw_subvoxel_section_count"], s["positive_height_section_count"])
+                >= config["boundary"]["profile_min_sections"]
+                for s in result["sides"].values()
+            )
+            result["review_support_side_count"] = review_sides
+            contextual = (
+                partial_context_review(
+                    caches[ident], result["boundary_xy"], containment, exterior
+                )
+                if review_sides >= 3
+                else None
             )
             if (
                 containment["status"] == "REJECT_OUTSIDE_VESSEL"
@@ -713,24 +742,22 @@ def run_perception(frame, progress=None, legacy_evidence=True):
                 # Preserve historical uncertainty for inspection. It may only
                 # enter hatch output after the same raw support and topology
                 # requirements as a newly recalled local proposal.
-                review_sides = sum(
-                    min(
-                        s["raw_subvoxel_section_count"],
-                        s["positive_height_section_count"],
+                if review_sides < 3 or (
+                    not contextual
+                    and (
+                        containment["status"] != "CONTAINED"
+                        or exterior["status"] != "ENCLOSED_OBSERVED_LOW_COMPONENT"
                     )
-                    >= config["boundary"]["profile_min_sections"]
-                    for s in result["sides"].values()
-                )
-                if (
-                    review_sides < 3
-                    or containment["status"] != "CONTAINED"
-                    or exterior["status"] != "ENCLOSED_OBSERVED_LOW_COMPONENT"
                 ):
                     result.update(
                         status="UNRESOLVED", review_support_side_count=review_sides
                     )
                     item["unresolved_candidates"].append(result)
                     continue
+            if contextual:
+                result.update(
+                    status="PARTIAL_HATCH", boundary_context_review=contextual
+                )
             if (
                 exterior["status"] != "ENCLOSED_OBSERVED_LOW_COMPONENT"
                 or result["undercoverage_risk"]
@@ -776,6 +803,8 @@ def run_perception(frame, progress=None, legacy_evidence=True):
             ]
             if result.get("reason") == "HATCH_COUNT_AMBIGUOUS":
                 result["candidate_blockers"].append("HATCH_COUNT_AMBIGUOUS")
+            if result.get("boundary_context_review"):
+                result["candidate_blockers"].append("BOUNDARY_OWNERSHIP_UNRESOLVED")
             hatches.append(result)
         groups = {}
         for result in item["hatches"]:

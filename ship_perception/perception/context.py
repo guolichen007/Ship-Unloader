@@ -55,6 +55,116 @@ class VesselEvidence:
 
 
 @dataclass(frozen=True)
+class BoundaryMeasurementContext:
+    vessel_id: str
+    sources: tuple
+    point_indexes: np.ndarray
+    point_source_codes: np.ndarray
+    point_index_sha256: str
+    unattributed_sources: tuple = ()
+
+    @classmethod
+    def build(cls, vessel, vessels):
+        """Retain unresolved sibling measurements without changing ownership.
+
+        A spatial support can contain several physical bodies. Siblings are
+        contextual only when their support has exactly one resolved core; a
+        second resolved core or an unrelated support cannot be borrowed.
+        """
+        vessels = tuple(vessels)
+        supports = set(vessel.public["source_support_ids"])
+        unattributed = tuple(
+            sorted(
+                (
+                    other
+                    for other in vessels
+                    if other.vessel_id != vessel.vessel_id
+                    and other.public["classification_status"] == "UNRESOLVED"
+                    and supports.intersection(other.public["source_support_ids"])
+                ),
+                key=lambda other: other.vessel_id,
+            )
+        )
+        unique_supports = set(supports)
+        if vessel.public["classification_status"] != "VESSEL_HYPOTHESIS":
+            unique_supports.clear()
+        for other in vessels:
+            if (
+                other.vessel_id != vessel.vessel_id
+                and other.public["classification_status"] == "VESSEL_HYPOTHESIS"
+            ):
+                unique_supports.difference_update(other.public["source_support_ids"])
+        siblings = tuple(
+            sorted(
+                (
+                    other
+                    for other in vessels
+                    if other.vessel_id != vessel.vessel_id
+                    and other.public["classification_status"] == "UNRESOLVED"
+                    and other.public["source_support_ids"]
+                    and set(other.public["source_support_ids"]).issubset(
+                        unique_supports
+                    )
+                ),
+                key=lambda other: other.vessel_id,
+            )
+        )
+        sources = (vessel,) + siblings
+        indexes = np.concatenate([source.point_indexes for source in sources])
+        order = np.argsort(indexes, kind="stable")
+        indexes = indexes[order]
+        if len(np.unique(indexes)) != len(indexes):
+            raise ValueError("BOUNDARY_CONTEXT_OWNERSHIP_OVERLAP")
+        codes = np.concatenate(
+            [
+                np.full(len(source.point_indexes), code, dtype="<i4")
+                for code, source in enumerate(sources)
+            ]
+        )[order]
+        indexes = np.frombuffer(np.asarray(indexes, dtype="<i8").tobytes(), dtype="<i8")
+        codes = np.frombuffer(codes.tobytes(), dtype="<i4")
+        return cls(
+            vessel.vessel_id,
+            sources,
+            indexes,
+            codes,
+            hashlib.sha256(memoryview(indexes).cast("B")).hexdigest(),
+            unattributed,
+        )
+
+    @classmethod
+    def build_all(cls, vessels):
+        # Unrelated spatial supports need no pairwise vessel comparison.
+        by_support = {}
+        for vessel in vessels:
+            for support in vessel.public["source_support_ids"]:
+                by_support.setdefault(support, {})[vessel.vessel_id] = vessel
+        contexts = []
+        for vessel in vessels:
+            neighbors = {}
+            for support in vessel.public["source_support_ids"]:
+                neighbors.update(by_support[support])
+            contexts.append(cls.build(vessel, neighbors.values()))
+        return tuple(contexts)
+
+    def identity(self):
+        return dict(
+            vessel_id=self.vessel_id,
+            point_count=len(self.point_indexes),
+            point_index_sha256=self.point_index_sha256,
+            sources=[source.identity() for source in self.sources],
+            unattributed_sources=[
+                source.identity() for source in self.unattributed_sources
+            ],
+            source_code_sha256=hashlib.sha256(
+                memoryview(self.point_source_codes).cast("B")
+            ).hexdigest(),
+            context_ownership_confirmed=False,
+            method="OWNED_CORE_AND_UNRESOLVED_SIBLINGS_OF_UNIQUE_SUPPORT_CORE",
+        )
+
+
+@dataclass(frozen=True)
 class SceneEvidenceContext:
     input_semantic_sha256: str
     raw_identity_json: str
@@ -62,6 +172,7 @@ class SceneEvidenceContext:
     software_sha: str
     scene: object
     vessels: tuple
+    boundary_contexts: tuple
 
     @classmethod
     def build(cls, frame, config, research, config_sha, software_sha):
@@ -88,6 +199,14 @@ class SceneEvidenceContext:
             software_sha,
             freeze(scene),
             tuple(vessels),
+            BoundaryMeasurementContext.build_all(vessels),
+        )
+
+    def boundary_context(self, vessel_id):
+        return next(
+            context
+            for context in self.boundary_contexts
+            if context.vessel_id == vessel_id
         )
 
     def validate_frame(self, frame):
@@ -104,4 +223,7 @@ class SceneEvidenceContext:
             software_sha=self.software_sha,
             b1_execution_count=1,
             vessels=[v.identity() for v in self.vessels],
+            boundary_measurement_contexts=[
+                context.identity() for context in self.boundary_contexts
+            ],
         )

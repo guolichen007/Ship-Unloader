@@ -15,7 +15,7 @@ from ship_perception.r1_static.hatch_proposal import (
     _raw3d_provider,
     _world_line,
 )
-from .context import thaw
+from .context import BoundaryMeasurementContext, thaw
 
 
 def cluster_levels(values, config, research):
@@ -51,13 +51,43 @@ class VesselLocalEvidence:
     input_frame_providers: object = None
     provider_build_count: int = 0
     grid_build_counts: dict = field(default_factory=dict)
+    measurement_context: object = None
+    context_xyz: object = None
+    context_grids: dict = field(default_factory=dict)
 
     @classmethod
-    def build(cls, frame, vessel, config):
+    def build(cls, frame, vessel, config, measurement_context=None):
         points = frame.xyz[vessel.point_indexes]
         uvz = np.column_stack((points[:, :2] @ vessel.axes.T, points[:, 2]))
         uvz.setflags(write=False)
-        return cls(vessel, uvz, config)
+        if measurement_context is None:
+            measurement_context = BoundaryMeasurementContext.build(vessel, [vessel])
+        if measurement_context.vessel_id != vessel.vessel_id:
+            raise ValueError("LOCAL_MEASUREMENT_CONTEXT_VESSEL_MISMATCH")
+        if measurement_context.point_index_sha256 == vessel.point_index_sha256:
+            context_uvz = uvz
+        else:
+            points = frame.xyz[measurement_context.point_indexes]
+            context_uvz = np.column_stack((points[:, :2] @ vessel.axes.T, points[:, 2]))
+            context_uvz.setflags(write=False)
+        return cls(
+            vessel,
+            uvz,
+            config,
+            measurement_context=measurement_context,
+            context_xyz=context_uvz,
+        )
+
+    def context_grid(self, name):
+        """Independent measurement occupancy, never a replacement owned mask."""
+        if self.context_xyz is self.xyz:
+            return self.grid(name)
+        if name not in self.context_grids:
+            key = "coarse_voxel_m" if name == "coarse" else "candidate_voxel_m"
+            self.context_grids[name] = R1HeightGrid.from_points(
+                self.context_xyz, self.config["geometry"][key]
+            )
+        return self.context_grids[name]
 
     def grid(self, name):
         if name not in self.grids:

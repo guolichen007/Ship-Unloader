@@ -16,15 +16,36 @@ class ExteriorTopology:
     config: dict
     components: dict = field(default_factory=dict)
     level_evaluations: int = 0
+    unresolved_context: object = None
 
     @classmethod
-    def build(cls, frame, vessel, config):
+    def build(cls, frame, vessel, config, measurement_context=None):
         uvz = np.column_stack((frame.xyz[:, :2] @ vessel.axes.T, frame.xyz[:, 2]))
         grid = R1HeightGrid.from_points(uvz, config["geometry"]["coarse_voxel_m"])
         rows, cols = grid.cell_indices(uvz[vessel.point_indexes, :2])
         owned = np.zeros(grid.count.shape, dtype=bool)
         owned[rows, cols] = True
-        return cls(grid, owned, config)
+        unresolved = np.zeros(grid.count.shape, dtype=bool)
+        if measurement_context is not None:
+            if measurement_context.vessel_id != vessel.vessel_id:
+                raise ValueError("EXTERIOR_CONTEXT_VESSEL_MISMATCH")
+            # Uncertain attribution is not the same as permission to borrow
+            # measurements. In a multi-core support, unresolved siblings stay
+            # unknown even though neither core may use them as its own evidence.
+            indexes = (
+                np.concatenate(
+                    [
+                        source.point_indexes
+                        for source in measurement_context.unattributed_sources
+                    ]
+                )
+                if measurement_context.unattributed_sources
+                else np.array([], dtype=int)
+            )
+            rows, cols = grid.cell_indices(uvz[indexes, :2])
+            unresolved[rows, cols] = True
+            unresolved &= ~owned
+        return cls(grid, owned, config, unresolved_context=unresolved)
 
     def at_level(self, level):
         key = float(level)
@@ -39,7 +60,10 @@ class ExteriorTopology:
             boundary = np.zeros(low.shape, dtype=bool)
             boundary[[0, -1], :] = True
             boundary[:, [0, -1]] = True
-            exterior = low & (~self.owned | boundary)
+            known_outside = ~self.owned
+            if self.unresolved_context is not None:
+                known_outside = known_outside & ~self.unresolved_context
+            exterior = low & (known_outside | boundary)
             external_ids = set(np.unique(labels[exterior]).tolist()) - {0}
             # Cache eviction changes recomputation only, never the measured
             # level or classification. Keep label rasters within 64 MiB.
@@ -74,6 +98,12 @@ class ExteriorTopology:
         component = int(ids[np.argmax(counts)])
         member = labels == component
         outside = int(np.count_nonzero(member & ~self.owned))
+        unresolved = (
+            int(np.count_nonzero(member & self.unresolved_context))
+            if self.unresolved_context is not None
+            else 0
+        )
+        known_outside = outside - unresolved
         total = int(member.sum())
         overlap = float(
             np.count_nonzero(inside & member)
@@ -83,20 +113,24 @@ class ExteriorTopology:
         touches = bool(np.any(member & boundary))
         if (
             connected
-            and outside / max(1, total) >= self.config["roi"]["min_enclosure_ratio"]
+            and known_outside / max(1, total)
+            >= self.config["roi"]["min_enclosure_ratio"]
             and overlap >= self.config["roi"]["min_enclosure_ratio"]
         ):
             status = "REJECT_EXTERIOR_LOW_REGION"
-        elif connected:
+        elif connected or unresolved:
             status = "UNRESOLVED_EXTERIOR_CONNECTIVITY"
         else:
             status = "ENCLOSED_OBSERVED_LOW_COMPONENT"
         return dict(
             status=status,
-            exterior_low_connected=connected,
+            exterior_low_connected=(connected if connected or not unresolved else None),
+            known_exterior_low_connected=connected,
             component_id=component,
             component_cells=total,
             external_owned_complement_cells=outside,
+            known_external_component_cells=known_outside,
+            unresolved_context_component_cells=unresolved,
             candidate_component_overlap=overlap,
             touches_scene_grid=touches,
             missing_cells_traversed=False,
@@ -151,6 +185,43 @@ def vessel_containment(grid, box, config, prepared=None):
         corner_support=supported[:4].tolist(),
         distance_to_observed_support_m=distances,
         inferred_envelope_is_measurement=False,
+    )
+
+
+def partial_context_review(cache, boundary_xy, containment, exterior):
+    """Keep a physically supported partial, without certifying its ownership.
+
+    The caller must still satisfy the existing raw three-side admission. This
+    check cannot rescue an outside centroid, known external low connection,
+    multi-core borrowed context, or missing measured corner support.
+    """
+    context = cache.measurement_context
+    if (
+        context is None
+        or len(context.sources) <= 1
+        or len(context.point_indexes) <= len(context.sources[0].point_indexes)
+        or not containment["centroid_inside_support"]
+        or containment["status"] == "REJECT_OUTSIDE_VESSEL"
+        or exterior.get("known_exterior_low_connected") is not False
+        or exterior.get("unresolved_context_component_cells", 0) <= 0
+    ):
+        return None
+    uv = np.asarray(boundary_xy) @ cache.vessel.axes.T
+    box = [*uv.min(0), *uv.max(0)]
+    final_core = vessel_containment(cache.grid("coarse"), box, cache.config)
+    if not final_core["centroid_inside_support"]:
+        return None
+    measured = vessel_containment(cache.context_grid("coarse"), box, cache.config)
+    if measured["status"] != "CONTAINED":
+        return None
+    return dict(
+        status="UNRESOLVED_BOUNDARY_OWNERSHIP_REVIEW",
+        measurement_containment=measured,
+        measurement_context=context.identity(),
+        final_core_containment=final_core,
+        owned_point_set_unchanged=True,
+        ownership_confirmed=False,
+        steel_edge_certified=False,
     )
 
 
