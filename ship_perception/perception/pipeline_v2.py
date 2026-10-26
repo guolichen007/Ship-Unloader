@@ -79,7 +79,8 @@ def _canonical_queries(proposals, cache):
 
 def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=None):
     timing = Timing(progress)
-    budget = PerformanceBudget()
+    # Reserve the documented five seconds for rendering outside this core.
+    budget = PerformanceBudget(total_s=55.0)
     config, config_sha = resolve_config()
     research_bytes = RESEARCH_CONFIG.read_bytes()
     research = json.loads(research_bytes)
@@ -538,6 +539,14 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
     intensity.update(
         used=False, production_scoring_enabled=False, geometry_mode="XYZ_ONLY"
     )
+    performance = budget.report()
+    performance.update(
+        core_execution_budget_s=55.0,
+        core_budget_exceeded=performance["total_budget_exceeded"],
+        render_reserve_s=5.0,
+        total_budget_s=60.0,
+        total_budget_exceeded=performance["total_elapsed_s"] > 60.0,
+    )
     return dict(
         schema="ship_perception.hatch_once.2",
         pipeline_version="multi-expert-berth-raw-profile.2",
@@ -600,7 +609,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
         physical_candidate_registry=query_rows,
         precision_attempts=precision_attempts,
         precision_profiler=profiler,
-        performance_budget=budget.report(),
+        performance_budget=performance,
         rejected_exterior_candidates=bounded(
             [r for r in rejected if r["reason"] == "STRONG_EXTERIOR_WATER_CONNECTION"]
         ),

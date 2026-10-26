@@ -6,7 +6,7 @@ import json
 import time
 from contextlib import contextmanager
 
-from .measurement import RawSpatialIndex, RawSectionProfile
+from .measurement import RawSpatialIndex, RawSectionProfile, BudgetedLocalSurfaceNormals
 
 import numpy as np
 from scipy.stats import theilslopes
@@ -887,7 +887,13 @@ class FinalBoundaryRefiner:
                     else None
                 )
                 if self.face_normals is None:
-                    self.face_normals = LocalSurfaceNormals(self.xyz, self.config)
+                    self.face_normals = (
+                        BudgetedLocalSurfaceNormals(
+                            self.xyz, self.config, self.budget, self.profiler
+                        )
+                        if self.measurement_context is not None
+                        else LocalSurfaceNormals(self.xyz, self.config)
+                    )
                     if self.measurement_context is not None:
                         self.measurement_context.local_surface_normals = (
                             self.face_normals
@@ -909,13 +915,14 @@ class FinalBoundaryRefiner:
                     faces[key] = measured_faces(
                         self.face_normals, axis, box[position], span, spans, self.config
                     )
-                    self.profiler["normal_points_evaluated"] = self.profiler.get(
-                        "normal_points_evaluated", 0
-                    ) + max(
-                        0,
-                        int(np.count_nonzero(self.face_normals.computed))
-                        - before_normal,
-                    )
+                    if not isinstance(self.face_normals, BudgetedLocalSurfaceNormals):
+                        self.profiler["normal_points_evaluated"] = self.profiler.get(
+                            "normal_points_evaluated", 0
+                        ) + max(
+                            0,
+                            int(np.count_nonzero(self.face_normals.computed))
+                            - before_normal,
+                        )
                 else:
                     self.profiler["normal_face_cache_hit"] = (
                         self.profiler.get("normal_face_cache_hit", 0) + 1

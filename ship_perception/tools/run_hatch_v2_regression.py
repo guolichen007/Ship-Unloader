@@ -78,8 +78,12 @@ def run_case(case, output):
         and (not matches or not all(m["old_opening_covered"] for m in matches))
         else (
             "COVERAGE_RETAINED_REVIEW_REQUIRED"
-            if matches
-            else "NO_ACCEPTED_REFERENCE_PENDING"
+            if old_pass and matches
+            else (
+                "UNACCEPTED_REFERENCE_COMPARISON_ONLY"
+                if matches
+                else "NO_ACCEPTED_REFERENCE_PENDING"
+            )
         )
     )
     selection = result["berth_selection"]

@@ -158,7 +158,14 @@ class UnifiedPhysicalValidation:
             return decide("UNRESOLVED", "INSUFFICIENT_INDEPENDENT_ENCLOSURE_SUPPORT")
         positive = ring["positive_height_side_count"]
         if positive < 2 and coaming < 3:
-            return decide("UNRESOLVED", "LOADED_INTERIOR_OR_EDGE_ROLE_UNRESOLVED")
+            # Missing coarse height/normal evidence is not a reason to block
+            # raw investigation of an independently supported enclosure.
+            # It stays partial; the unchanged raw support/role guards decide
+            # whether any final review geometry can be emitted.
+            row["precision_allowed"] = True
+            return decide(
+                "PARTIAL", "LOADED_INTERIOR_OR_EDGE_ROLE_REQUIRES_RAW_INVESTIGATION"
+            )
         row["precision_allowed"] = True
         if (
             row["containment"]["status"] != "CONTAINED"

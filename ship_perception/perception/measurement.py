@@ -2,6 +2,28 @@
 
 from dataclasses import dataclass, field
 import numpy as np
+from ship_perception.r1_static.raw_surface_normals import LocalSurfaceNormals
+
+
+class BudgetedLocalSurfaceNormals(LocalSurfaceNormals):
+    """Same exact estimator with cooperative stops between memory batches."""
+
+    def __init__(self, xyz, config, budget, counters):
+        super().__init__(xyz, config)
+        self.budget, self.counters = budget, counters
+
+    def _estimate(self, indexes):
+        pending = indexes[~self.computed[indexes]]
+        for start in range(0, len(pending), 8192):
+            if self.budget is not None:
+                self.budget.check()
+            ids = pending[start : start + 8192]
+            super()._estimate(ids)
+            self.counters["normal_points_evaluated"] = self.counters.get(
+                "normal_points_evaluated", 0
+            ) + len(ids)
+            if self.budget is not None:
+                self.budget.check()
 
 
 class RawSpatialIndex:
