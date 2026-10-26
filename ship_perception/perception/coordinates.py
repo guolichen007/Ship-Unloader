@@ -11,6 +11,31 @@ import numpy as np
 CORNER_INTERSECTIONS = ("U0/V0", "U1/V0", "U1/V1", "U0/V1")
 
 
+def boundary_dimensions(boundary_xy):
+    """Measure the final polygon in XY, including slanted/nonparallel edges.
+
+    Length follows vessel U and width follows vessel V. Neither is an XY
+    bounding-box extent or a claim about an independently certified steel edge.
+    """
+    polygon = np.asarray(boundary_xy, dtype=float)
+    if polygon.shape != (4, 2) or not np.isfinite(polygon).all():
+        raise ValueError("INVALID_FOUR_CORNER_COORDINATES")
+    edges = np.linalg.norm(np.roll(polygon, -1, axis=0) - polygon, axis=1)
+    return dict(
+        length_m=float((edges[0] + edges[2]) / 2),
+        width_m=float((edges[1] + edges[3]) / 2),
+        side_lengths_m={
+            "V0": float(edges[0]),
+            "U1": float(edges[1]),
+            "V1": float(edges[2]),
+            "U0": float(edges[3]),
+        },
+        method="MEAN_OPPOSITE_EDGE_LENGTHS",
+        coordinate_system="ORIGINAL_INPUT_XY",
+        geometry_role="FINAL_REVIEW_BOUNDARY_NOT_CERTIFIED_STEEL",
+    )
+
+
 def corner_coordinates(payload, source_result_sha256):
     """Project final review results into a small coordinate-only document.
 
@@ -38,6 +63,7 @@ def corner_coordinates(payload, source_result_sha256):
             corners.append(
                 dict(
                     corner_id="C" + str(index),
+                    display_label="P" + str(index + 1),
                     side_intersection=intersection,
                     x_m=float(point[0]),
                     y_m=float(point[1]),
@@ -59,6 +85,7 @@ def corner_coordinates(payload, source_result_sha256):
                 candidate_blockers=list(hatch.get("candidate_blockers", [])),
                 undercoverage_risk=hatch["undercoverage_risk"],
                 boundary_xy_m=polygon.tolist(),
+                dimensions=boundary_dimensions(polygon),
                 corners=corners,
             )
         )

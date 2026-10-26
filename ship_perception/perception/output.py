@@ -13,6 +13,7 @@ from ship_perception.r1_static.height_grid import R1HeightGrid
 from ship_perception.r1_static.intensity_evidence import IntensityEvidence, AUX_WEIGHT
 from ship_perception.r1_static.run import _atomic_json
 from .pipeline import _json_default
+from .review_labels import annotate_measurements
 
 
 def auxiliary_review(payload, frame, ownership_indexes):
@@ -71,7 +72,8 @@ def render(payload, frame, path, *, fusion=False):
 
     grid = R1HeightGrid.from_points(frame.xyz, 0.5)
     step = max(1, int(np.ceil(max(grid.count.shape) / 1000)))
-    figure, ax = plt.subplots(figsize=(16, 8))
+    display_aspect = grid.count.shape[0] / grid.count.shape[1]
+    figure, ax = plt.subplots(figsize=(20, max(6, min(12, 20 * display_aspect + 1))))
     masked = np.ma.masked_where(~grid.occupancy, grid.median)
     image = ax.imshow(
         masked[::step, ::step],
@@ -87,6 +89,9 @@ def render(payload, frame, path, *, fusion=False):
         aspect="equal",
     )
     figure.colorbar(image, ax=ax, label="Raw Z median (m)")
+    # Leave room for corner labels while retaining every measured scene cell.
+    y_low, y_high = ax.get_ylim()
+    ax.set_ylim(y_low - 0.1 * (y_high - y_low), y_high + 0.04 * (y_high - y_low))
     result = payload["intensity_fusion" if fusion else "geometry_only"]
     for hatch in result["hatches"]:
         poly = np.asarray(hatch["boundary_xy"])
@@ -99,13 +104,6 @@ def render(payload, frame, path, *, fusion=False):
             ls=":",
             alpha=0.6,
         )
-        ax.text(
-            *poly.mean(0),
-            hatch["hatch_id"] + " | " + hatch["status"],
-            ha="center",
-            fontsize=8,
-            bbox=dict(facecolor="white", alpha=0.85, edgecolor="#ffbb33"),
-        )
     title = "Geometry review candidates - raw input frame"
     if fusion:
         title = (
@@ -116,14 +114,15 @@ def render(payload, frame, path, *, fusion=False):
     ax.set(title=title, xlabel="Input X (m)", ylabel="Input Y (m)")
     ax.text(
         0.01,
-        0.01,
+        -0.12,
         "Amber: review boundary | Dotted: uncertainty coverage | Steel precision unverified",
         transform=ax.transAxes,
         fontsize=8,
         bbox=dict(facecolor="white", alpha=0.85),
     )
     figure.tight_layout()
-    figure.savefig(path, dpi=150)
+    annotate_measurements(ax, result["hatches"])
+    figure.savefig(path, dpi=150, bbox_inches="tight", pad_inches=0.15)
     plt.close(figure)
 
 

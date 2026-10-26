@@ -10,7 +10,10 @@ from unittest import mock
 
 import numpy as np
 
-from ship_perception.perception.coordinates import corner_coordinates
+from ship_perception.perception.coordinates import (
+    boundary_dimensions,
+    corner_coordinates,
+)
 
 
 def payload():
@@ -65,6 +68,10 @@ class CornerExportTests(unittest.TestCase):
             )
             self.assertEqual(new["status"], old["status"])
             self.assertEqual(len(new["corners"]), 4)
+            self.assertEqual(
+                [point["display_label"] for point in new["corners"]],
+                ["P1", "P2", "P3", "P4"],
+            )
             self.assertTrue(all("z_m" not in p for p in new["corners"]))
         self.assertIsNone(result["hatches"][1]["individual_hatch_count"])
         self.assertEqual(
@@ -72,6 +79,27 @@ class CornerExportTests(unittest.TestCase):
         )
         self.assertEqual(source, before)
         json.dumps(result, allow_nan=False)
+
+    def test_dimensions_follow_rotated_final_edges_instead_of_xy_extents(self):
+        angle = np.deg2rad(37)
+        rotation = np.array(
+            [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+        )
+        polygon = np.array([[0, 0], [40, 0], [40, 16], [0, 16]])
+        transformed = polygon @ rotation.T + [-103.7, 57.4]
+        dimensions = boundary_dimensions(transformed)
+        self.assertAlmostEqual(dimensions["length_m"], 40)
+        self.assertAlmostEqual(dimensions["width_m"], 16)
+        for side, expected in (("V0", 40), ("V1", 40), ("U0", 16), ("U1", 16)):
+            self.assertAlmostEqual(dimensions["side_lengths_m"][side], expected)
+
+    def test_nonparallel_measured_edges_keep_both_lengths_and_mean(self):
+        # Real line intersections need not form a perfect rectangle.
+        dimensions = boundary_dimensions([[0, 0], [40, 0], [39, 16], [1, 16]])
+        self.assertAlmostEqual(dimensions["length_m"], 39)
+        self.assertAlmostEqual(dimensions["width_m"], np.hypot(1, 16))
+        self.assertEqual(dimensions["side_lengths_m"]["V0"], 40)
+        self.assertEqual(dimensions["side_lengths_m"]["V1"], 38)
 
     def test_no_candidates_exports_empty_list(self):
         source = payload()
