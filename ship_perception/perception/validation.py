@@ -17,6 +17,7 @@ class ExteriorTopology:
     components: dict = field(default_factory=dict)
     level_evaluations: int = 0
     unresolved_context: object = None
+    boundary_seeds_confirmed: bool = True
 
     @classmethod
     def build(cls, frame, vessel, config, measurement_context=None):
@@ -63,7 +64,9 @@ class ExteriorTopology:
             known_outside = ~self.owned
             if self.unresolved_context is not None:
                 known_outside = known_outside & ~self.unresolved_context
-            exterior = low & (known_outside | boundary)
+            exterior = low & (
+                known_outside | (boundary if self.boundary_seeds_confirmed else False)
+            )
             external_ids = set(np.unique(labels[exterior]).tolist()) - {0}
             # Cache eviction changes recomputation only, never the measured
             # level or classification. Keep label rasters within 64 MiB.
