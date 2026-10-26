@@ -54,6 +54,7 @@ def execute(frame, args, progress):
         flush=True,
     )
     print("OUTPUT_DIR=" + str(directory), flush=True)
+    print("HATCH_CORNERS_JSON=" + str(directory / "05_hatch_corners.json"), flush=True)
     return 0
 
 

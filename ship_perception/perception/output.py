@@ -1,7 +1,8 @@
-"""Atomic four-file review output, with a separate failure contract."""
+"""Atomic scene review and four-corner output, with a separate failure contract."""
 
 import copy
 from datetime import datetime
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -182,6 +183,17 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
             )
             Draft202012Validator(json.loads(schema.read_text())).validate(clean)
             _atomic_json(staged / "03_results.json", clean)
+            from .coordinates import corner_coordinates
+
+            _atomic_json(
+                staged / "05_hatch_corners.json",
+                corner_coordinates(
+                    clean,
+                    hashlib.sha256(
+                        (staged / "03_results.json").read_bytes()
+                    ).hexdigest(),
+                ),
+            )
             (staged / "04_input_summary.txt").write_text(
                 "\n".join(
                     key.upper() + "=" + json.dumps(value, allow_nan=False)

@@ -36,10 +36,13 @@ output/YYYYMMDD_HHMMSS_microseconds/
 ├── 02_intensity_fusion.png
 ├── 03_results.json
 ├── 04_input_summary.txt
+├── 05_hatch_corners.json    # four XY corners for every final review candidate
 └── input_snapshot.npz       # only with --save-snapshot
 ```
 
-终端逐阶段显示 `START / RUNNING / DONE / FAILED`、阶段耗时与总耗时，长阶段每 15 秒报告仍在运行。正式目录只在四份产物全部写完后发布；失败另存 `failure_*/failure.json`。
+终端逐阶段显示 `START / RUNNING / DONE / FAILED`、阶段耗时与总耗时，长阶段每 15 秒报告仍在运行。正式目录只在五份产物全部写完后发布；失败另存 `failure_*/failure.json`。
+
+`05_hatch_corners.json` 单列整幅场景中所有最终复核对象的四角坐标，使用原始输入 frame 的 XY、单位米；每角含 `x_m`、`y_m`、相交边名称及不确定性。它与全局图使用同一份最终几何，不补造 Z，也不把 `UNRESOLVED` 包围组当作单个已确认船舱。
 
 琥珀实线为最佳复核边界，点线为不确定性覆盖范围。`PARTIAL_HATCH`、`UNRESOLVED_VESSEL_REVIEW` 不能当作已确认船舱；矩形约束和缺测推断不能当作实测钢边。完整原始场景保留在背景中，避免漏检区域被绘图裁掉。
 
