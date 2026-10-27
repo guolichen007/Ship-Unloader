@@ -230,6 +230,42 @@ def partial_context_review(cache, boundary_xy, containment, exterior):
 
 def deck_ring(cache, candidate):
     lines = cache.structural_providers()
+    if getattr(cache, "_v21_deck_index_enabled", True):
+        if not hasattr(cache, "_v21_deck_line_index"):
+            indexes = {}
+            for axis in (0, 1):
+                order = sorted(
+                    (
+                        i
+                        for i, p in enumerate(lines)
+                        if p["rho_or_region"]["normal_axis"] == axis
+                    ),
+                    key=lambda i: (lines[i]["rho_or_region"]["rho"], i),
+                )
+                indexes[axis] = (
+                    np.array(order, dtype=int),
+                    np.array([lines[i]["rho_or_region"]["rho"] for i in order]),
+                )
+            cache._v21_deck_line_index = indexes
+        selected = set()
+        join = cache.config["boundary"]["corner_join_m"]
+        for axis, pos in [(0, 0), (0, 2), (1, 1), (1, 3)]:
+            order, coordinates = cache._v21_deck_line_index[axis]
+            # Conservative one-ULP padding leaves the historical absolute
+            # distance predicate in charge of exact boundary inclusion.
+            lo = np.searchsorted(
+                coordinates,
+                np.nextafter(candidate["bounds_axial"][pos] - join, -np.inf),
+                "left",
+            )
+            hi = np.searchsorted(
+                coordinates,
+                np.nextafter(candidate["bounds_axial"][pos] + join, np.inf),
+                "right",
+            )
+            selected.update(order[lo:hi].tolist())
+        lines = [lines[i] for i in sorted(selected)]
+    by_id = {p["provider_id"]: p for p in lines}
     seed = dict(seed_type="HEIGHT_REGION", anchor_axis=None)
     sides = _side_evidence(candidate["bounds_axial"], lines, cache.config, seed)
     for side, rise, support in zip(
@@ -238,9 +274,7 @@ def deck_ring(cache, candidate):
         candidate.get("side_support_cells", [[0, 0]] * 4),
     ):
         row = sides[side]
-        provider_rows = [
-            p for p in lines if p["provider_id"] in row["supporting_provider_ids"]
-        ]
+        provider_rows = [by_id[pid] for pid in row["supporting_provider_ids"]]
         kinds = {p["provider_type"] for p in provider_rows}
         row.update(
             same_vessel_support=bool(provider_rows),

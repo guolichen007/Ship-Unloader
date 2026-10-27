@@ -79,6 +79,39 @@ class UnifiedPhysicalValidation:
         self.containment = prepare_containment(cache.context_grid("coarse"))
         self.decisions = []
 
+    def search_face_priority(self, box):
+        """Index already measured nominal faces; this score never admits a side."""
+        cache, config = self.cache, self.cache.config
+        if not hasattr(cache, "structural_providers"):
+            return 0
+        if not hasattr(cache, "_v21_normal_priority_index"):
+            cache._v21_normal_priority_index = {}
+            for axis, rows in line_families(cache).items():
+                rows = sorted(
+                    (f for f in rows if f["raw3d"] and f["bev"] and f["normal_face"]),
+                    key=lambda f: f["rho"],
+                )
+                cache._v21_normal_priority_index[axis] = (
+                    rows,
+                    np.array([f["rho"] for f in rows]),
+                )
+        count = 0
+        search = config["roi"]["support_search_m"]
+        for axis, pos, sign in [(0, 0, 1), (0, 2, -1), (1, 1, 1), (1, 3, -1)]:
+            rows, positions = cache._v21_normal_priority_index[axis]
+            lo = np.searchsorted(positions, box[pos] - search, side="left")
+            hi = np.searchsorted(positions, box[pos] + search, side="right")
+            span = (box[1 - axis], box[3 - axis])
+            count += any(
+                (f["rho"] - (box[axis] + box[axis + 2]) / 2) * sign < 0
+                and max(
+                    0.0, min(span[1], f["interval"][1]) - max(span[0], f["interval"][0])
+                )
+                >= config["roi"]["min_enclosure_ratio"] * (span[1] - span[0])
+                for f in rows[lo:hi]
+            )
+        return count
+
     def evaluate(self, query):
         config = self.cache.config
         box = list(query.bounds)
@@ -164,27 +197,8 @@ class UnifiedPhysicalValidation:
         row["deck_ring"] = deck_ring(self.cache, row)
         ring = row["deck_ring"]
         row["independent_support_sides"] = ring["measured_strong_side_count"]
-        providers = {p["provider_id"]: p for p in self.cache.structural_providers()}
-        side_candidates = self.cache.side_candidates(box)
-        row["search_normal_face_side_count"] = sum(
-            any(
-                min(c["primary_raw3d"], c["primary_bev"])
-                >= config["roi"]["min_enclosure_ratio"]
-                and (c["rho"] - (box[axis] + box[axis + 2]) / 2) * sign < 0
-                and any(
-                    "RAW3D_VERIFIED_VERTICAL_FACE"
-                    in providers.get(pid, {}).get("evidence_types", [])
-                    for pid in c["provider_ids"]
-                )
-                for c in side_candidates[name]
-            )
-            for name, axis, sign in [
-                ("U0", 0, 1),
-                ("U1", 0, -1),
-                ("V0", 1, 1),
-                ("V1", 1, -1),
-            ]
-        )
+        row["search_normal_face_side_count"] = self.search_face_priority(box)
+        row["search_normal_face_role"] = "NOMINAL_PRIORITY_ONLY_NOT_PHYSICAL_ACCEPTANCE"
         levels = [x for x in opening["outside_side_median_z"] if x is not None]
         row["exterior"] = self.exterior.review(
             box, float(np.median(levels)) if levels else None

@@ -20,6 +20,56 @@ from ship_perception.tests.test_hatch_metamorphic import vessel_points
 
 
 class RecallPerfContracts(unittest.TestCase):
+    def test_indexed_deck_evidence_preserves_exact_boundaries_and_provider_order(self):
+        from ship_perception.perception.validation import deck_ring
+
+        rng = np.random.default_rng(190)
+        for origin in (0.0, 1e6):
+            join = self.config["boundary"]["corner_join_m"]
+            positions = (
+                np.r_[
+                    rng.uniform(-10, 40, 300),
+                    join,
+                    -join,
+                    np.nextafter(join, np.inf),
+                    np.nextafter(-join, -np.inf),
+                ]
+                + origin
+            )
+            providers = [
+                dict(
+                    provider_id="p" + str(i),
+                    provider_type=(
+                        "RAW3D_STRUCTURAL_PROVIDER"
+                        if i % 2
+                        else "BEV_RECTILINEAR_PROVIDER"
+                    ),
+                    vessel_hypothesis_id="V",
+                    rho_or_region=dict(normal_axis=i % 2, rho=float(rho)),
+                    support_interval=[origin - 5, origin + 35],
+                    source_geometry=dict(
+                        observed_intervals=[[origin - 5, origin + 35]]
+                    ),
+                    evidence_types=(
+                        ["RAW3D_VERIFIED_VERTICAL_FACE"]
+                        if i % 3
+                        else ["HEIGHT_TRANSITION"]
+                    ),
+                    uncertainty_m=0.05,
+                )
+                for i, rho in enumerate(positions)
+            ]
+            cache = SimpleNamespace(
+                config=self.config, structural_providers=lambda: providers
+            )
+            for shift in np.r_[0.0, rng.uniform(-2, 2, 15)]:
+                box = (np.array([0.0, 0.0, 20.0, 10.0]) + origin + shift).tolist()
+                cache._v21_deck_index_enabled = False
+                baseline = deck_ring(cache, dict(bounds_axial=box))
+                cache._v21_deck_index_enabled = True
+                indexed = deck_ring(cache, dict(bounds_axial=box))
+                self.assertEqual(indexed, baseline)
+
     @classmethod
     def setUpClass(cls):
         cls.config, _ = resolve_config()
