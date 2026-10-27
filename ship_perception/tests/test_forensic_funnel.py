@@ -97,3 +97,31 @@ class ForensicFunnelContracts(unittest.TestCase):
             report["proposal_trace"][0]["first_blocking_reason"],
             "INSUFFICIENT_FINAL_PHYSICAL_SIDES",
         )
+
+    def test_one_proposal_with_two_physical_branches_retains_both_blockers(self):
+        result = self.result()
+        result["physical_candidate_registry"].append(
+            dict(
+                query_id="Q2",
+                source_proposal_ids=["LEGACY:B2"],
+                bounds_axial=[0, 0, 10, 10],
+                state="UNRESOLVED",
+                precision_allowed=False,
+                raw_edge_probe_allowed=True,
+                reason="COARSE_TWO_SIDES",
+                raw_probe=dict(
+                    full_precision_allowed=False,
+                    raw_probe_support_side_count=1,
+                    reason="INSUFFICIENT_RAW_PROBE_SUPPORT",
+                ),
+            )
+        )
+        report = funnel(result, 4)
+        branches = [
+            t for t in report["proposal_trace"] if t["proposal_id"] == "LEGACY:B2"
+        ]
+        self.assertEqual({b["physical_query_id"] for b in branches}, {"Q0", "Q2"})
+        self.assertEqual(
+            {b["first_blocking_stage"] for b in branches},
+            {"FULL_PRECISION", "RAW_EDGE_PROBE"},
+        )

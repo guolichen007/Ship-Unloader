@@ -59,8 +59,11 @@ def funnel(result, minimum_sections):
         for v in result["per_vessel_status"]
     )
     compiled = result.get("compiled_candidate_registry", [])
-    compile_by_id = {pid: g for g in compiled for pid in g["source_proposal_ids"]}
-    query_by_id = {pid: q for q in queries for pid in q.get("source_proposal_ids", [])}
+    compile_by_query = {g["group_id"]: g for g in compiled}
+    query_by_id = {}
+    for query in queries:
+        for pid in query.get("source_proposal_ids", []):
+            query_by_id.setdefault(pid, []).append(query)
     exact = Counter(
         identity(
             [
@@ -80,86 +83,98 @@ def funnel(result, minimum_sections):
     trace = []
     for proposal in proposals:
         pid = proposal["proposal_id"]
-        group = compile_by_id.get(pid)
-        query = query_by_id.get(pid)
-        qid = query.get("query_id") if query else None
-        attempt = attempts.get(qid)
-        final = finals.get(qid)
-        probe = query.get("raw_probe") if query else None
-        if final:
-            stage, reason = None, None
-            outcome = final["status"]
-        elif query is None:
-            stage, reason = (
-                "PHYSICAL_QUERY_COMPILATION",
-                "QUERY_NOT_REACHED_BEFORE_BUDGET_STOP",
-            )
-            outcome = "UNRESOLVED"
-        elif query.get("state") == "PROPOSED":
-            stage, reason = "PHYSICAL_VALIDATION", query.get(
-                "reason", "VALIDATION_NOT_REACHED"
-            )
-            outcome = "UNRESOLVED"
-        elif query.get("state") == "REJECTED" or not query.get(
-            "raw_edge_probe_allowed", query.get("precision_allowed", False)
-        ):
-            stage, reason = "PHYSICAL_VALIDATION", query.get("reason")
-            outcome = query.get("state", "UNRESOLVED")
-        elif probe and not probe.get("full_precision_allowed", False):
-            stage, reason = "RAW_EDGE_PROBE", probe.get(
-                "reason", "RAW_PROBE_INSUFFICIENT"
-            )
-            outcome = "UNRESOLVED"
-        elif not attempt:
-            stage, reason = "FULL_PRECISION", "PRECISION_BUDGET_DEFERRED_OR_INTERRUPTED"
-            outcome = "UNRESOLVED"
-        elif qid in suppressed:
-            stage, reason = "FINAL_SELECTION", suppressed[qid]["reason"]
-            outcome = "SUPPRESSED"
-        else:
-            measured = attempt["result"]
-            sides = supported_sides(measured, minimum_sections)
-            stage = "FULL_PRECISION"
-            reason = measured.get("error_code") or (
-                "INSUFFICIENT_FINAL_PHYSICAL_SIDES"
-                if len(sides) < 3
-                else (
-                    "FINAL_SELECTION_NOT_FULLY_RECORDED"
-                    if not suppression_complete
-                    else "FINAL_ADMISSION_UNRESOLVED"
+        for query in query_by_id.get(pid, [None]):
+            group = compile_by_query.get(query.get("query_id")) if query else None
+            qid = query.get("query_id") if query else None
+            attempt = attempts.get(qid)
+            final = finals.get(qid)
+            probe = query.get("raw_probe") if query else None
+            if final:
+                stage, reason = None, None
+                outcome = final["status"]
+            elif query is None:
+                stage, reason = (
+                    "PHYSICAL_QUERY_COMPILATION",
+                    "QUERY_NOT_REACHED_BEFORE_BUDGET_STOP",
+                )
+                outcome = "UNRESOLVED"
+            elif query.get("state") == "PROPOSED":
+                stage, reason = "PHYSICAL_VALIDATION", query.get(
+                    "reason", "VALIDATION_NOT_REACHED"
+                )
+                outcome = "UNRESOLVED"
+            elif query.get("state") == "REJECTED" or not query.get(
+                "raw_edge_probe_allowed", query.get("precision_allowed", False)
+            ):
+                stage, reason = "PHYSICAL_VALIDATION", query.get("reason")
+                outcome = query.get("state", "UNRESOLVED")
+            elif probe and not probe.get("full_precision_allowed", False):
+                stage, reason = "RAW_EDGE_PROBE", probe.get(
+                    "reason", "RAW_PROBE_INSUFFICIENT"
+                )
+                outcome = "UNRESOLVED"
+            elif (
+                query.get("precision_disposition")
+                == "EXPLAINED_BY_MEASURED_REVIEW_REGION"
+            ):
+                stage, reason = "FINAL_SELECTION", query["precision_disposition"]
+                outcome = "EXPLAINED"
+            elif not attempt and query.get("raw_edge_probe_allowed") and not probe:
+                stage, reason = "RAW_EDGE_PROBE", "RAW_PROBE_BUDGET_DEFERRED"
+                outcome = "UNRESOLVED"
+            elif not attempt:
+                stage, reason = (
+                    "FULL_PRECISION",
+                    "PRECISION_BUDGET_DEFERRED_OR_INTERRUPTED",
+                )
+                outcome = "UNRESOLVED"
+            elif qid in suppressed:
+                stage, reason = "FINAL_SELECTION", suppressed[qid]["reason"]
+                outcome = "SUPPRESSED"
+            else:
+                measured = attempt["result"]
+                sides = supported_sides(measured, minimum_sections)
+                stage = "FULL_PRECISION"
+                reason = measured.get("error_code") or (
+                    "INSUFFICIENT_FINAL_PHYSICAL_SIDES"
+                    if len(sides) < 3
+                    else (
+                        "FINAL_SELECTION_NOT_FULLY_RECORDED"
+                        if not suppression_complete
+                        else "FINAL_ADMISSION_UNRESOLVED"
+                    )
+                )
+                outcome = "UNRESOLVED"
+            trace.append(
+                dict(
+                    proposal_id=pid,
+                    legacy_proposal_id=pid if proposal["expert"] == "LEGACY" else None,
+                    expert=proposal["expert"],
+                    vessel_id=proposal["vessel_id"],
+                    original_bounds=proposal["bounds_axial"],
+                    compiled_group_id=group["group_id"] if group else qid,
+                    compiled_group_status=(
+                        "RECORDED" if group else "NOT_IMPLEMENTED_IN_BASELINE"
+                    ),
+                    physical_query_id=qid,
+                    query_bounds=query.get("bounds_axial") if query else None,
+                    query_changed_bounds=bool(
+                        query and proposal["bounds_axial"] != query.get("bounds_axial")
+                    ),
+                    validation_state=query.get("state") if query else None,
+                    validation_reason=query.get("reason") if query else None,
+                    raw_probe=probe,
+                    full_precision_attempted=attempt is not None,
+                    final_support_sides=(
+                        supported_sides(attempt["result"], minimum_sections)
+                        if attempt
+                        else []
+                    ),
+                    first_blocking_stage=stage,
+                    first_blocking_reason=reason,
+                    outcome=outcome,
                 )
             )
-            outcome = "UNRESOLVED"
-        trace.append(
-            dict(
-                proposal_id=pid,
-                legacy_proposal_id=pid if proposal["expert"] == "LEGACY" else None,
-                expert=proposal["expert"],
-                vessel_id=proposal["vessel_id"],
-                original_bounds=proposal["bounds_axial"],
-                compiled_group_id=group["group_id"] if group else qid,
-                compiled_group_status=(
-                    "RECORDED" if group else "NOT_IMPLEMENTED_IN_BASELINE"
-                ),
-                physical_query_id=qid,
-                query_bounds=query.get("bounds_axial") if query else None,
-                query_changed_bounds=bool(
-                    query and proposal["bounds_axial"] != query.get("bounds_axial")
-                ),
-                validation_state=query.get("state") if query else None,
-                validation_reason=query.get("reason") if query else None,
-                raw_probe=probe,
-                full_precision_attempted=attempt is not None,
-                final_support_sides=(
-                    supported_sides(attempt["result"], minimum_sections)
-                    if attempt
-                    else []
-                ),
-                first_blocking_stage=stage,
-                first_blocking_reason=reason,
-                outcome=outcome,
-            )
-        )
     probe_rows = [q["raw_probe"] for q in queries if q.get("raw_probe")]
     raw = dict(
         instrumented=bool(probe_rows), attempted=len(probe_rows) if probe_rows else None
@@ -181,7 +196,8 @@ def funnel(result, minimum_sections):
         else None
     )
     attempt_support = [
-        len(supported_sides(a["result"], minimum_sections)) for a in attempts.values()
+        len(supported_sides(a["result"], minimum_sections))
+        for a in result.get("precision_attempts", [])
     ]
     return dict(
         schema="ship_perception.forensic_funnel.1",
@@ -217,10 +233,13 @@ def funnel(result, minimum_sections):
             suppression_registry_complete=suppression_complete,
             interrupted_precision_attempts_not_recorded=bool(
                 result.get("pipeline_health", {}).get("isolated_failures")
+            )
+            and not result.get(
+                "precision_attempt_registry_includes_interrupted", False
             ),
         ),
         full_precision=dict(
-            attempted=len(attempts),
+            attempted=len(result.get("precision_attempts", [])),
             accepted=sum(s >= 4 for s in attempt_support),
             partial=sum(s == 3 for s in attempt_support),
             unresolved=sum(s < 3 for s in attempt_support),
@@ -280,6 +299,8 @@ def markdown(report):
                 f["final"]["hatch_count"],
             )
         )
+    for scene in report["scenes"]:
+        f = scene["funnel"]
         lines.extend(
             [
                 "",
