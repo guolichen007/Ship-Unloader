@@ -279,12 +279,13 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                             raw_proposal_evidence=batch.raw_output(),
                         )
                     )
-                    cache._v21_post_b2_queries = adapter.adapt(batch, budget)
                 # Providers retain their immutable B1-core provenance. Extra
                 # selected-vessel returns remain available to height and raw
                 # precision without building another eager normal tree.
                 cache.providers = base_cache.structural_providers()
                 cache.provider_build_count = base_cache.provider_build_count
+                if legacy_evidence:
+                    cache._v21_post_b2_queries = adapter.adapt(batch, budget)
                 for expert in (
                     HeightBasinExpert(),
                     StructuralLineExpert(),

@@ -10,6 +10,49 @@ from ship_perception.perception.output import auxiliary_review
 
 
 class V2Pipeline(unittest.TestCase):
+    def test_split_core_adapter_reuses_one_core_provider_identity(self):
+        from ship_perception.perception import local_evidence
+
+        xyz, _ = vessel_points(1, spacing=0.2)
+        masks = [(xyz[:, 1] >= 6) & (xyz[:, 1] < 11), xyz[:, 1] < 6, xyz[:, 1] >= 11]
+        indexes = [np.flatnonzero(mask) for mask in masks]
+
+        def discover(*args):
+            rows = []
+            for i, ids in enumerate(indexes):
+                points = xyz[ids]
+                rows.append(
+                    dict(
+                        vessel_hypothesis_id="V" + str(i),
+                        source_support_ids=["S0"],
+                        local_axes=np.eye(2).tolist(),
+                        bbox_xy=[*points[:, :2].min(0), *points[:, :2].max(0)],
+                        point_count=len(ids),
+                        classification_status=(
+                            "VESSEL_HYPOTHESIS" if i == 0 else "UNRESOLVED"
+                        ),
+                    )
+                )
+            return dict(vessel_hypotheses=rows), dict(
+                vessel_point_indexes={
+                    "V" + str(i): ids for i, ids in enumerate(indexes)
+                }
+            )
+
+        with patch(
+            "ship_perception.perception.context.infer_scene_vessels",
+            side_effect=discover,
+        ) as b1, patch(
+            "ship_perception.perception.local_evidence._raw3d_provider",
+            wraps=local_evidence._raw3d_provider,
+        ) as providers:
+            result = self.run_points(xyz)
+        self.assertEqual(b1.call_count, 1)
+        self.assertEqual(providers.call_count, 1)
+        self.assertEqual(len(providers.call_args[0][0]), len(indexes[0]))
+        self.assertEqual(result["selected_raw_context"]["raw_point_count"], len(xyz))
+        self.assertEqual(result["pipeline_health"]["isolated_failures"], [])
+
     def run_points(self, points):
         return run_perception(
             PointCloudFrame(
