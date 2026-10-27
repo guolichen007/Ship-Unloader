@@ -92,3 +92,37 @@ class PhysicalValidationContracts(unittest.TestCase):
         self.assertEqual(new.counters["normal_points_evaluated"], len(xyz))
         new._estimate(ids)
         self.assertEqual(new.counters["normal_points_evaluated"], len(xyz))
+
+    def test_two_coarse_sides_do_not_block_local_raw_probe(self):
+        config, _ = resolve_config()
+        grid = R1HeightGrid.from_points(
+            np.array([[x, y, 0.0] for x in range(25) for y in range(12)]), 0.5
+        )
+        cache = SimpleNamespace(
+            config=config,
+            context_grid=lambda _: grid,
+            vessel=SimpleNamespace(vessel_id="V0"),
+        )
+        proposal = CandidateProposal.from_evidence(
+            "LEGACY", "V0", dict(bounds_axial=[2, 2, 20, 10])
+        )
+        query = PhysicalBoundaryQuery("Q", "V0", proposal.bounds, (proposal,), ())
+        ring = dict(
+            measured_strong_side_count=2,
+            positive_height_side_count=0,
+            sides={
+                name: dict(vertical_face_support=False)
+                for name in ("U0", "U1", "V0", "V1")
+            },
+        )
+        exterior = SimpleNamespace(
+            review=lambda *args: dict(status="NO_LOWER_INTERIOR_COMPONENT")
+        )
+        with patch(
+            "ship_perception.perception.physical_validation.deck_ring",
+            return_value=ring,
+        ):
+            row = UnifiedPhysicalValidation(cache, exterior).evaluate(query)
+        self.assertEqual(row["state"], "UNRESOLVED")
+        self.assertTrue(row["raw_edge_probe_allowed"])
+        self.assertFalse(row["precision_allowed"])

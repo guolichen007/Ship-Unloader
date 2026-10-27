@@ -4,6 +4,7 @@ import warnings
 import copy
 import json
 import time
+import hashlib
 from contextlib import contextmanager
 
 from .measurement import RawSpatialIndex, RawSectionProfile, BudgetedLocalSurfaceNormals
@@ -80,6 +81,7 @@ class FinalBoundaryRefiner:
         self.height_cache = {}
         self.budget = getattr(measurement_context, "budget", None)
         self.side_elapsed = {}
+        self.observation_key = ""
 
     @contextmanager
     def _timed_side(self, name, scope):
@@ -109,6 +111,7 @@ class FinalBoundaryRefiner:
                         "vessel_hypothesis_id",
                         "raw_support_scope",
                         "opening_evidence",
+                        "profile_observations",
                     )
                 },
             ],
@@ -117,6 +120,14 @@ class FinalBoundaryRefiner:
         if key in self.refinement_cache:
             return copy.deepcopy(self.refinement_cache[key][0])
         started = time.perf_counter()
+        self.observations = proposal.get("profile_observations", self.observations)
+        self.observation_key = (
+            hashlib.sha256(
+                json.dumps(self.observations, sort_keys=True).encode()
+            ).hexdigest()
+            if self.observations
+            else ""
+        )
         self.side_elapsed = {}
         previous_counters = dict(self.profiler)
         result = self._refine_uncached(proposal, axes)
@@ -218,8 +229,12 @@ class FinalBoundaryRefiner:
         for phase in phases:
             if self.budget is not None:
                 self.budget.check()
-            grid = R1HeightGrid.from_points(
-                raster_roi, cell, origin_xy=origin + np.array(phase) * cell
+            grid = (
+                self.measurement_context.rasters.grid(box, margin, phase)
+                if self.measurement_context is not None
+                else R1HeightGrid.from_points(
+                    raster_roi, cell, origin_xy=origin + np.array(phase) * cell
+                )
             )
             for name, axis, position, sign in SIDE_SPECS:
                 with self._timed_side(name, "RASTER_EVIDENCE"):
@@ -981,6 +996,7 @@ class FinalBoundaryRefiner:
             span[1],
             sign,
             None if measured_face is None else measured_face["point_index_sha256"],
+            self.observation_key,
         )
         if key not in self.raw_section_cache:
             result = (
@@ -1006,20 +1022,30 @@ class FinalBoundaryRefiner:
         search = config["roi"]["boundary_search_m"]
         band = search + config["boundary"]["side_probe_m"]
         # One original-point extraction, followed by one normal-coordinate sort.
-        selected = roi[
-            (abs(roi[:, axis] - anchor) <= band)
-            & (roi[:, 1 - axis] >= span[0])
-            & (roi[:, 1 - axis] <= span[1])
-        ]
+        profile = (
+            self.measurement_context.side_measurements.profile(axis, anchor, span)
+            if self.measurement_context is not None
+            else None
+        )
+        selected = (
+            profile.points
+            if profile is not None
+            else roi[
+                (abs(roi[:, axis] - anchor) <= band)
+                & (roi[:, 1 - axis] >= span[0])
+                & (roi[:, 1 - axis] <= span[1])
+            ]
+        )
         if (
             not len(selected)
             or np.ptp(selected[:, 2]) < config["boundary"]["profile_min_drop_m"]
         ):
             return dict(status="INSUFFICIENT_RAW_SUPPORT", modes=[])
-        profile = RawSectionProfile(selected, axis, tuple(span), config)
-        self.profiler["raw_profile_build_count"] = (
-            self.profiler.get("raw_profile_build_count", 0) + 1
-        )
+        if profile is None:
+            profile = RawSectionProfile(selected, axis, tuple(span), config)
+            self.profiler["raw_profile_build_count"] = (
+                self.profiler.get("raw_profile_build_count", 0) + 1
+            )
         nominated = profile.edge_modes(anchor, sign)
         self.profiler["raw_edge_mode_count"] = self.profiler.get(
             "raw_edge_mode_count", 0
@@ -1156,7 +1182,7 @@ class FinalBoundaryRefiner:
     def _continuous_measurement(
         self, points, observations, axis, rho, span, sign, config
     ):
-        key = (axis, float(rho), tuple(span), sign)
+        key = (axis, float(rho), tuple(span), sign, self.observation_key)
         if key not in self.continuous_cache:
             self.continuous_cache[key] = _continuous_rho(
                 points, observations, axis, rho, span, sign, config

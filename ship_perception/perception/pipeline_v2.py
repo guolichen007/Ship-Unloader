@@ -24,6 +24,10 @@ from .berth import load_berth_reference, select_berth_vessel
 from .selected_context import SelectedVesselRawContext
 from .legacy_expert import LegacyProposalExpert, verify_legacy_sources
 from .candidate_union import candidate_union, physical_queries, PhysicalBoundaryQuery
+from .proposal_compiler import ProposalCompiler, evidence_lineage
+from .legacy_post_b2 import LegacyPostB2EvidenceAdapter
+from .raw_boundary_probe import RawBoundaryProbe
+from .precision_scheduler import PrecisionScheduler
 from .experts import (
     HeightBasinExpert,
     StructuralLineExpert,
@@ -58,23 +62,79 @@ def _deferred(row, axes, reason=None):
 
 
 def _canonical_queries(proposals, cache):
-    queries = physical_queries(
-        proposals, cache.config, lambda p: resolve_physical_modes(p, cache)
+    from .candidate_union import canonical
+
+    families = line_families(cache)
+
+    def nominal_lineage(proposal):
+        modes = []
+        box = proposal.bounds
+        for axis, position in ((0, 0), (0, 2), (1, 1), (1, 3)):
+            span = (box[1 - axis], box[3 - axis])
+            nearby = [
+                f
+                for f in families[axis]
+                if f["raw3d"]
+                and f["bev"]
+                and abs(f["rho"] - box[position])
+                <= cache.config["boundary"]["corner_join_m"]
+                and max(
+                    0, min(span[1], f["interval"][1]) - max(span[0], f["interval"][0])
+                )
+                >= (span[1] - span[0]) * cache.config["roi"]["min_enclosure_ratio"]
+            ]
+            if not nearby:
+                return evidence_lineage(proposal)
+            modes.append(
+                min(nearby, key=lambda f: abs(f["rho"] - box[position]))["provider_ids"]
+            )
+        return canonical(modes)
+
+    compiler = ProposalCompiler(cache.config, nominal_lineage)
+    groups = compiler.compile(proposals)
+    cache._v21_compiled_registry = [g.audit() for g in groups]
+    cache._v21_exact_duplicates = compiler.exact_duplicate_count
+    legacy = getattr(cache, "_v21_post_b2_queries", ())
+    queries = [g.query() for g in groups]
+    unmatched = []
+    for query in legacy:
+        evidence = cache._v21_adapter.evidence[query.query_id]
+        match = next(
+            (
+                q
+                for q in queries
+                if q.vessel_id == query.vessel_id
+                and q.bounds == query.bounds
+                and evidence["measured_separator_faces"] is None
+            ),
+            None,
+        )
+        if match is None:
+            unmatched.append(query)
+        else:
+            cache._v21_adapter.evidence[match.query_id] = dict(
+                evidence,
+                query_id=match.query_id,
+                source_proposal_ids=[p.proposal_id for p in match.proposals],
+            )
+    cache._v21_compiled_registry.extend(
+        dict(
+            group_id=q.query_id,
+            vessel_id=q.vessel_id,
+            bounds_axial=list(q.bounds),
+            source_proposal_ids=[p.proposal_id for p in q.proposals],
+            candidate_sources=q.sources,
+            member_bounds=[list(p.bounds) for p in q.proposals],
+            union_search_envelope=cache._v21_adapter.evidence[q.query_id][
+                "original_group_envelope"
+            ],
+            separator_topology=cache._v21_adapter.evidence[q.query_id][
+                "separator_topology"
+            ],
+        )
+        for q in unmatched
     )
-    families = {
-        f["provider_ids"]: f for group in line_families(cache).values() for f in group
-    }
-    for group in role_families(cache).values():
-        for family in group:
-            for sign in family["supported_signs"]:
-                families[family["provider_ids"] + (("SIGNED_RAW_ROLE", sign),)] = family
-    output = []
-    for q in queries:
-        if len(q.mode_signature) == 4 and all(m is not None for m in q.mode_signature):
-            u0, u1, v0, v1 = [families[m]["rho"] for m in q.mode_signature]
-            q = replace(q, bounds=(u0, v0, u1, v1))
-        output.append(q)
-    return tuple(output)
+    return tuple(queries) + tuple(unmatched)
 
 
 def final_support_sides(result, config):
@@ -142,6 +202,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
     query_rows = []
     selected_audit = None
     precision_attempts = []
+    compiled_registry = []
     for vessel in context.vessels:
         by_vessel.append(
             dict(
@@ -170,6 +231,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
         validation = None
         layout = None
         measurement = None
+        adapter = None
         proposals_seen = []
         expert_elapsed = {}
         queries = ()
@@ -198,6 +260,8 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
             cache.v2_measurement = measurement
             with timing.stage("LOCAL_RECALL"), budget.stage("LOCAL_RECALL"):
                 batches = []
+                adapter = LegacyPostB2EvidenceAdapter(cache)
+                cache._v21_adapter = adapter
                 if legacy_evidence:
                     verify_legacy_sources()
                     expert_started = time.perf_counter()
@@ -214,6 +278,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                             raw_proposal_evidence=batch.raw_output(),
                         )
                     )
+                    cache._v21_post_b2_queries = adapter.adapt(batch, budget)
                 # Providers retain their immutable B1-core provenance. Extra
                 # selected-vessel returns remain available to height and raw
                 # precision without building another eager normal tree.
@@ -255,7 +320,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                     query_rows.append(row)
                     if row["state"] == "REJECTED":
                         rejected.append(row)
-                    elif row["precision_allowed"]:
+                    elif row.get("raw_edge_probe_allowed", row["precision_allowed"]):
                         ready.append((query, row))
                     else:
                         deferred.append(_deferred(row, vessel.axes))
@@ -280,9 +345,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                 item["layout_gap_searches"] = gaps
                 item["multi_hold_searches"] = multi_gaps
                 if recovery:
-                    combined = _canonical_queries(
-                        tuple(p for q in queries for p in q.proposals) + recovery, cache
-                    )
+                    combined = _canonical_queries(union + recovery, cache)
                     previous = {
                         (
                             q.mode_signature
@@ -322,7 +385,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                             continue
                         row = validation.evaluate(query)
                         query_rows.append(row)
-                        if row["precision_allowed"]:
+                        if row.get("raw_edge_probe_allowed", row["precision_allowed"]):
                             ready.append((query, row))
                         elif row["state"] == "REJECTED":
                             rejected.append(row)
@@ -352,18 +415,66 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
             refiner = getattr(measurement, "refiner", None) or FinalBoundaryRefiner(
                 measurement.raw_uvz, [], config, measurement
             )
+            measurement.refiner = refiner
+            probe = RawBoundaryProbe(measurement, refiner)
+            scheduler = PrecisionScheduler(ready, config)
             with timing.stage("FINAL_PRECISION"), budget.stage(
                 "FINAL_PRECISION", hard=True
             ):
                 measured_family = []
-                for position, (query, row) in enumerate(ready):
+                for position, (query, row) in enumerate(scheduler):
                     try:
                         budget.check()
+                        if scheduler.explained(query, row):
+                            row["precision_disposition"] = (
+                                "EXPLAINED_BY_MEASURED_REVIEW_REGION"
+                            )
+                            continue
+                        if row.get("alternate_hypothesis"):
+                            original_row = row
+                            row = validation.evaluate(query)
+                            row.update(
+                                alternate_hypothesis=True,
+                                scheduler_region_bounds=original_row[
+                                    "scheduler_region_bounds"
+                                ],
+                            )
+                            query_rows.append(row)
+                            if row["state"] == "REJECTED":
+                                continue
+                        row["legacy_post_b2"] = adapter.evidence.get(
+                            query.query_id, row.get("legacy_post_b2", {})
+                        )
+                        side_candidates = cache.side_candidates(query.bounds)
+                        refiner.observations = []
+                        refiner.observation_key = ""
+                        raw_probe = probe.evaluate(query, row, side_candidates)
+                        row["raw_probe"] = raw_probe
+                        row["full_precision_allowed"] = raw_probe[
+                            "full_precision_allowed"
+                        ]
+                        if not raw_probe["full_precision_allowed"]:
+                            deferred.append(
+                                _deferred(row, vessel.axes, raw_probe["reason"])
+                            )
+                            if not row.get("alternate_hypothesis"):
+                                scheduler.alternate(query, row)
+                            continue
+                        profile_started = time.perf_counter()
+                        try:
+                            observations = (
+                                adapter.measure_profiles(query, raw_probe, measurement)
+                                if query.query_id in adapter.evidence
+                                else []
+                            )
+                        finally:
+                            row["local_profile_elapsed_s"] = (
+                                time.perf_counter() - profile_started
+                            )
                         proposal = dict(
                             row,
-                            measured_side_candidates=cache.side_candidates(
-                                query.bounds
-                            ),
+                            measured_side_candidates=side_candidates,
+                            profile_observations=observations,
                         )
                         # All nominal inputs remain available for directional
                         # movement guards even after physical-mode dedup.
@@ -372,24 +483,32 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                             *boxes[:, :2].min(0),
                             *boxes[:, 2:].max(0),
                         ]
+                        attempt = dict(
+                            query_id=query.query_id,
+                            bounds_axial=list(query.bounds),
+                            status="INTERRUPTED",
+                            result=dict(
+                                status="UNRESOLVED",
+                                error_code="FULL_PRECISION_BUDGET_INTERRUPTED",
+                                sides={},
+                            ),
+                        )
+                        precision_attempts.append(attempt)
                         result = refiner.refine(proposal, vessel.axes)
+                        attempt.update(status="COMPLETED", result=result)
                     except PerformanceBudgetExceeded:
                         deferred.extend(
                             _deferred(r, vessel.axes, "PERFORMANCE_BUDGET_EXCEEDED")
-                            for _, r in ready[position:]
+                            for _, r in ready
+                            if r.get("raw_probe") is None
                         )
                         raise
-                    precision_attempts.append(
-                        dict(
-                            query_id=query.query_id,
-                            bounds_axial=list(query.bounds),
-                            result=result,
-                        )
-                    )
                     if not result.get("boundary_xy"):
                         deferred.append(
                             _deferred(row, vessel.axes, "RAW_PRECISION_UNRESOLVED")
                         )
+                        if not row.get("alternate_hypothesis"):
+                            scheduler.alternate(query, row)
                         continue
                     supported_sides = final_support_sides(result, config)
                     support = len(supported_sides)
@@ -415,9 +534,12 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                                 row, vessel.axes, "INSUFFICIENT_FINAL_PHYSICAL_SIDES"
                             )
                         )
+                        if not row.get("alternate_hypothesis"):
+                            scheduler.alternate(query, row)
                         continue
                     result["status"] = "PARTIAL_HATCH"
                     item["hatches"].append(result)
+                    scheduler.record(query, row, result)
                     uv = np.asarray(result["boundary_uv"])
                     measured_family.append(
                         dict(
@@ -426,20 +548,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                         )
                     )
                     layout.fit(measured_family)
-                    for _, pending in ready[position + 1 :]:
-                        pending["layout"] = layout.review(pending["bounds_axial"])
-                    ready[position + 1 :] = sorted(
-                        ready[position + 1 :],
-                        key=lambda qr: (
-                            qr[1]["layout"]["ranking_penalty"],
-                            -sum(
-                                s["vertical_face_support"]
-                                for s in qr[1]["deck_ring"]["sides"].values()
-                            ),
-                            -qr[1]["deck_ring"]["positive_height_side_count"],
-                            qr[0].query_id,
-                        ),
-                    )
+                    scheduler.update_layout(layout)
                 for result in item["hatches"]:
                     uv = np.asarray(result["boundary_uv"])
                     result["layout"] = layout.review((*uv.min(0), *uv.max(0)))
@@ -492,7 +601,64 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                 precision_query_count=len(precision_attempts),
                 precision_incomplete_count=int(bool(failures)),
                 frozen_provider_normals="LEGACY_PROVIDER_REQUIRED; NOT_INCLUDED_IN_PRECISION_NORMAL_COUNTERS",
+                compiled_group_count=len(getattr(cache, "_v21_compiled_registry", [])),
+                exact_duplicate_count=getattr(cache, "_v21_exact_duplicates", 0),
             )
+            completed = [
+                a for a in precision_attempts if a.get("status") == "COMPLETED"
+            ]
+            slowest = max(
+                completed,
+                key=lambda a: a["result"]
+                .get("precision_profiler", {})
+                .get("per_candidate_elapsed_s", 0),
+                default=None,
+            )
+            profiler["slowest_candidate"] = (
+                dict(
+                    query_id=slowest["query_id"],
+                    elapsed_s=slowest["result"]["precision_profiler"][
+                        "per_candidate_elapsed_s"
+                    ],
+                )
+                if slowest
+                else None
+            )
+            side_times = [
+                (s.get("elapsed_s", 0), q["query_id"], name)
+                for q in query_rows
+                for name, s in q.get("raw_probe", {}).get("sides", {}).items()
+            ]
+            profiler["slowest_probe_side"] = max(side_times, default=None)
+            full_times = [
+                (elapsed, a["query_id"], name, "FULL_PRECISION")
+                for a in completed
+                for name, elapsed in a["result"]["precision_profiler"]
+                .get("per_side_elapsed_s", {})
+                .items()
+            ]
+            profiler["slowest_side"] = max(
+                full_times + [(*value, "RAW_EDGE_PROBE") for value in side_times],
+                default=None,
+            )
+            candidate_times = []
+            for row in query_rows:
+                elapsed = row.get("raw_probe", {}).get("elapsed_s", 0) + row.get(
+                    "local_profile_elapsed_s", 0
+                )
+                elapsed += sum(
+                    a["result"]
+                    .get("precision_profiler", {})
+                    .get("per_candidate_elapsed_s", 0)
+                    for a in completed
+                    if a["query_id"] == row["query_id"]
+                )
+                candidate_times.append((elapsed, row["query_id"]))
+            if candidate_times:
+                elapsed, query_id = max(candidate_times)
+                profiler["slowest_candidate"] = dict(
+                    query_id=query_id, elapsed_s=elapsed
+                )
         item["proposal_registry"] = [
             dict(
                 proposal_id=p.proposal_id,
@@ -511,6 +677,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                     vessel_hypothesis_id=active,
                     bounds_axial=list(query.bounds),
                     candidate_sources=query.sources,
+                    source_proposal_ids=[p.proposal_id for p in query.proposals],
                     state="PROPOSED",
                     precision_allowed=False,
                     reason="PERFORMANCE_BUDGET_EXCEEDED",
@@ -518,6 +685,11 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                 query_rows.append(pending)
                 deferred.append(_deferred(pending, vessel.axes))
         if cache is not None:
+            compiled_registry = getattr(cache, "_v21_compiled_registry", [])
+            item["legacy_post_b2_evidence"] = (
+                list(adapter.evidence.values()) if adapter is not None else []
+            )
+            item["boundary_line_graph"] = getattr(cache, "_v2_boundary_graph", {})
             item["provider_cache"] = dict(
                 raw3d_build_count=cache.provider_build_count,
                 bev_build_count=cache.provider_build_count,
@@ -546,6 +718,8 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                 ),
             )
             hatches.append(result)
+        if measurement is not None:
+            profiler.update(measurement.counters)
         item["independent_groups"] = [
             dict(
                 group_id="G%03d" % i,
@@ -574,7 +748,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
     )
     return dict(
         schema="ship_perception.hatch_once.2",
-        pipeline_version="multi-expert-berth-raw-profile.2",
+        pipeline_version="multi-expert-recall-perf.2.1",
         production_geometry_mode="XYZ_ONLY",
         _ownership_indexes={v.vessel_id: v.point_indexes for v in context.vessels},
         input=dict(
@@ -633,6 +807,8 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
         physical_validation=bounded(query_rows),
         physical_candidate_registry=query_rows,
         precision_attempts=precision_attempts,
+        precision_attempt_registry_includes_interrupted=True,
+        compiled_candidate_registry=compiled_registry,
         precision_profiler=profiler,
         performance_budget=performance,
         rejected_exterior_candidates=bounded(

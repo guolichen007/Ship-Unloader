@@ -91,12 +91,31 @@ class UnifiedPhysicalValidation:
             source_proposal_ids=[p.proposal_id for p in query.proposals],
             state="PROPOSED",
             precision_allowed=False,
+            raw_edge_probe_allowed=True,
+            legacy_post_b2=getattr(
+                getattr(self.cache, "_v21_adapter", None), "evidence", {}
+            ).get(query.query_id, {}),
         )
 
         def decide(state, reason):
             row.update(state=state, reason=reason)
+            if state == "REJECTED":
+                row["raw_edge_probe_allowed"] = False
             self.decisions.append(row)
             return row
+
+        if not row["legacy_post_b2"] and "LEGACY" in query.sources:
+            row["legacy_post_b2"] = dict(
+                support_side_count=max(
+                    (
+                        p.evidence().get("measured_strong_side_count", 0)
+                        for p in query.proposals
+                        if p.expert == "LEGACY"
+                    ),
+                    default=0,
+                ),
+                derived_search_evidence=False,
+            )
 
         if query.vessel_id != self.cache.vessel.vessel_id:
             return decide("REJECTED", "CONFIRMED_OTHER_VESSEL")

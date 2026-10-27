@@ -1,6 +1,7 @@
 """Exact raw-point indexing and once-per-section normal-coordinate profiles."""
 
 from dataclasses import dataclass, field
+from collections import OrderedDict
 import numpy as np
 from ship_perception.r1_static.raw_surface_normals import LocalSurfaceNormals
 
@@ -84,6 +85,15 @@ class RawSectionProfile:
         self.sorted_points = self.points[order]
         self.coordinates = self.sorted_points[:, self.axis]
 
+    def view(self, low, high):
+        """An exact sub-band of the existing stable sort, without another sort."""
+        result = object.__new__(RawSectionProfile)
+        result.points = self.window(low, high)
+        result.axis, result.span, result.config = self.axis, self.span, self.config
+        result.sorted_points = result.points
+        result.coordinates = result.points[:, self.axis]
+        return result
+
     def window(self, low, high, *, include_low=True, include_high=True):
         a = np.searchsorted(
             self.coordinates, low, side="left" if include_low else "right"
@@ -143,6 +153,55 @@ class RawSectionProfile:
         ]
 
 
+class BoundarySideMeasurementCache:
+    """Cache immutable spatial bands; every anchor still measures its own modes."""
+
+    def __init__(self, spatial, config, counters, enabled=True):
+        self.spatial, self.config, self.counters = spatial, config, counters
+        self.enabled = enabled
+        self.profiles = OrderedDict()
+        self.bytes = 0
+        self.origin = spatial.xyz[:, :2].min(0)
+
+    def profile(self, axis, anchor, span):
+        band = (
+            self.config["roi"]["boundary_search_m"]
+            + self.config["boundary"]["side_probe_m"]
+        )
+        width = 2 * band
+        tile = int(np.floor((anchor - self.origin[axis]) / width))
+        low = self.origin[axis] + tile * width - band
+        high = low + 2 * width
+        key = (axis, tuple(span), tile)
+        profile = self.profiles.get(key) if self.enabled else None
+        if profile is None:
+            box = [0.0] * 4
+            box[axis], box[axis + 2] = low, high
+            box[1 - axis], box[3 - axis] = span
+            profile = RawSectionProfile(
+                self.spatial.query(box), axis, tuple(span), self.config
+            )
+            self.counters["raw_profile_build_count"] = (
+                self.counters.get("raw_profile_build_count", 0) + 1
+            )
+            size = profile.points.nbytes + profile.sorted_points.nbytes
+            while self.profiles and self.bytes + size > 64 * 1024 * 1024:
+                _, old = self.profiles.popitem(last=False)
+                self.bytes -= old.points.nbytes + old.sorted_points.nbytes
+            if self.enabled and size <= 64 * 1024 * 1024:
+                self.profiles[key] = profile
+                self.bytes += size
+        else:
+            self.profiles.move_to_end(key)
+            self.counters["side_profile_cache_hit"] = (
+                self.counters.get("side_profile_cache_hit", 0) + 1
+            )
+            self.counters["raw_profile_cache_hit"] = (
+                self.counters.get("raw_profile_cache_hit", 0) + 1
+            )
+        return profile.view(anchor - band, anchor + band)
+
+
 class VesselMeasurementContext:
     """A single vessel's shared immutable raw coordinates and lazy caches."""
 
@@ -165,6 +224,14 @@ class VesselMeasurementContext:
             spatial_query_count=0,
         )
         self.spatial = RawSpatialIndex(self.raw_uvz, self.counters)
+        self.side_measurements = BoundarySideMeasurementCache(
+            self.spatial, cache.config, self.counters
+        )
+        from .raster_measurement_cache import RasterPhaseMeasurementCache
+
+        self.rasters = RasterPhaseMeasurementCache(
+            self.spatial, cache.config, self.counters
+        )
         self.height_profiles = {}
         self.raw_edge_modes = {}
         self.face_evidence = {}

@@ -1,8 +1,8 @@
 """Independent measured proposal experts; no expert can veto another source."""
 
-import copy
+from dataclasses import replace
 import numpy as np
-from .candidate_union import CandidateProposal
+from .candidate_union import CandidateProposal, canonical
 from .local_evidence import local_height_recall
 
 
@@ -109,92 +109,21 @@ def line_height(cache, axis, rho, span, sign):
 def structural_enclosures(cache, budget=None):
     if hasattr(cache, "_v2_structural_enclosures"):
         return cache._v2_structural_enclosures
-    families = role_families(cache, budget)
-    minimum = cache.config["roi"]["min_deck_span_m"]
-    drop = cache.config["roi"]["opening_drop_m"]
-    support = cache.config["roi"]["min_enclosure_ratio"]
-    transverse = []
-    for family in families[1]:
-        if not family["raw3d"] or not family["bev"]:
-            continue
-        for sign in family["supported_signs"]:
-            if (
-                family["role_support_sections"]
-                >= cache.config["boundary"]["profile_min_sections"]
-                or family["normal_face"]
-            ):
-                transverse.append((family, sign))
-    candidates = []
-    for low, sign in transverse:
-        if sign != 1:
-            continue
-        for high, opposite in transverse:
-            if budget is not None:
-                budget.check()
-            if opposite != -1 or high["rho"] - low["rho"] < minimum:
-                continue
-            span = (
-                max(low["interval"][0], high["interval"][0]),
-                min(low["interval"][1], high["interval"][1]),
-            )
-            if span[1] - span[0] < minimum:
-                continue
-            ends = []
-            for family in families[0]:
-                overlap = max(
-                    0,
-                    min(family["interval"][1], high["rho"])
-                    - max(family["interval"][0], low["rho"]),
-                )
-                if (
-                    family["rho"] < span[0] - cache.config["roi"]["support_search_m"]
-                    or family["rho"] > span[1] + cache.config["roi"]["support_search_m"]
-                ):
-                    continue
-                if (
-                    not family["raw3d"]
-                    or not family["bev"]
-                    or overlap / (high["rho"] - low["rho"]) < support
-                ):
-                    continue
-                roles = []
-                roles = list(family["supported_signs"])
-                if roles:
-                    ends.append((family, roles))
-            for index, (left, roles) in enumerate(ends):
-                if 1 not in roles:
-                    continue
-                rights = [
-                    right
-                    for right, rroles in ends[index + 1 :]
-                    if -1 in rroles and right["rho"] - left["rho"] >= minimum
-                ]
-                if not rights:
-                    continue
-                # Adjacent measured closure and outer-envelope hypotheses both
-                # survive. A layout model does not invent a transverse wall.
-                for right in (rights[0], rights[-1]) if len(rights) > 1 else rights:
-                    box = [left["rho"], low["rho"], right["rho"], high["rho"]]
-                    candidates.append(
-                        dict(
-                            bounds_axial=box,
-                            source_provider_ids=list(
-                                left["provider_ids"]
-                                + right["provider_ids"]
-                                + low["provider_ids"]
-                                + high["provider_ids"]
-                            ),
-                            physical_modes=[
-                                left["provider_ids"],
-                                right["provider_ids"],
-                                low["provider_ids"],
-                                high["provider_ids"],
-                            ],
-                            normal_face_sides=sum(
-                                f["normal_face"] for f in (left, right, low, high)
-                            ),
-                        )
-                    )
+    from .boundary_line_graph import BoundaryLineGraph
+
+    graph = BoundaryLineGraph(
+        line_families(cache),
+        cache.config,
+        lambda axis, rho, span, sign: line_height(cache, axis, rho, span, sign),
+        budget,
+    )
+    candidates = graph.enclosures()
+    cache._v2_boundary_graph = dict(
+        node_count=graph.nodes,
+        intersection_count=graph.edges,
+        adjacent_closure_count=len(candidates),
+        raw_role_queries=0,
+    )
     cache._v2_structural_enclosures = candidates
     return candidates
 
@@ -353,32 +282,43 @@ class LoadedHoldExpert(HeightBasinExpert):
         rows = [
             row for row in cache._v2_height_recall[0] if row.get("polarity") == "RAISED"
         ]
-        rows += structural_enclosures(cache, budget)
-        return tuple(
+        height = tuple(
             CandidateProposal.from_evidence(self.name, cache.vessel.vessel_id, row, i)
             for i, row in enumerate(rows)
         )
+        structural = tuple(
+            replace(
+                p,
+                expert=self.name,
+                proposal_id=self.name + ":STRUCTURAL:" + p.proposal_id,
+            )
+            for p in StructuralLineExpert().propose(cache, research, budget)
+        )
+        return height + structural
 
 
 class StructuralLineExpert:
     name = "STRUCTURAL_LINE"
 
     def propose(self, cache, research, budget=None):
-        return tuple(
-            CandidateProposal.from_evidence(self.name, cache.vessel.vessel_id, row, i)
-            for i, row in enumerate(structural_enclosures(cache, budget))
-        )
+        if not hasattr(cache, "_v21_structural_proposals"):
+            cache._v21_structural_proposals = tuple(
+                CandidateProposal.from_evidence(
+                    self.name, cache.vessel.vessel_id, row, i
+                )
+                for i, row in enumerate(structural_enclosures(cache, budget))
+            )
+        return cache._v21_structural_proposals
 
 
 class LocalEnclosureExpert(StructuralLineExpert):
     name = "LOCAL_ENCLOSURE"
 
     def propose(self, cache, research, budget=None):
-        rows = structural_enclosures(cache, budget)
         return tuple(
-            CandidateProposal.from_evidence(self.name, cache.vessel.vessel_id, row, i)
-            for i, row in enumerate(rows)
-            if row["normal_face_sides"] >= 3
+            replace(p, expert=self.name, proposal_id=self.name + ":" + p.proposal_id)
+            for p in StructuralLineExpert().propose(cache, research, budget)
+            if p.evidence()["normal_face_sides"] >= 3
         )
 
 
@@ -386,27 +326,22 @@ class LargeSandHoldExpert(StructuralLineExpert):
     name = "LARGE_SAND_HOLD"
 
     def propose(self, cache, research, budget=None):
-        # Closed structural cycles are independent of the cargo's median Z.
-        # The outer-envelope alternative remains a proposal until cross-deck,
-        # observed margins and raw sections validate its physical identity.
-        rows = structural_enclosures(cache, budget)
+        # Interpret the same immutable enclosure; no second geometry search,
+        # outer-box Cartesian product or separate Raw measurement is created.
         return tuple(
-            CandidateProposal.from_evidence(
-                self.name,
-                cache.vessel.vessel_id,
-                dict(row, interior_height_hard_gate=False),
-                i,
+            replace(
+                p,
+                expert=self.name,
+                proposal_id=self.name + ":" + p.proposal_id,
+                evidence_json=canonical(
+                    dict(
+                        p.evidence(),
+                        interior_height_hard_gate=False,
+                        interpretation="CONTINUOUS_STRUCTURAL_ENCLOSURE_WITH_UNKNOWN_LOAD",
+                    )
+                ),
             )
-            for i, row in enumerate(rows)
-            if not any(
-                other["bounds_axial"][0] < row["bounds_axial"][0]
-                and other["bounds_axial"][2] > row["bounds_axial"][2]
-                and abs(other["bounds_axial"][1] - row["bounds_axial"][1])
-                <= cache.config["boundary"]["corner_join_m"]
-                and abs(other["bounds_axial"][3] - row["bounds_axial"][3])
-                <= cache.config["boundary"]["corner_join_m"]
-                for other in rows
-            )
+            for p in StructuralLineExpert().propose(cache, research, budget)
         )
 
 
