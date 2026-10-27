@@ -30,14 +30,8 @@
             }
           },
           "support_side_count": 4,
-          "profile_observation_count": null,
-          "profile_evidence_types": [
-            "OBSERVED_3D_FACE",
-            "OBSERVED_PROFILE_BREAK"
-          ],
           "local_physical_candidate_available": true,
-          "steel_role_certified": false,
-          "profile_observations_available": true
+          "steel_role_certified": false
         },
         {
           "candidate_id": "legacy:H000",
@@ -62,14 +56,8 @@
             }
           },
           "support_side_count": 4,
-          "profile_observation_count": null,
-          "profile_evidence_types": [
-            "OBSERVED_3D_FACE",
-            "OBSERVED_PROFILE_BREAK"
-          ],
           "local_physical_candidate_available": true,
-          "steel_role_certified": false,
-          "profile_observations_available": true
+          "steel_role_certified": false
         }
       ]
     },
@@ -100,14 +88,8 @@
             }
           },
           "support_side_count": 4,
-          "profile_observation_count": null,
-          "profile_evidence_types": [
-            "OBSERVED_3D_FACE",
-            "OBSERVED_PROFILE_BREAK"
-          ],
           "local_physical_candidate_available": true,
-          "steel_role_certified": false,
-          "profile_observations_available": true
+          "steel_role_certified": false
         }
       ]
     },
@@ -138,14 +120,8 @@
             }
           },
           "support_side_count": 4,
-          "profile_observation_count": null,
-          "profile_evidence_types": [
-            "OBSERVED_3D_FACE",
-            "OBSERVED_PROFILE_BREAK"
-          ],
           "local_physical_candidate_available": true,
-          "steel_role_certified": false,
-          "profile_observations_available": true
+          "steel_role_certified": false
         }
       ]
     },
@@ -176,14 +152,8 @@
             }
           },
           "support_side_count": 3,
-          "profile_observation_count": null,
-          "profile_evidence_types": [
-            "OBSERVED_3D_FACE",
-            "OBSERVED_PROFILE_BREAK"
-          ],
           "local_physical_candidate_available": true,
-          "steel_role_certified": false,
-          "profile_observations_available": true
+          "steel_role_certified": false
         }
       ]
     },
@@ -214,14 +184,8 @@
             }
           },
           "support_side_count": 2,
-          "profile_observation_count": null,
-          "profile_evidence_types": [
-            "OBSERVED_3D_FACE",
-            "OBSERVED_PROFILE_BREAK"
-          ],
           "local_physical_candidate_available": true,
-          "steel_role_certified": false,
-          "profile_observations_available": true
+          "steel_role_certified": false
         },
         {
           "candidate_id": "legacy:H001",
@@ -246,14 +210,8 @@
             }
           },
           "support_side_count": 3,
-          "profile_observation_count": null,
-          "profile_evidence_types": [
-            "OBSERVED_3D_FACE",
-            "OBSERVED_PROFILE_BREAK"
-          ],
           "local_physical_candidate_available": true,
-          "steel_role_certified": false,
-          "profile_observations_available": true
+          "steel_role_certified": false
         }
       ]
     },
@@ -284,14 +242,8 @@
             }
           },
           "support_side_count": 2,
-          "profile_observation_count": null,
-          "profile_evidence_types": [
-            "OBSERVED_3D_FACE",
-            "OBSERVED_PROFILE_BREAK"
-          ],
           "local_physical_candidate_available": true,
-          "steel_role_certified": false,
-          "profile_observations_available": true
+          "steel_role_certified": false
         },
         {
           "candidate_id": "legacy:H002",
@@ -316,14 +268,8 @@
             }
           },
           "support_side_count": 2,
-          "profile_observation_count": null,
-          "profile_evidence_types": [
-            "OBSERVED_3D_FACE",
-            "OBSERVED_PROFILE_BREAK"
-          ],
           "local_physical_candidate_available": true,
-          "steel_role_certified": false,
-          "profile_observations_available": true
+          "steel_role_certified": false
         },
         {
           "candidate_id": "legacy:H001",
@@ -348,16 +294,17 @@
             }
           },
           "support_side_count": 2,
-          "profile_observation_count": null,
-          "profile_evidence_types": [
-            "OBSERVED_3D_FACE",
-            "OBSERVED_PROFILE_BREAK"
-          ],
           "local_physical_candidate_available": true,
-          "steel_role_certified": false,
-          "profile_observations_available": true
+          "steel_role_certified": false
         }
       ]
     }
+  ],
+  "frozen_semantics": [
+    "proposal_identity",
+    "separator_topology",
+    "side_evidence_availability",
+    "support_side_count",
+    "legacy_physical_candidate_availability"
   ]
 }

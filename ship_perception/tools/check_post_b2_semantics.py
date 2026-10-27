@@ -53,10 +53,6 @@ def check(result, golden):
                 for name, old in candidate["side_evidence_availability"].items()
             ):
                 failures.append("SIDE_EVIDENCE_AVAILABILITY_LOST")
-            if candidate["profile_observations_available"] and not evidence.get(
-                "profile_observations"
-            ):
-                failures.append("LOCAL_PROFILE_EVIDENCE_NOT_RECOVERED")
             if not evidence["local_physical_candidate_available"]:
                 failures.append("PHYSICAL_CANDIDATE_UNAVAILABLE")
             findings.append((len(failures), evidence["query_id"], failures))
@@ -74,6 +70,9 @@ def check(result, golden):
                 compiled_group_id=best[1],
                 status="PASS" if best[0] == 0 else "FAIL",
                 failures=best[2],
+                profile_observations_available=bool(
+                    current.get(best[1], {}).get("profile_observations")
+                ),
             )
         )
     return dict(

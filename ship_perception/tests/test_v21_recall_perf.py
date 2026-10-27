@@ -122,11 +122,91 @@ class RecallPerfContracts(unittest.TestCase):
             lambda axis, rho, span, sign: 4.0 if roles[axis, rho] == sign else -4.0,
         )
         rows = graph.enclosures()
-        self.assertEqual(len(rows), 12)
+        adjacent = [r for r in rows if r["closure_kind"] == "ADJACENT"]
+        self.assertEqual(len(adjacent), 12)
         self.assertTrue(
-            all(r["bounds_axial"][2] - r["bounds_axial"][0] == 20 for r in rows)
+            all(r["bounds_axial"][2] - r["bounds_axial"][0] == 20 for r in adjacent)
         )
         self.assertTrue(all(not r["signed_roles_resolved"] for r in rows))
+        outer = [r for r in rows if r["closure_kind"] == "SUPPORTED_OUTER_ENVELOPE"]
+        self.assertTrue(outer)
+        self.assertTrue(all(r["normal_face_sides"] >= 3 for r in outer))
+        self.assertLessEqual(len(rows), 2 * len(adjacent))
+
+    def test_outer_envelope_needs_extra_structure_and_does_not_remove_adjacent_closure(
+        self,
+    ):
+        families = {0: [], 1: []}
+        roles = {(0, 0.0): 1, (0, 20.0): -1, (0, 40.0): -1, (1, 0.0): 1, (1, 10.0): -1}
+        for axis, rhos, span in (
+            (0, (0.0, 20.0, 40.0), (0.0, 10.0)),
+            (1, (0.0, 10.0), (0.0, 40.0)),
+        ):
+            for rho in rhos:
+                families[axis].append(
+                    dict(
+                        rho=rho,
+                        interval=span,
+                        raw3d=True,
+                        bev=True,
+                        normal_face=False,
+                        provider_ids=(str((axis, rho)),),
+                    )
+                )
+        height = lambda axis, rho, span, sign: 1.0 if roles[axis, rho] == sign else -1.0
+        rows = BoundaryLineGraph(families, self.config, height).enclosures()
+        self.assertTrue(any(r["bounds_axial"] == [0.0, 0.0, 20.0, 10.0] for r in rows))
+        self.assertFalse(any(r["bounds_axial"] == [0.0, 0.0, 40.0, 10.0] for r in rows))
+        for groups in families.values():
+            for face in groups:
+                face["normal_face"] = True
+        rows = BoundaryLineGraph(families, self.config, height).enclosures()
+        self.assertTrue(any(r["bounds_axial"] == [0.0, 0.0, 20.0, 10.0] for r in rows))
+        self.assertTrue(
+            any(
+                r["bounds_axial"] == [0.0, 0.0, 40.0, 10.0]
+                and r["closure_kind"] == "SUPPORTED_OUTER_ENVELOPE"
+                for r in rows
+            )
+        )
+
+    def test_side_line_index_preserves_exact_mode_values_and_provider_order(self):
+        from ship_perception.perception.local_evidence import VesselLocalEvidence
+        from ship_perception.r1_static.r2h_b5_corner_forensics import _side_modes
+
+        providers = []
+        for axis in (0, 1):
+            for index, rho in enumerate((10.0, 0.0, 20.0, 5.0, 15.0)):
+                for kind in ("RAW3D_STRUCTURAL_PROVIDER", "BEV_RECTILINEAR_PROVIDER"):
+                    providers.append(
+                        dict(
+                            provider_id=str(len(providers)),
+                            provider_type=kind,
+                            rho_or_region=dict(normal_axis=axis, rho=rho),
+                            support_interval=(-10.0, 30.0),
+                            source_support_ids=["S"],
+                            coverage=0.9,
+                        )
+                    )
+        cache = VesselLocalEvidence(
+            SimpleNamespace(vessel_id="V"),
+            np.zeros((1, 3)),
+            self.config,
+            providers=providers,
+        )
+        box = (1.0, 2.0, 19.0, 16.0)
+        indexed = cache.side_candidates(box)
+        lines = cache._v21_side_lines[0]
+        for name, axis, pos in (("U0", 0, 0), ("U1", 0, 2), ("V0", 1, 1), ("V1", 1, 3)):
+            search = self.config["roi"]["support_search_m"]
+            old = _side_modes(
+                lines,
+                axis,
+                (box[1 - axis], box[3 - axis]),
+                (box[pos] - search, box[pos] + search),
+                self.config,
+            )
+            self.assertEqual(indexed[name], old)
 
     def test_coarse_two_sides_can_discover_additional_raw_sides_without_normals_or_rasters(
         self,
@@ -211,6 +291,25 @@ class RecallPerfContracts(unittest.TestCase):
                 results[1]["sides"][name]["rho_after_m"],
             )
 
+    def test_overlapping_section_spans_share_sort_without_changing_raw_measurement(
+        self,
+    ):
+        u, v = np.meshgrid(np.arange(-2, 2, 0.025), np.arange(0, 6, 0.025))
+        xyz = np.column_stack(
+            (u.ravel(), v.ravel(), np.where(u > 0, -4.0, 0.0).ravel())
+        )
+        cached, uncached = self.measurement(xyz), self.measurement(xyz, False)
+        a, b = (
+            FinalBoundaryRefiner(xyz, [], self.config, m) for m in (cached, uncached)
+        )
+        for span in ((0.0, 4.0), (0.2, 4.2), (0.3, 4.3)):
+            self.assertEqual(
+                a._search_raw_section(xyz, 0, 0.0, span, 1),
+                b._search_raw_section(xyz, 0, 0.0, span, 1),
+            )
+        self.assertEqual(cached.counters["raw_profile_build_count"], 1)
+        self.assertEqual(uncached.counters["raw_profile_build_count"], 3)
+
     def test_scheduler_visits_second_region_before_thirty_competing_hypotheses(self):
         ready = []
         for index in range(30):
@@ -223,6 +322,84 @@ class RecallPerfContracts(unittest.TestCase):
         scheduled = iter(PrecisionScheduler(ready, self.config))
         self.assertEqual(next(scheduled)[0].query_id, "A00")
         self.assertEqual(next(scheduled)[0].query_id, "Z")
+
+    def test_measured_face_enclosure_precedes_legacy_id_without_physical_agreement(
+        self,
+    ):
+        p = self.proposal()
+        legacy = (
+            PhysicalBoundaryQuery("A", "V", p.bounds, (p,), ()),
+            dict(
+                legacy_post_b2=dict(derived_search_evidence=True, support_side_count=4),
+                independent_support_sides=4,
+                deck_ring=dict(positive_height_side_count=4, sides={}),
+            ),
+        )
+        enclosure = (
+            PhysicalBoundaryQuery("Z", "V", p.bounds, (p,), ()),
+            dict(
+                independent_support_sides=3,
+                deck_ring=dict(
+                    positive_height_side_count=3,
+                    sides={
+                        name: dict(vertical_face_support=True)
+                        for name in ("U0", "U1", "V0")
+                    },
+                ),
+            ),
+        )
+        self.assertEqual(
+            next(iter(PrecisionScheduler([legacy, enclosure], self.config)))[
+                0
+            ].query_id,
+            "Z",
+        )
+
+    def test_measurement_admission_does_not_lower_final_three_raw_side_requirement(
+        self,
+    ):
+        from ship_perception.perception.pipeline_v2 import final_support_sides
+
+        u, v = np.meshgrid(np.arange(-2, 22, 0.1), np.arange(0, 10, 0.1))
+        xyz = np.column_stack(
+            (u.ravel(), v.ravel(), np.where((u > 0) & (u < 20), -4.0, 0.0).ravel())
+        )
+        m = self.measurement(xyz)
+        p = self.proposal(box=(0, 1, 20, 9))
+        q = PhysicalBoundaryQuery("Q", "V", p.bounds, (p,), ())
+        ring = dict(
+            sides={
+                name: dict(
+                    vertical_face_support=True, raw3d_support=True, bev_support=True
+                )
+                for name in ("U0", "U1", "V0", "V1")
+            }
+        )
+        row = dict(independent_support_sides=3, deck_ring=ring)
+        refiner = FinalBoundaryRefiner(xyz, [], self.config, m)
+        probe = RawBoundaryProbe(m, refiner).evaluate(q, row, {})
+        self.assertTrue(probe["full_precision_allowed"])
+        result = refiner.refine(
+            dict(bounds_axial=list(p.bounds), vessel_hypothesis_id="V", deck_ring=ring),
+            np.eye(2),
+        )
+        self.assertEqual(len(final_support_sides(result, self.config)), 2)
+
+    def test_section_capacity_is_conservative_about_existing_structural_search(self):
+        xyz, _ = vessel_points(1, spacing=0.15)
+        m = self.measurement(xyz)
+        p = self.proposal(box=(0, 0, 20, 0.1))
+        q = PhysicalBoundaryQuery("Q", "V", p.bounds, (p,), ())
+        probe = RawBoundaryProbe(m, FinalBoundaryRefiner(xyz, [], self.config, m))
+        narrow = probe.evaluate(q, {}, {})
+        self.assertFalse(narrow["full_measurement_possible"])
+        modes = dict(
+            V0=[dict(rho=-3.9, primary_raw3d=1.0, primary_bev=1.0)],
+            V1=[dict(rho=4.0, primary_raw3d=1.0, primary_bev=1.0)],
+        )
+        expanded = probe.evaluate(q, {}, modes)
+        self.assertTrue(expanded["full_measurement_possible"])
+        self.assertFalse(expanded["final_coordinates_created"])
 
     def test_parent_envelope_cannot_explain_away_a_separate_child_opening(self):
         parent = PhysicalBoundaryQuery("P", "V", (0, 0, 40, 10), (), ())

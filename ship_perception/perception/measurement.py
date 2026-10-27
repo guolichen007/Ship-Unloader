@@ -85,11 +85,15 @@ class RawSectionProfile:
         self.sorted_points = self.points[order]
         self.coordinates = self.sorted_points[:, self.axis]
 
-    def view(self, low, high):
+    def view(self, low, high, span=None):
         """An exact sub-band of the existing stable sort, without another sort."""
         result = object.__new__(RawSectionProfile)
         result.points = self.window(low, high)
-        result.axis, result.span, result.config = self.axis, self.span, self.config
+        span = self.span if span is None else tuple(span)
+        if span != self.span:
+            along = result.points[:, 1 - self.axis]
+            result.points = result.points[(along >= span[0]) & (along <= span[1])]
+        result.axis, result.span, result.config = self.axis, span, self.config
         result.sorted_points = result.points
         result.coordinates = result.points[:, self.axis]
         return result
@@ -172,14 +176,24 @@ class BoundarySideMeasurementCache:
         tile = int(np.floor((anchor - self.origin[axis]) / width))
         low = self.origin[axis] + tile * width - band
         high = low + 2 * width
-        key = (axis, tuple(span), tile)
+        # Overlapping along-line sections share a raw band as well. The exact
+        # requested interval is filtered from its stable sort in view(); tile
+        # dimensions partition storage only and never quantize a measurement.
+        scale = 2 ** int(np.ceil(np.log2(max(width, span[1] - span[0]) / width)))
+        along_width = width * scale
+        along_tile = int(
+            np.floor(((span[0] + span[1]) / 2 - self.origin[1 - axis]) / along_width)
+        )
+        along_low = self.origin[1 - axis] + (along_tile - 1) * along_width
+        along_high = along_low + 3 * along_width
+        key = (axis, tile, along_tile, scale)
         profile = self.profiles.get(key) if self.enabled else None
         if profile is None:
             box = [0.0] * 4
             box[axis], box[axis + 2] = low, high
-            box[1 - axis], box[3 - axis] = span
+            box[1 - axis], box[3 - axis] = along_low, along_high
             profile = RawSectionProfile(
-                self.spatial.query(box), axis, tuple(span), self.config
+                self.spatial.query(box), axis, (along_low, along_high), self.config
             )
             self.counters["raw_profile_build_count"] = (
                 self.counters.get("raw_profile_build_count", 0) + 1
@@ -199,7 +213,7 @@ class BoundarySideMeasurementCache:
             self.counters["raw_profile_cache_hit"] = (
                 self.counters.get("raw_profile_cache_hit", 0) + 1
             )
-        return profile.view(anchor - band, anchor + band)
+        return profile.view(anchor - band, anchor + band, span)
 
 
 class VesselMeasurementContext:

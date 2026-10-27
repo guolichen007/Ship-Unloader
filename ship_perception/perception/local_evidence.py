@@ -123,36 +123,56 @@ class VesselLocalEvidence:
     def side_candidates(self, box):
         from ship_perception.r1_static.r2h_b5_corner_forensics import _side_modes
 
-        lines = [
-            dict(
-                normal_axis=p["rho_or_region"]["normal_axis"],
-                rho=p["rho_or_region"]["rho"],
-                along=p["support_interval"],
-                provider_type=p["provider_type"],
-                provider_id=p["provider_id"],
-                source_vessel_id=self.vessel.vessel_id,
-                source_support_ids=p["source_support_ids"],
-                source_scope="SAME_VESSEL",
-                coverage=p["coverage"],
-            )
-            for p in self.structural_providers()
-        ]
+        if not hasattr(self, "_v21_side_lines"):
+            lines = [
+                dict(
+                    normal_axis=p["rho_or_region"]["normal_axis"],
+                    rho=p["rho_or_region"]["rho"],
+                    along=p["support_interval"],
+                    provider_type=p["provider_type"],
+                    provider_id=p["provider_id"],
+                    source_vessel_id=self.vessel.vessel_id,
+                    source_support_ids=p["source_support_ids"],
+                    source_scope="SAME_VESSEL",
+                    coverage=p["coverage"],
+                )
+                for p in self.structural_providers()
+            ]
+            indexes = {}
+            for axis in (0, 1):
+                order = np.array(
+                    sorted(
+                        (
+                            i
+                            for i, line in enumerate(lines)
+                            if line["normal_axis"] == axis
+                        ),
+                        key=lambda i: (lines[i]["rho"], i),
+                    ),
+                    dtype=int,
+                )
+                indexes[axis] = (order, np.asarray([lines[i]["rho"] for i in order]))
+            self._v21_side_lines = (lines, indexes)
+        lines, indexes = self._v21_side_lines
         search = self.config["roi"]["support_search_m"]
-        return {
-            name: _side_modes(
-                lines,
-                axis,
-                (box[1 - axis], box[3 - axis]),
-                (box[position] - search, box[position] + search),
-                self.config,
+        output = {}
+        for name, axis, position in (
+            ("U0", 0, 0),
+            ("U1", 0, 2),
+            ("V0", 1, 1),
+            ("V1", 1, 3),
+        ):
+            band = (box[position] - search, box[position] + search)
+            order, coordinates = indexes[axis]
+            low = np.searchsorted(coordinates, band[0], side="left")
+            high = np.searchsorted(coordinates, band[1], side="right")
+            # Keep historical provider ordering as well as exact inclusive
+            # boundaries, so provenance and mode values remain identical.
+            nearby = [lines[i] for i in sorted(order[low:high])]
+            output[name] = _side_modes(
+                nearby, axis, (box[1 - axis], box[3 - axis]), band, self.config
             )
-            for name, axis, position in (
-                ("U0", 0, 0),
-                ("U1", 0, 2),
-                ("V0", 1, 1),
-                ("V1", 1, 3),
-            )
-        }
+        return output
 
     def export_structural(self):
         """Transform cached measured lines for the independent legacy consumer."""

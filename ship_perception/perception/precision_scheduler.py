@@ -39,7 +39,13 @@ class PrecisionScheduler:
         query, row = item
         post = row.get("legacy_post_b2", {})
         ring = row.get("deck_ring", {})
+        coaming = sum(
+            s.get("vertical_face_support", False)
+            for s in ring.get("sides", {}).values()
+        )
         return (
+            -int(coaming >= 3),
+            -coaming,
             -int(
                 post.get("derived_search_evidence", False)
                 and post.get("support_side_count", 0) >= 3
@@ -47,10 +53,6 @@ class PrecisionScheduler:
             -int(post.get("support_side_count", 0) >= 3),
             -ring.get("positive_height_side_count", 0),
             -row.get("independent_support_sides", 0),
-            -sum(
-                s.get("vertical_face_support", False)
-                for s in ring.get("sides", {}).values()
-            ),
             row.get("layout", {}).get("ranking_penalty", 0),
             query.query_id,
         )

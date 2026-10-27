@@ -192,11 +192,61 @@ class RawBoundaryProbe:
             report["elapsed_s"] = time.perf_counter() - started
         support = sum(s["status"] == "STRONG_UNIQUE_EDGE" for s in sides.values())
         structural = row.get("legacy_post_b2", {}).get("support_side_count", 0)
-        target = 2 if structural >= 3 else 3
+        coaming = sum(
+            s.get("vertical_face_support", False)
+            for s in row.get("deck_ring", {}).get("sides", {}).values()
+        )
+        structural_enclosure = (
+            coaming >= 3 and row.get("independent_support_sides", 0) >= 3
+        )
+        investigation_support = max(structural, coaming if structural_enclosure else 0)
+        target = 2 if investigation_support >= 3 else 3
+        possible = list(box)
+        for name, axis, position, sign in SIDE_SPECS:
+            anchors = [
+                c["rho"]
+                for c in side_candidates.get(name, [])
+                if min(c.get("primary_raw3d", 0), c.get("primary_bev", 0))
+                >= self.refiner.config["roi"]["min_enclosure_ratio"]
+                and abs(c["rho"] - box[position])
+                <= self.refiner.config["roi"]["support_search_m"]
+                and (c["rho"] - (box[axis] + box[axis + 2]) / 2) * sign < 0
+            ]
+            # Include the full existing Raw search around every structural
+            # nomination. This is a search envelope, never a final rectangle.
+            search = self.refiner.config["roi"]["boundary_search_m"]
+            possible[position] = (
+                min([box[position]] + anchors) - search
+                if sign == 1
+                else max([box[position]] + anchors) + search
+            )
+        capacities = [
+            max(
+                0,
+                len(
+                    physical_sections(
+                        (possible[1 - axis], possible[3 - axis]),
+                        self.refiner.config["geometry"]["refine_voxel_m"],
+                        self.refiner.config,
+                    )
+                )
+                - 1,
+            )
+            for axis in (0, 1)
+        ]
+        full_measurement_possible = (
+            sum(
+                2 * (count >= self.refiner.config["boundary"]["profile_min_sections"])
+                for count in capacities
+            )
+            >= 3
+        )
         # Escalate only unexplained nearby sides, and stop extra probing once
         # the documented investigation admission is met. This is still solely
         # Raw profiles: no raster, corner reconstruction or normal estimator.
         for name, axis, position, sign in SIDE_SPECS:
+            if not full_measurement_possible:
+                break
             if support >= target:
                 break
             if sides[name]["status"] == "STRONG_UNIQUE_EDGE":
@@ -235,7 +285,7 @@ class RawBoundaryProbe:
             for name, s in sides.items()
         )
         allowed = support >= 3 or (
-            support >= 2 and structural >= 3 and independent_remaining
+            support >= 2 and investigation_support >= 3 and independent_remaining
         )
         cross = row.get("legacy_post_b2", {}).get("cross_deck") or {}
         cross_partial = (
@@ -244,7 +294,7 @@ class RawBoundaryProbe:
             and row.get("independent_support_sides", 0) >= 3
             and any(s["status"] == "UNOBSERVED" for s in sides.values())
         )
-        allowed |= cross_partial
+        allowed = (allowed or cross_partial) and full_measurement_possible
         reason = (
             "RAW_THREE_SIDE_INVESTIGATION"
             if support >= 3
@@ -262,6 +312,10 @@ class RawBoundaryProbe:
                 )
             )
         )
+        if not full_measurement_possible:
+            reason = "INSUFFICIENT_PHYSICAL_SECTION_CAPACITY_FOR_THREE_FINAL_SIDES"
+        elif allowed and support < 3 and structural_enclosure and not cross_partial:
+            reason = "STRUCTURAL_TWO_RAW_SIDES_WITH_MEASURED_FACE_REMAINDER"
         report.update(
             sides=sides,
             raw_probe_support_side_count=support,
@@ -275,6 +329,8 @@ class RawBoundaryProbe:
             raster_build_count=0,
             normal_query_count=0,
             final_coordinates_created=False,
+            full_measurement_possible=full_measurement_possible,
+            structural_raw_search_envelope=possible,
             probe_status="COMPLETED",
         )
         return report

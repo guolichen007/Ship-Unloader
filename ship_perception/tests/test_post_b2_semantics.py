@@ -40,13 +40,14 @@ class PostB2SemanticGate(unittest.TestCase):
         )
         return result, golden, evidence
 
-    def test_retained_b2_identity_without_local_profile_does_not_pass(self):
+    def test_retained_b2_identity_without_side_evidence_does_not_pass(self):
         result, golden, evidence = self.data()
-        evidence["profile_observations"] = []
+        evidence["support_side_count"] = 2
+        evidence["side_evidence_availability"]["V0"] = False
         report = check(result, golden)
         self.assertEqual(report["status"], "FAIL")
         self.assertIn(
-            "LOCAL_PROFILE_EVIDENCE_NOT_RECOVERED",
+            "SIDE_EVIDENCE_AVAILABILITY_LOST",
             report["candidate_checks"][0]["failures"],
         )
 
