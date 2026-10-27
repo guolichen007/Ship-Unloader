@@ -70,6 +70,22 @@ class BoundaryLineGraph:
             if kind != "ADJACENT" and not self._extra_envelope_support(faces, box):
                 return
             seen.add(box)
+            skipped = sum(
+                f["normal_face"]
+                and box[axis] + self.join < f["rho"] < box[axis + 2] - self.join
+                and self.overlap(f, (box[1 - axis], box[3 - axis])) >= self.support
+                for axis in (0, 1)
+                for f in self.families[axis]
+            )
+            transverse = max(
+                (
+                    self.overlap(f, (box[1], box[3]))
+                    for f in self.families[0]
+                    if f["normal_face"]
+                    and box[0] + self.join < f["rho"] < box[2] - self.join
+                ),
+                default=0.0,
+            )
             output.append(
                 dict(
                     bounds_axial=list(box),
@@ -81,6 +97,8 @@ class BoundaryLineGraph:
                     geometry_role="NOMINAL_STRUCTURAL_CLOSURE_NOT_STEEL",
                     closure_kind=kind,
                     signed_roles_resolved=False,
+                    skipped_verified_face_count=int(skipped),
+                    internal_transverse_face_coverage=float(transverse),
                 )
             )
 

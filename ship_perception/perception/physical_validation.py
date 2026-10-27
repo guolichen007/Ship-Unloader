@@ -89,6 +89,22 @@ class UnifiedPhysicalValidation:
             bounds_axial=box,
             candidate_sources=query.sources,
             source_proposal_ids=[p.proposal_id for p in query.proposals],
+            skipped_verified_face_count=min(
+                (
+                    p.evidence()["skipped_verified_face_count"]
+                    for p in query.proposals
+                    if "skipped_verified_face_count" in p.evidence()
+                ),
+                default=0,
+            ),
+            internal_transverse_face_coverage=min(
+                (
+                    p.evidence()["internal_transverse_face_coverage"]
+                    for p in query.proposals
+                    if "internal_transverse_face_coverage" in p.evidence()
+                ),
+                default=0.0,
+            ),
             state="PROPOSED",
             precision_allowed=False,
             raw_edge_probe_allowed=True,
@@ -148,6 +164,27 @@ class UnifiedPhysicalValidation:
         row["deck_ring"] = deck_ring(self.cache, row)
         ring = row["deck_ring"]
         row["independent_support_sides"] = ring["measured_strong_side_count"]
+        providers = {p["provider_id"]: p for p in self.cache.structural_providers()}
+        side_candidates = self.cache.side_candidates(box)
+        row["search_normal_face_side_count"] = sum(
+            any(
+                min(c["primary_raw3d"], c["primary_bev"])
+                >= config["roi"]["min_enclosure_ratio"]
+                and (c["rho"] - (box[axis] + box[axis + 2]) / 2) * sign < 0
+                and any(
+                    "RAW3D_VERIFIED_VERTICAL_FACE"
+                    in providers.get(pid, {}).get("evidence_types", [])
+                    for pid in c["provider_ids"]
+                )
+                for c in side_candidates[name]
+            )
+            for name, axis, sign in [
+                ("U0", 0, 1),
+                ("U1", 0, -1),
+                ("V0", 1, 1),
+                ("V1", 1, -1),
+            ]
+        )
         levels = [x for x in opening["outside_side_median_z"] if x is not None]
         row["exterior"] = self.exterior.review(
             box, float(np.median(levels)) if levels else None

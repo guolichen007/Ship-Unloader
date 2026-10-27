@@ -11,6 +11,7 @@ class BudgetedLocalSurfaceNormals(LocalSurfaceNormals):
 
     def __init__(self, xyz, config, budget, counters):
         super().__init__(xyz, config)
+        self.input_point_indexes = np.lexsort((xyz[:, 2], xyz[:, 1], xyz[:, 0]))
         self.budget, self.counters = budget, counters
 
     def _estimate(self, indexes):
@@ -250,6 +251,9 @@ class VesselMeasurementContext:
         self.raw_edge_modes = {}
         self.face_evidence = {}
         self.local_surface_normals = None
+        from .local_deck_profiles import LocalDeckProfileCache
+
+        self.local_deck_profiles = LocalDeckProfileCache(self, cache.config)
 
     @property
     def sorted_u_indexes(self):

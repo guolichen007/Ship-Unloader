@@ -106,6 +106,32 @@ class RecallPerfContracts(unittest.TestCase):
         self.assertNotEqual(regions["parent"], regions["left"])
         self.assertNotEqual(regions["parent"], regions["right"])
 
+    def test_outer_envelope_cannot_preempt_independent_interior_closures(self):
+        ready = []
+        for ident, box, skipped in [
+            ("parent", (0, 0, 60, 12), 2),
+            ("left", (0, 0, 28, 12), 0),
+            ("right", (32, 0, 60, 12), 0),
+        ]:
+            p = self.proposal(box=box)
+            ready.append(
+                (
+                    PhysicalBoundaryQuery(ident, "V", p.bounds, (p,), ()),
+                    dict(
+                        skipped_verified_face_count=skipped,
+                        deck_ring=dict(
+                            sides={
+                                side: dict(vertical_face_support=True)
+                                for side in ("U0", "U1", "V0", "V1")
+                            }
+                        ),
+                    ),
+                )
+            )
+        ordered = [q.query_id for q, _ in PrecisionScheduler(ready, self.config)]
+        self.assertEqual(set(ordered[:2]), {"left", "right"})
+        self.assertEqual(ordered[-1], "parent")
+
     def test_scheduler_alternates_independent_paths_within_one_region(self):
         p = self.proposal()
         ring = dict(
@@ -384,6 +410,27 @@ class RecallPerfContracts(unittest.TestCase):
         ).evaluate(query, dict(independent_support_sides=2), {})
         self.assertEqual(result["raw_probe_support_side_count"], 2)
         self.assertFalse(result["full_precision_allowed"])
+
+    def test_raw_probe_nominates_a_missing_edge_beyond_fine_refinement_band(self):
+        xyz, boxes = vessel_points(1, spacing=0.15)
+        measurement = self.measurement(xyz)
+        box = list(boxes[0])
+        box[0] += 1.2
+        box[2] -= 1.2
+        p = self.proposal(box=box)
+        query = PhysicalBoundaryQuery("Q", "V", p.bounds, (p,), ())
+        with patch(
+            "ship_perception.r1_static.height_grid.R1HeightGrid.from_points",
+            side_effect=AssertionError("probe raster"),
+        ), patch(
+            "ship_perception.perception.final_boundary.BudgetedLocalSurfaceNormals",
+            side_effect=AssertionError("probe normals"),
+        ):
+            result = RawBoundaryProbe(
+                measurement, FinalBoundaryRefiner(xyz, [], self.config, measurement)
+            ).evaluate(query, dict(independent_support_sides=2), {})
+        self.assertGreaterEqual(result["raw_probe_support_side_count"], 3)
+        self.assertTrue(result["full_precision_allowed"])
 
     def test_nearby_anchors_reuse_profile_without_caching_or_rounding_final_rho(self):
         u, v = np.meshgrid(np.arange(-2, 2, 0.025), np.arange(0, 4, 0.025))

@@ -114,6 +114,12 @@ class FinalBoundaryRefiner:
                         "profile_observations",
                     )
                 },
+                {
+                    name: (side.get("status"), side.get("rho"))
+                    for name, side in proposal.get("raw_probe", {})
+                    .get("sides", {})
+                    .items()
+                },
             ],
             sort_keys=True,
         )
@@ -748,6 +754,88 @@ class FinalBoundaryRefiner:
                 candidates = proposal.get("measured_side_candidates", {}).get(name, [])
                 measured = []
                 candidate_heights = {}
+                investigated = (
+                    proposal.get("raw_probe", {}).get("sides", {}).get(name, {})
+                )
+                ring = proposal.get("deck_ring", {}).get("sides", {}).get(name, {})
+                if (
+                    investigated.get("status") == "STRONG_UNIQUE_EDGE"
+                    and ring.get("raw3d_support")
+                    and ring.get("bev_support")
+                ):
+                    anchor = investigated.get("rho", box[position])
+                    middle = (box[axis] + box[axis + 2]) / 2
+                    if (
+                        abs(anchor - box[position]) <= config["roi"]["support_search_m"]
+                        and (anchor - middle) * sign < 0
+                    ):
+                        from .raw_mode_consensus import resolve_section_modes, supported
+
+                        raw = resolve_section_modes(
+                            [
+                                self._raw_section(points, axis, anchor, s, sign)
+                                for s in spans
+                            ],
+                            spans,
+                            config,
+                            self.budget,
+                        )
+                        rows = [
+                            dict(along=sum(s) / 2, rho=r["continuous"][0])
+                            for s, r in zip(spans, raw)
+                            if supported(r)
+                        ]
+                        rho, fit = self._fit(rows, anchor)
+                        if fit["status"] == "CONSENSUS":
+                            rho += fit["slope"] * (
+                                (span[0] + span[1]) / 2 - fit["reference_along_m"]
+                            )
+                            line = dict(
+                                normal_axis=axis,
+                                a_xy=(
+                                    [
+                                        rho + fit["slope"] * (span[0] - sum(span) / 2),
+                                        span[0],
+                                    ]
+                                    if axis == 0
+                                    else [
+                                        span[0],
+                                        rho + fit["slope"] * (span[0] - sum(span) / 2),
+                                    ]
+                                ),
+                                b_xy=(
+                                    [
+                                        rho + fit["slope"] * (span[1] - sum(span) / 2),
+                                        span[1],
+                                    ]
+                                    if axis == 0
+                                    else [
+                                        span[1],
+                                        rho + fit["slope"] * (span[1] - sum(span) / 2),
+                                    ]
+                                ),
+                            )
+                            if (
+                                not has_low_context
+                                or sum(
+                                    r["supported"]
+                                    for r in core_adjacency(
+                                        points, line, box, spans, sign, config, opening
+                                    )
+                                )
+                                >= minimum
+                            ):
+                                measured.append(
+                                    dict(
+                                        rho=rho,
+                                        support_section_count=len(rows),
+                                        fit=fit,
+                                        provider_ids=ring.get(
+                                            "supporting_provider_ids", []
+                                        ),
+                                        measurement_source="RAW_PROBE_ANCHOR_REMEASURED_IN_FINAL_PRECISION",
+                                    )
+                                )
                 for candidate in candidates:
                     if self.budget is not None:
                         self.budget.check()
@@ -890,7 +978,14 @@ class FinalBoundaryRefiner:
         points,
     ):
         """Use a unique observed 3D face when mixed returns veto paired profiles."""
-        if proposal.get("opening_evidence", {}).get("status") != "OPENING_LOWER":
+        opening = proposal.get("opening_evidence", {})
+        lower_context = opening.get("status") == "OPENING_LOWER"
+        local_profiles = (
+            self.measurement_context.local_deck_profiles
+            if self.measurement_context is not None
+            else None
+        )
+        if not lower_context and local_profiles is None:
             return None
         minimum = self.config["boundary"]["profile_min_sections"]
         support = self.config["roi"]["min_enclosure_ratio"]
@@ -918,8 +1013,25 @@ class FinalBoundaryRefiner:
                 )
                 for h in heights
             )
-            if usable < minimum:
+            standard_support = lower_context and usable >= minimum
+            if not standard_support and local_profiles is None:
                 continue
+            if not standard_support:
+                providers = {
+                    p["provider_id"]: p
+                    for p in self.measurement_context.local.structural_providers()
+                }
+                if not any(
+                    "RAW3D_VERIFIED_VERTICAL_FACE"
+                    in providers.get(pid, {}).get("evidence_types", [])
+                    for pid in candidate["provider_ids"]
+                ):
+                    continue
+                # Cheap local Raw profiles precede any new normal queries.
+                # Unexplained nominal frames must not trigger costly geometry.
+                evidence = local_profiles.evidence(axis, anchor, span, sign)
+                if sum(e["supported"] for e in evidence) < minimum:
+                    continue
             # This query is lazy and cached per refiner, never per grid phase.
             if self.face_normals is None:
                 from ship_perception.r1_static.raw_surface_normals import (
@@ -979,26 +1091,53 @@ class FinalBoundaryRefiner:
                     > self.config["boundary"]["corner_join_m"]
                 ):
                     continue
-                adjacency = core_adjacency(
-                    points,
-                    face,
-                    box,
-                    spans,
-                    sign,
-                    self.config,
-                    proposal["opening_evidence"],
-                )
-                if sum(r["supported"] for r in adjacency) < minimum:
-                    continue
-                if (
+                adjacency = []
+                if lower_context:
+                    adjacency = core_adjacency(
+                        points, face, box, spans, sign, self.config, opening
+                    )
+                    if sum(r["supported"] for r in adjacency) < minimum:
+                        continue
+                standard_sections = (
                     sum(
                         raw_face_section(points, face, axis, s, sign, self.config)
                         is not None
                         for s in spans
                     )
-                    < minimum
-                ):
-                    continue
+                    if standard_support
+                    else 0
+                )
+                if standard_sections < minimum:
+                    if local_profiles is None:
+                        continue
+                    context = self.measurement_context.local.measurement_context
+                    ids = face["point_indexes"]
+                    owned = (
+                        context.sources[0].point_indexes
+                        if context is not None
+                        else self.measurement_context.raw_point_indexes
+                    )
+                    primary_ids = ids[
+                        np.isin(self.measurement_context.raw_point_indexes[ids], owned)
+                    ]
+                    # point_indexes are sorted; face.points retain fit order.
+                    # Index the original Raw array to preserve their association.
+                    face["_primary_normal_points"] = self.xyz[primary_ids]
+                    face["local_deck_profile_support"] = True
+                    face["local_deck_profile_reference"] = dict(
+                        rho=face_position(face, sum(span) / 2), span=list(span)
+                    )
+                    if (
+                        sum(
+                            raw_face_section(
+                                points, face, axis, s, sign, self.config, local_profiles
+                            )
+                            is not None
+                            for s in spans
+                        )
+                        < minimum
+                    ):
+                        continue
                 face.update(
                     core_adjacency=adjacency,
                     provider_ids=candidate["provider_ids"],
@@ -1025,14 +1164,36 @@ class FinalBoundaryRefiner:
             span[0],
             span[1],
             sign,
-            None if measured_face is None else measured_face["point_index_sha256"],
+            (
+                None
+                if measured_face is None
+                else (
+                    measured_face["point_index_sha256"],
+                    json.dumps(
+                        measured_face.get("local_deck_profile_reference"),
+                        sort_keys=True,
+                    ),
+                )
+            ),
             self.observation_key,
         )
         if key not in self.raw_section_cache:
             result = (
                 None
                 if measured_face is None
-                else raw_face_section(roi, measured_face, axis, span, sign, config)
+                else raw_face_section(
+                    roi,
+                    measured_face,
+                    axis,
+                    span,
+                    sign,
+                    config,
+                    (
+                        self.measurement_context.local_deck_profiles
+                        if self.measurement_context is not None
+                        else None
+                    ),
+                )
             )
             if result is None:
                 result = self._search_raw_section(roi, axis, anchor, span, sign)

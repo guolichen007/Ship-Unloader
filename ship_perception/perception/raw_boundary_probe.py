@@ -15,9 +15,78 @@ class SignedRoleResolver:
         self.measurement, self.refiner = measurement, refiner
         self.config = refiner.config
 
-    def side(self, axis, anchor, span, sign, candidates, extended=False):
+    def raw_nominations(self, axis, anchor, span, sign):
+        """Nominate within the existing structural ROI, then refine normally."""
+        from .measurement import RawSectionProfile
+
+        config = self.config
+        key = ("RAW_NOMINATION", axis, anchor, tuple(span), sign)
+        cache = self.measurement.raw_edge_modes
+        if key in cache:
+            return cache[key]
+        search = config["roi"]["support_search_m"]
+        fine = config["roi"]["boundary_search_m"]
+        probe = config["boundary"]["side_probe_m"]
+        box = [0.0] * 4
+        box[axis], box[axis + 2] = anchor - search - probe, anchor + search + probe
+        box[1 - axis], box[3 - axis] = span
+        ids = self.measurement.spatial.query_indexes(box)
+        points = self.measurement.raw_uvz[ids]
+        profile = RawSectionProfile(points, axis, tuple(span), config)
+        counters = self.measurement.counters
+        counters["raw_profile_build_count"] += 1
+        context = self.measurement.local.measurement_context
+        owned = (
+            context.sources[0].point_indexes
+            if context is not None
+            else self.measurement.raw_point_indexes
+        )
+        primary = np.isin(self.measurement.raw_point_indexes[ids], owned)
+        edges = physical_sections(span, config["geometry"]["refine_voxel_m"], config)
+        modes = []
+        for center in np.arange(anchor - search, anchor + search + fine, 2 * fine):
+            if self.refiner.budget is not None:
+                self.refiner.budget.check()
+            for mode in profile.edge_modes(center, sign):
+                rho = mode["peak_rho"]
+                if abs(rho - anchor) > search or any(
+                    abs(rho - old) <= config["boundary"]["corner_join_m"]
+                    for old in modes
+                ):
+                    continue
+                near = primary & (
+                    abs(points[:, axis] - rho)
+                    <= config["geometry"]["candidate_voxel_m"]
+                )
+                count = sum(
+                    np.count_nonzero(
+                        near & (points[:, 1 - axis] >= lo) & (points[:, 1 - axis] <= hi)
+                    )
+                    >= config["boundary"]["line_min_points"]
+                    for lo, hi in zip(edges[:-1], edges[1:])
+                )
+                if count >= config["boundary"]["profile_min_sections"]:
+                    modes.append(float(rho))
+        cache[key] = tuple(modes)
+        return cache[key]
+
+    def side(
+        self, axis, anchor, span, sign, candidates, extended=False, normal_range=None
+    ):
         config = self.config
         anchors = [anchor]
+        if extended:
+            for rho in self.raw_nominations(axis, anchor, span, sign):
+                if (
+                    normal_range is not None
+                    and (rho - sum(normal_range) / 2) * sign >= 0
+                ):
+                    continue
+                if not any(
+                    abs(rho - old) <= config["boundary"]["corner_join_m"]
+                    for old in anchors
+                ):
+                    anchors.append(rho)
         for candidate in candidates:
             rho = candidate["rho"]
             if (
@@ -252,8 +321,6 @@ class RawBoundaryProbe:
             if sides[name]["status"] == "STRONG_UNIQUE_EDGE":
                 continue
             candidates = side_candidates.get(name, [])
-            if not candidates:
-                continue
             side_start = time.perf_counter()
             replacement = self.resolver.side(
                 axis,
@@ -262,6 +329,7 @@ class RawBoundaryProbe:
                 sign,
                 candidates,
                 extended=True,
+                normal_range=(box[axis], box[axis + 2]),
             )
             replacement["elapsed_s"] = (
                 sides[name]["elapsed_s"] + time.perf_counter() - side_start

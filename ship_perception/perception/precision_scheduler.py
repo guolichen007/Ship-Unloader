@@ -79,7 +79,10 @@ class PrecisionScheduler:
         )
         return (
             -int(nominal_capacity >= 3),
+            -int(max(coaming, row.get("search_normal_face_side_count", 0)) >= 3),
             -int(coaming >= 3),
+            row.get("internal_transverse_face_coverage", 0.0),
+            row.get("skipped_verified_face_count", 0),
             -int(self.has_post_structure(row)),
             -coaming,
             -int(

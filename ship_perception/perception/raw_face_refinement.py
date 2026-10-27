@@ -58,7 +58,9 @@ def measured_faces(normals, axis, anchor, span, spans, config):
             < boundary["profile_min_sections"]
         ):
             continue
-        ids = np.sort(indexes[member])
+        canonical_ids = indexes[member]
+        order = getattr(normals, "input_point_indexes", None)
+        ids = np.sort(canonical_ids if order is None else order[canonical_ids])
         identity = hashlib.sha256(ids.astype("<i8", copy=False).tobytes()).hexdigest()
         faces.append(
             dict(
@@ -67,6 +69,9 @@ def measured_faces(normals, axis, anchor, span, spans, config):
                 b_xy=b.tolist(),
                 points=observed,
                 point_indexes=ids,
+                point_index_frame=(
+                    "INPUT_RAW" if order is not None else "CANONICAL_NORMALS"
+                ),
                 point_index_sha256=identity,
                 point_count=len(ids),
                 section_point_counts=counts,
@@ -122,10 +127,14 @@ def same_face(first, second):
 
 
 def public_face(face):
-    return {k: v for k, v in face.items() if k not in ("points", "point_indexes")}
+    return {
+        k: v
+        for k, v in face.items()
+        if k not in ("points", "point_indexes") and not k.startswith("_")
+    }
 
 
-def raw_face_section(xyz, face, axis, span, sign, config):
+def raw_face_section(xyz, face, axis, span, sign, config, local_profiles=None):
     """A raw-normal measurement is distinct from a paired-height midpoint."""
     points = face["points"]
     selected = points[
@@ -134,6 +143,51 @@ def raw_face_section(xyz, face, axis, span, sign, config):
     if len(selected) < config["boundary"]["line_min_points"]:
         return None
     rho = face_position(face, (span[0] + span[1]) / 2)
+    if face.get("local_deck_profile_support"):
+        if local_profiles is None:
+            return None
+        # Borrowed deck context may supply a surface reference, but it cannot
+        # supply the independently measured wall of the selected vessel core.
+        primary = face["_primary_normal_points"]
+        count = int(
+            np.count_nonzero(
+                (primary[:, 1 - axis] >= span[0]) & (primary[:, 1 - axis] <= span[1])
+            )
+        )
+        if count < config["boundary"]["line_min_points"]:
+            return None
+        reference = face["local_deck_profile_reference"]
+        whole = local_profiles.section(axis, reference["rho"], reference["span"], sign)
+        evidence = local_profiles.section_evidence(axis, rho, span, sign, face, whole)
+        if not evidence["supported"]:
+            return None
+        return dict(
+            status="UNIQUE_SIGNED_RAW_STEP",
+            rho=rho,
+            modes=[rho],
+            continuous=[
+                rho,
+                max(face["residual_p95_m"], evidence["uncertainty_m"]),
+                len(selected),
+                False,
+            ],
+            height=dict(
+                status="MEASURED",
+                counts=evidence["counts"][::-1],
+                signed_contrast_m=evidence["min_observed_drop_m"],
+                robust_lower_contrast_m=None,
+                z_mad_m=None,
+                transition=True,
+                support_basis="RAW_NORMAL_FACE_AND_MEASURED_LOCAL_DECK_PROFILES",
+                local_deck_profiles=evidence,
+            ),
+            raw_measurement_present=True,
+            raw_normal_face_count=len(selected),
+            primary_normal_face_count=count,
+            measurement_source="RAW_NORMAL_FACE_WITH_LOCAL_DECK_PROFILES",
+            surface_pair_present=False,
+            raw_normal_face_identity=face["point_index_sha256"],
+        )
     observations = [
         dict(xy=p[:2].tolist(), reference_role="RAW_NORMAL_FACE_ROLE_UNVERIFIED")
         for p in selected

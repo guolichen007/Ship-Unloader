@@ -1,0 +1,159 @@
+"""Exact profile equivalence and Raw face ownership counterexamples."""
+
+import unittest
+from types import SimpleNamespace
+
+import numpy as np
+from scipy.spatial import cKDTree
+
+from ship_perception.r1_static.run import resolve_config
+from ship_perception.r1_static.boundary_refinement import _profile
+from ship_perception.perception.plane_profile import observed_profile
+from ship_perception.perception.measurement import BudgetedLocalSurfaceNormals
+from ship_perception.perception.measurement import RawSpatialIndex
+from ship_perception.perception.local_deck_profiles import LocalDeckProfileCache
+from ship_perception.perception.sections import robust_height_support
+from ship_perception.perception.raw_face_refinement import (
+    measured_faces,
+    raw_face_section,
+)
+
+
+class LocalDeckProfiles(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.config, _ = resolve_config()
+
+    def test_batched_quantiles_preserve_observed_breaks_and_rejections(self):
+        rng = np.random.default_rng(818)
+        for dtype in (np.float32, np.float64):
+            for scenario in range(40):
+                xy = rng.uniform([-2.0, -1.0], [2.0, 1.0], (1400, 2))
+                center = np.array([100.0, -60.0])
+                z = np.where(xy[:, 0] < 0, 0.0, -1.0) + rng.normal(0, 0.015, len(xy))
+                if scenario % 4 == 1:  # Competing cargo steps.
+                    z[(xy[:, 0] > 0.4) & (xy[:, 0] < 0.8)] = 0.0
+                if scenario % 4 == 2:  # No opening.
+                    z[:] = 0.0
+                if scenario % 4 == 3:  # Sparse or occluded returns.
+                    xy, z = xy[::20], z[::20]
+                points = np.column_stack((xy + center, z)).astype(dtype)
+                tree = cKDTree(points[:, :2])
+                plane = (np.array([0.0, 0.0, 1.0]), 0.0)
+                args = (
+                    points,
+                    tree,
+                    center,
+                    np.array([0.0, 1.0]),
+                    np.array([1.0, 0.0]),
+                    plane,
+                    self.config,
+                )
+                old = _profile(*args, "ORIGINAL")
+                new = observed_profile(*args)
+                self.assertEqual(old["valid"], new is not None)
+                if new is not None:
+                    np.testing.assert_allclose(
+                        new["break_position"], old["break_position"], atol=1e-12
+                    )
+                    self.assertAlmostEqual(
+                        new["break_strength"], old["break_strength"], places=10
+                    )
+                    self.assertEqual(new["residual"], old["residual"])
+
+    def test_canonical_normal_indexes_map_back_to_the_actual_input_wall(self):
+        along, height = np.meshgrid(np.arange(0, 13, 0.1), np.arange(-3, 0, 0.1))
+        wall = np.column_stack(
+            (np.full(along.size, 4.0), along.ravel(), height.ravel())
+        )
+        floor = np.column_stack(
+            (
+                np.arange(len(wall)) * 0.001,
+                np.full(len(wall), 16.0),
+                np.zeros(len(wall)),
+            )
+        )
+        points = np.vstack((wall, floor))
+        points = points[np.random.default_rng(19).permutation(len(points))]
+        normals = BudgetedLocalSurfaceNormals(points, self.config, None, {})
+        faces = measured_faces(
+            normals, 0, 4.0, (0.0, 12.0), [(0, 3), (3, 6), (6, 9), (9, 12)], self.config
+        )
+        self.assertTrue(faces)
+        for face in faces:
+            reconstructed = points[face["point_indexes"]]
+            self.assertTrue(np.all(reconstructed[:, 0] == 4.0))
+            self.assertEqual(face["point_index_frame"], "INPUT_RAW")
+            np.testing.assert_allclose(
+                reconstructed[np.lexsort(reconstructed.T[::-1])],
+                face["points"][np.lexsort(face["points"].T[::-1])],
+            )
+
+    def test_local_surface_profiles_cannot_fill_a_missing_core_wall_section(self):
+        points = np.column_stack(
+            (np.full(30, 4.0), np.linspace(0, 3, 30), np.linspace(-3, 0, 30))
+        )
+        face = dict(
+            points=points,
+            normal_axis=0,
+            a_xy=[4.0, 0.0],
+            b_xy=[4.0, 12.0],
+            residual_p95_m=0.01,
+            point_index_sha256="raw",
+            local_deck_profile_support=True,
+            _primary_normal_points=points[:0],
+            local_deck_profile_reference=dict(rho=4.0, span=[0, 12]),
+        )
+
+        def forbidden(*args):
+            self.fail(
+                "Missing primary wall must fail before profile or deck measurements"
+            )
+
+        profiles = SimpleNamespace(section=forbidden, section_evidence=forbidden)
+        self.assertIsNone(
+            raw_face_section(points, face, 0, (0, 3), 1, self.config, profiles)
+        )
+
+    def test_multiple_observed_deck_levels_retain_raw_support_and_exact_cache_results(
+        self,
+    ):
+        x, y = np.meshgrid(np.arange(0, 8, 0.075), np.arange(0, 12.05, 0.1))
+        level = np.where(y < 6, 0.0, 1.0)
+        z = level - np.where(x > 4, 2.0, 0.0)
+        points = np.column_stack((x.ravel(), y.ravel(), z.ravel()))
+        inside = points[points[:, 0] > 4].copy()
+        inside[:, 2] += 2.0
+        # High mixed returns destroy strip-wide quartile polarity. A local
+        # measured deck-to-lower family remains observable in every section.
+        points = np.vstack((points, inside))
+        self.assertFalse(
+            robust_height_support(points, 0, 4.0, (0, 3), 1, self.config)["transition"]
+        )
+        measurement = SimpleNamespace(
+            raw_uvz=points,
+            raw_point_indexes=np.arange(len(points)),
+            counters={},
+            budget=None,
+        )
+        measurement.spatial = RawSpatialIndex(points, measurement.counters)
+        cache = LocalDeckProfileCache(measurement, self.config)
+        face = dict(normal_axis=0, a_xy=[4.0, 0.0], b_xy=[4.0, 12.0])
+        first = cache.evidence(0, 4.0, (0.0, 12.0), 1, face)
+        self.assertEqual(len(first), 4)
+        self.assertTrue(all(row["supported"] for row in first))
+        second = cache.evidence(0, 4.0, (0.0, 12.0), 1, face)
+        self.assertEqual(first, second)
+        self.assertGreater(measurement.counters["local_deck_profile_cache_hit"], 0)
+        cache.enabled = False
+        uncached = cache.evidence(0, 4.0, (0.0, 12.0), 1, face)
+        self.assertEqual(first, uncached)
+        for row in first:
+            self.assertGreaterEqual(
+                min(row["counts"]), self.config["boundary"]["profile_min_points"]
+            )
+            self.assertFalse(row["geometry_inferred"])
+
+
+if __name__ == "__main__":
+    unittest.main()
