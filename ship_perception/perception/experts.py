@@ -7,12 +7,14 @@ from .local_evidence import local_height_recall
 
 
 def _proposal(expert, cache, bounds, index, **evidence):
-    row = dict(
+    row = dict(evidence)
+    # Derived closure evidence can carry its own diagnostic geometry role.
+    # The new expert record still owns its identity and remains a proposal.
+    row.update(
         proposal_id=expert + str(index),
         bounds_axial=list(map(float, bounds)),
         vessel_hypothesis_id=cache.vessel.vessel_id,
         geometry_role="PROPOSAL_NOT_STEEL",
-        **evidence,
     )
     return CandidateProposal.from_evidence(expert, cache.vessel.vessel_id, row, index)
 

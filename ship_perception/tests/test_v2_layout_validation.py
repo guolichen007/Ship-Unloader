@@ -12,6 +12,35 @@ from ship_perception.r1_static.run import resolve_config
 
 
 class LayoutAndExterior(unittest.TestCase):
+    def test_observed_cross_deck_children_remain_proposals_with_their_own_identity(
+        self,
+    ):
+        from unittest.mock import patch
+        from ship_perception.perception.experts import MultiHoldLayoutExpert
+
+        cache = SimpleNamespace(
+            config=self.config, vessel=SimpleNamespace(vessel_id="V")
+        )
+        children = [
+            dict(bounds_axial=[0, 2, 10, 18], geometry_role="NOMINAL_CLOSURE"),
+            dict(bounds_axial=[12, 2, 24, 18], geometry_role="NOMINAL_CLOSURE"),
+        ]
+        with patch(
+            "ship_perception.perception.experts.structural_enclosures",
+            return_value=children,
+        ), patch(
+            "ship_perception.perception.layout.cross_deck_evidence",
+            return_value=dict(can_split=True),
+        ):
+            proposals, _ = MultiHoldLayoutExpert().search(
+                cache, [dict(bounds=[0, 2, 24, 18])], {}
+            )
+        self.assertEqual(len(proposals), 2)
+        for proposal in proposals:
+            self.assertEqual(proposal.vessel_id, "V")
+            self.assertEqual(proposal.evidence()["geometry_role"], "PROPOSAL_NOT_STEEL")
+            self.assertIn("split_hypothesis", proposal.evidence())
+
     def test_cross_deck_requires_measured_faces_not_only_a_height_ridge(self):
         cache = self.cache()
         providers = [
