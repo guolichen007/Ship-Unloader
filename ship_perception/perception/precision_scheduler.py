@@ -65,6 +65,7 @@ class PrecisionScheduler:
         )
         return (
             -int(nominal_capacity >= 3),
+            -int(self.has_post_structure(row)),
             -int(coaming >= 3),
             -coaming,
             -int(
@@ -108,12 +109,17 @@ class PrecisionScheduler:
                     yield query, row
 
     @staticmethod
-    def evidence_family(row):
+    def has_post_structure(row):
         post = row.get("legacy_post_b2", {})
-        if (
-            post.get("derived_search_evidence")
+        return (
+            post.get("local_physical_candidate_available", False)
             and post.get("support_side_count", 0) >= 3
-        ):
+            and sum(post.get("side_evidence_availability", {}).values()) >= 3
+        )
+
+    @staticmethod
+    def evidence_family(row):
+        if PrecisionScheduler.has_post_structure(row):
             return "POST_B2_WITH_LOCAL_STRUCTURE"
         if any(
             s.get("vertical_face_support", False)

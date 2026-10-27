@@ -83,6 +83,42 @@ class RecallPerfContracts(unittest.TestCase):
         self.assertEqual(next(scheduled)[0].query_id, "L")
         self.assertEqual(next(scheduled)[0].query_id, "S01")
 
+    def test_post_b2_tier_requires_actual_local_side_evidence_not_legacy_label(self):
+        p = self.proposal()
+        post = dict(
+            local_physical_candidate_available=True,
+            support_side_count=3,
+            side_evidence_availability=dict(U0=True, U1=False, V0=True, V1=True),
+        )
+        historical = (
+            PhysicalBoundaryQuery("L", "V", p.bounds, (p,), ()),
+            dict(legacy_post_b2=post),
+        )
+        measured = (
+            PhysicalBoundaryQuery("S", "V", p.bounds, (p,), ()),
+            dict(
+                deck_ring=dict(
+                    sides={
+                        name: dict(vertical_face_support=True)
+                        for name in ("U0", "U1", "V0", "V1")
+                    }
+                )
+            ),
+        )
+        self.assertEqual(
+            next(iter(PrecisionScheduler([measured, historical], self.config)))[
+                0
+            ].query_id,
+            "L",
+        )
+        post["side_evidence_availability"]["U0"] = False
+        self.assertEqual(
+            next(iter(PrecisionScheduler([measured, historical], self.config)))[
+                0
+            ].query_id,
+            "S",
+        )
+
     def measurement(self, xyz, enabled=True):
         cache = SimpleNamespace(
             config=self.config,
