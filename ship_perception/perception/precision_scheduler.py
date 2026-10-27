@@ -84,9 +84,43 @@ class PrecisionScheduler:
         while any(r["queue"] for r in self.regions):
             for region in self.regions:
                 if region["queue"]:
-                    query, row = region["queue"].popleft()
+                    queue = region["queue"]
+                    first_tier = self.rank(queue[0])[0]
+                    # Independent proposal paths must get a turn within the
+                    # same region as well. Repeated structural variants must
+                    # not starve a post-B2 hypothesis of that enclosure.
+                    alternative = next(
+                        (
+                            i
+                            for i, item in enumerate(queue)
+                            if self.rank(item)[0] == first_tier
+                            and self.evidence_family(item[1])
+                            != region.get("last_family")
+                        ),
+                        0,
+                    )
+                    queue.rotate(-alternative)
+                    query, row = queue.popleft()
+                    queue.rotate(alternative)
+                    region["last_family"] = self.evidence_family(row)
                     row["scheduler_region_bounds"] = list(region["bounds"])
+                    row["scheduler_evidence_family"] = region["last_family"]
                     yield query, row
+
+    @staticmethod
+    def evidence_family(row):
+        post = row.get("legacy_post_b2", {})
+        if (
+            post.get("derived_search_evidence")
+            and post.get("support_side_count", 0) >= 3
+        ):
+            return "POST_B2_WITH_LOCAL_STRUCTURE"
+        if any(
+            s.get("vertical_face_support", False)
+            for s in row.get("deck_ring", {}).get("sides", {}).values()
+        ):
+            return "MEASURED_STRUCTURAL_CLOSURE"
+        return "OTHER_LOCAL_EVIDENCE"
 
     def alternate(self, query, row):
         seen = {tuple(query.bounds)}

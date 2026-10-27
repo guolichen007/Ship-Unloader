@@ -57,6 +57,32 @@ class RecallPerfContracts(unittest.TestCase):
             [q.query_id for q, _ in ordered], [broad.query_id, thin.query_id]
         )
 
+    def test_scheduler_alternates_independent_paths_within_one_region(self):
+        p = self.proposal()
+        ring = dict(
+            sides={
+                name: dict(vertical_face_support=True)
+                for name in ("U0", "U1", "V0", "V1")
+            }
+        )
+        structural = [
+            (
+                PhysicalBoundaryQuery("S%02d" % i, "V", p.bounds, (p,), ()),
+                dict(deck_ring=ring),
+            )
+            for i in range(30)
+        ]
+        legacy = (
+            PhysicalBoundaryQuery("L", "V", p.bounds, (p,), ()),
+            dict(
+                legacy_post_b2=dict(derived_search_evidence=True, support_side_count=3)
+            ),
+        )
+        scheduled = iter(PrecisionScheduler(structural + [legacy], self.config))
+        self.assertEqual(next(scheduled)[0].query_id, "S00")
+        self.assertEqual(next(scheduled)[0].query_id, "L")
+        self.assertEqual(next(scheduled)[0].query_id, "S01")
+
     def measurement(self, xyz, enabled=True):
         cache = SimpleNamespace(
             config=self.config,
