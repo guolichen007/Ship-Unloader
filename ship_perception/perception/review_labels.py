@@ -12,7 +12,7 @@ FIGURE_TEXT = dict(
     xlabel="输入坐标 X（米）",
     ylabel="输入坐标 Y（米）",
     colorbar="原始点云 Z 中位高度（米）",
-    legend="琥珀实线：复核边界｜点线：不确定范围｜钢边精度尚未验证",
+    legend="琥珀实线：复核边界｜点线：不确定范围｜Z：局部围板/甲板上沿实测估计，缺测不补值｜钢边精度尚未验证",
 )
 STATUS_LABELS = {
     "HATCH_REVIEW_CANDIDATE": "船舱候选",
@@ -31,7 +31,7 @@ def chinese_plot_style():
         for character in (
             "".join(FIGURE_TEXT.values())
             + "".join(STATUS_LABELS.values())
-            + "开口组舱数未定状态待核对角点长宽米"
+            + "开口组舱数未定状态待核对角点长宽米未观测"
         )
         if ord(character) > 127
     }
@@ -99,14 +99,20 @@ def annotate_measurements(ax, hatches):
         polygon = np.asarray(hatch["boundary_xy"], dtype=float)
         center = ax.transData.transform(polygon.mean(0))
         for index, point in enumerate(polygon):
+            heights = hatch.get("corner_heights", [])
+            height = heights[index] if len(heights) == 4 else {}
+            z = height.get("z_m")
+            if z is not None and not np.isfinite(z):
+                raise ValueError("INVALID_CORNER_HEIGHT")
+            z_label = "Z≈{:.3f}米".format(z) if z is not None else "Z=未观测"
             position = ax.transData.transform(point)
             left = position[0] <= center[0]
             below = position[1] <= center[1]
             sign_y = -1 if below else 1
             x_offset = 4 if left else -4
             label = ax.annotate(
-                "{} 角点P{}\nX={:.3f}米\nY={:.3f}米".format(
-                    hatch["hatch_id"], index + 1, point[0], point[1]
+                "{} 角点P{}\nX={:.3f}米\nY={:.3f}米\n{}".format(
+                    hatch["hatch_id"], index + 1, point[0], point[1], z_label
                 ),
                 xy=point,
                 xytext=(x_offset, sign_y * 9),

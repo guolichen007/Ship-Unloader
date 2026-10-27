@@ -72,7 +72,8 @@ class CornerExportTests(unittest.TestCase):
                 [point["display_label"] for point in new["corners"]],
                 ["P1", "P2", "P3", "P4"],
             )
-            self.assertTrue(all("z_m" not in p for p in new["corners"]))
+            self.assertTrue(all(p["z_m"] is None for p in new["corners"]))
+            self.assertTrue(all(p["z_status"] == "UNOBSERVED" for p in new["corners"]))
         self.assertIsNone(result["hatches"][1]["individual_hatch_count"])
         self.assertEqual(
             result["hatches"][1]["candidate_type"], "UNRESOLVED_OPENING_GROUP"

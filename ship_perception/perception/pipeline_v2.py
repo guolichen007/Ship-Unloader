@@ -28,6 +28,7 @@ from .proposal_compiler import ProposalCompiler, evidence_lineage
 from .legacy_post_b2 import LegacyPostB2EvidenceAdapter
 from .raw_boundary_probe import RawBoundaryProbe
 from .precision_scheduler import PrecisionScheduler
+from .corner_height import CornerHeightMeasurement
 from .experts import (
     HeightBasinExpert,
     StructuralLineExpert,
@@ -702,6 +703,10 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
         item["unresolved_review_proposals"] = bounded(deferred)
         item["status"] = "REVIEW_CANDIDATES" if item["hatches"] else "UNRESOLVED"
         for result in item["hatches"]:
+            with timing.stage("CORNER_HEIGHT_OUTPUT"):
+                result["corner_heights"] = CornerHeightMeasurement(
+                    measurement, config
+                ).measure(result)
             if layout is not None:
                 uv = np.asarray(result["boundary_uv"])
                 result["layout"] = layout.review((*uv.min(0), *uv.max(0)))

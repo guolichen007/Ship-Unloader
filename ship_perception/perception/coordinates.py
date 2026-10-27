@@ -41,7 +41,8 @@ def corner_coordinates(payload, source_result_sha256):
 
     Coordinates come from the same final line intersections used by the full
     scene image. Ambiguous opening groups retain their status and unknown
-    individual count; this export never splits them or synthesizes a Z value.
+    individual count. Z is copied only from local Raw surface measurements;
+    unavailable heights remain null and never become an invented coordinate.
     """
     if payload["schema"] != "ship_perception.hatch_once.2":
         raise ValueError("UNSUPPORTED_CORNER_EXPORT_SOURCE_SCHEMA")
@@ -56,10 +57,15 @@ def corner_coordinates(payload, source_result_sha256):
         ):
             raise ValueError("FINAL_BOUNDARY_COORDINATE_MISMATCH")
         evidence = hatch.get("corners", [])
+        heights = hatch.get("corner_heights", [])
         corners = []
         for index, (point, intersection) in enumerate(
             zip(polygon, CORNER_INTERSECTIONS)
         ):
+            height = heights[index] if len(heights) == 4 else {}
+            z = height.get("z_m")
+            if z is not None and not np.isfinite(z):
+                raise ValueError("INVALID_CORNER_HEIGHT")
             corners.append(
                 dict(
                     corner_id="C" + str(index),
@@ -67,6 +73,13 @@ def corner_coordinates(payload, source_result_sha256):
                     side_intersection=intersection,
                     x_m=float(point[0]),
                     y_m=float(point[1]),
+                    z_m=float(z) if z is not None else None,
+                    z_status=height.get("z_status", "UNOBSERVED"),
+                    z_uncertainty_m=height.get("z_uncertainty_m"),
+                    z_definition=height.get(
+                        "z_definition", "LOCAL_COAMING_OR_DECK_UPPER_SURFACE"
+                    ),
+                    z_measurement=copy.deepcopy(height),
                     uncertainty_m=(
                         evidence[index].get("uncertainty_m")
                         if len(evidence) == 4
@@ -85,6 +98,7 @@ def corner_coordinates(payload, source_result_sha256):
                 candidate_blockers=list(hatch.get("candidate_blockers", [])),
                 undercoverage_risk=hatch["undercoverage_risk"],
                 boundary_xy_m=polygon.tolist(),
+                boundary_xyz_m=[[p["x_m"], p["y_m"], p["z_m"]] for p in corners],
                 dimensions=boundary_dimensions(polygon),
                 corners=corners,
             )
@@ -98,8 +112,10 @@ def corner_coordinates(payload, source_result_sha256):
         config_sha256=payload["config_sha256"],
         input=copy.deepcopy(payload["input"]),
         coordinate_frame=payload["input"]["frame_id"],
-        coordinate_system="ORIGINAL_INPUT_XY",
-        coordinate_dimensions=["x", "y"],
+        coordinate_system="ORIGINAL_INPUT_XYZ",
+        coordinate_dimensions=["x", "y", "z"],
+        z_definition="LOCAL_COAMING_OR_DECK_UPPER_SURFACE",
+        unobserved_z_representation="null",
         units="m",
         output_scope="FULL_SCENE_ALL_FINAL_REVIEW_CANDIDATES",
         corner_order=list(CORNER_INTERSECTIONS),
@@ -117,7 +133,7 @@ def main():
     from ship_perception.r1_static.run import _atomic_json
 
     parser = argparse.ArgumentParser(
-        description="Export four XY corners from a completed hatch review JSON"
+        description="Export four XYZ corners; unobserved Z remains null"
     )
     parser.add_argument("--result", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
