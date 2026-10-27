@@ -294,9 +294,9 @@ class SceneEvidenceContext:
                 frame.xyz,
                 {
                     s["support_id"]: s["bbox_xy"]
-                    for s in scene["scene_support_candidates"]
+                    for s in scene.get("scene_support_candidates", [])
                 },
-                private["grid"].cell_m,
+                private["grid"].cell_m if private.get("grid") is not None else None,
             ),
         )
 
