@@ -7,6 +7,7 @@ import numpy as np
 from .recall import box_overlap
 from .candidate_union import canonical
 from .proposal_compiler import evidence_lineage
+from .sections import physical_sections
 
 
 class PrecisionScheduler:
@@ -34,8 +35,7 @@ class PrecisionScheduler:
             region["queue"].append((query, row))
         self.explanations = []
 
-    @staticmethod
-    def rank(item):
+    def rank(self, item):
         query, row = item
         post = row.get("legacy_post_b2", {})
         ring = row.get("deck_ring", {})
@@ -43,7 +43,28 @@ class PrecisionScheduler:
             s.get("vertical_face_support", False)
             for s in ring.get("sides", {}).values()
         )
+        # A thin structural strip can have many measured faces yet cannot
+        # supply the existing final section count at its nominal bounds.
+        # Measure viable enclosures first; narrow hypotheses remain queued
+        # and may expand through the unchanged Raw/structural search later.
+        box = query.bounds
+        nominal_capacity = sum(
+            2
+            * (
+                len(
+                    physical_sections(
+                        (box[1 - axis], box[3 - axis]),
+                        self.config["geometry"]["refine_voxel_m"],
+                        self.config,
+                    )
+                )
+                - 1
+                >= self.config["boundary"]["profile_min_sections"]
+            )
+            for axis in (0, 1)
+        )
         return (
+            -int(nominal_capacity >= 3),
             -int(coaming >= 3),
             -coaming,
             -int(

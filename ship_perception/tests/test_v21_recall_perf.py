@@ -36,6 +36,27 @@ class RecallPerfContracts(unittest.TestCase):
             ),
         )
 
+    def test_scheduler_measurable_enclosure_precedes_thin_many_face_strip(self):
+        p = self.proposal(ident="broad")
+        broad = PhysicalBoundaryQuery("broad", "V", p.bounds, (p,), ())
+        p = self.proposal(box=(30, 0, 60, 1), ident="thin")
+        thin = PhysicalBoundaryQuery("thin", "V", p.bounds, (p,), ())
+        broad_row = dict(legacy_post_b2=dict(support_side_count=3))
+        thin_row = dict(
+            deck_ring=dict(
+                sides={
+                    name: dict(vertical_face_support=True)
+                    for name in ("U0", "U1", "V0", "V1")
+                }
+            )
+        )
+        ordered = list(
+            PrecisionScheduler([(thin, thin_row), (broad, broad_row)], self.config)
+        )
+        self.assertEqual(
+            [q.query_id for q, _ in ordered], [broad.query_id, thin.query_id]
+        )
+
     def measurement(self, xyz, enabled=True):
         cache = SimpleNamespace(
             config=self.config,
