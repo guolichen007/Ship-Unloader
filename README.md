@@ -2,7 +2,7 @@
 
 双激光雷达卸船机船舱识别与船体稳定跟踪系统。
 
-本分支是 **V2 多专家船舱识别开发验证版**，运行环境为 Ubuntu 22.04 / ROS2 Humble。PCD 和 `/ship_scan/map` 共用纯 XYZ 主链，输出中文全景图、逐边证据、四角坐标与不确定性。真实历史场景的单调回归门尚未通过，不能替代 main 现场基线，也不用于自动控制。V1.4 船体跟踪源码继续冻结保留。
+本分支是 **V2.1 召回与性能优化开发验证版**，运行环境为 Ubuntu 22.04 / ROS2 Humble。PCD 和 `/ship_scan/map` 共用纯 XYZ 主链，输出中文全景图、逐边证据、四角坐标与不确定性。真实历史场景的单调回归门尚未通过，不能替代 main 现场基线，也不用于自动控制。V1.4 船体跟踪源码继续冻结保留。
 
 ## 两个现场入口
 
@@ -54,15 +54,15 @@ output/YYYYMMDD_HHMMSS_microseconds/
 
 终端逐阶段显示 `START / RUNNING / DONE / FAILED`、阶段耗时与总耗时，长阶段每 15 秒报告仍在运行。正式目录只在五份产物全部写完后发布；失败另存 `failure_*/failure.json`。
 
-`05_hatch_corners.json` 单列整幅场景中所有最终复核对象的四角坐标，使用原始输入 frame 的 XY、单位米；每角含 `x_m`、`y_m`、相交边名称及不确定性。它与全局图使用同一份最终几何，不补造 Z，也不把 `UNRESOLVED` 包围组当作单个已确认船舱。
+`05_hatch_corners.json` 单列整幅场景中所有最终复核对象的四角坐标，使用 `ship_perception.hatch_corners.2`，坐标为原始输入 frame 的 XYZ、单位米。XY 来自最终四线交点；Z 按用户选择，独立测量局部围板/甲板上沿，含 `z_status`、`z_uncertainty_m` 与 Raw 来源。无唯一局部上沿或相邻边支撑不足时，`z_m=null`、`z_status=UNOBSERVED`，不补值。它与两张全局图共用同一份坐标，也不把 `UNRESOLVED` 包围组当作单个已确认船舱。
 
-两张全船图均在角点附近标注 `P1～P4` 的输入 XY 坐标，并在每舱中央显示“长 / 宽”。JSON 的 `C0～C3` 依次对应图中 `P1～P4`，`dimensions` 同时保存长、宽及四条边的实长。长度为两条 U 向边实长的平均，宽度为两条 V 向边实长的平均；不使用旋转后的 XY 包围框尺寸。显示保留三位小数只是数值格式，不代表毫米级精度认证。
+两张全船图均在角点附近标注 `P1～P4` 的输入 XYZ 坐标（Z 缺测明确写“未观测”），并在每舱中央显示“长 / 宽”。JSON 的 `C0～C3` 依次对应图中 `P1～P4`，`dimensions` 同时保存长、宽及四条边的实长。长度为两条 U 向边实长的平均，宽度为两条 V 向边实长的平均；不使用旋转后的 XY 包围框尺寸。显示保留三位小数只是数值格式，不代表毫米级精度认证。
 
 琥珀实线为最佳复核边界，点线为不确定性覆盖范围。`PARTIAL_HATCH`、`UNRESOLVED_VESSEL_REVIEW` 不能当作已确认船舱；矩形约束和缺测推断不能当作实测钢边。完整原始场景保留在背景中，避免漏检区域被绘图裁掉。
 
 ## 当前技术路线与边界
 
-- V2 主链为一次 B1 → 靠岸船选择 → 原始索引工作区 → Legacy / Height Basin / Structural Line / Local Enclosure / Loaded Hold / Large Sand Hold 候选联合 → 物理查询去重 → 统一验证 → 一个共享四边精修器。Layout Recovery / Multi Hold 仅搜索和排序，不创造边。
+- V2 主链为一次 B1 → 靠岸船选择 → 原始索引工作区 → Legacy / Height Basin / Structural Line / Local Enclosure / Loaded Hold / Large Sand Hold 候选联合与 post-B2 局部证据 → 名义候选编译 → 统一验证 → 廉价 Raw 探测和逐区域调查 → 一个共享四边精修器。Layout Recovery / Multi Hold 仅搜索和排序，不创造边。
 - Legacy 冻结 B2 候选及原始证据，旧 R2F/R2G/B4/B5 只保留在 `--pipeline v1-diagnostic` 历史诊断路径，不在 V2 中重复执行整套最终精修。历史旧路径的召回效果尚未全部迁入 V2，见验收说明。
 - `UNKNOWN_CONTEXT` 不作为强船外种子；缺少高度、一边缺测、装载高度不明和布局不一致不作为硬拒绝。只对明确物理矛盾拒绝；证据不足的候选保存为未决记录。
 - 最终 Raw 不降采样，保持原有 0.05 m 分辨率。共享排序空间索引、剖面、边模式、逐相位 Raw 测量与按需法向；冻结 Legacy provider 自身的法向资格计算仍保留。
