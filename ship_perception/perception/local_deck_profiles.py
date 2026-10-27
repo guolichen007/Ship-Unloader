@@ -210,13 +210,20 @@ class LocalDeckProfileCache:
                 # Profile construction sees padded neighbours, but each
                 # physical section must own its counted Raw support itself.
                 tube &= (along_values >= lo) & (along_values <= hi)
+                observed_signed = (
+                    sign * (points[:, axis] - profile["rho"])
+                    if face is None
+                    else signed
+                )
                 outside |= (
                     tube
-                    & (signed <= 0)
+                    & (observed_signed <= 0)
                     & (abs(residual) <= config["roi"]["support_band_m"])
                 )
                 inside |= (
-                    tube & (signed > 0) & (residual <= -config["roi"]["opening_drop_m"])
+                    tube
+                    & (observed_signed > 0)
+                    & (residual <= -config["roi"]["opening_drop_m"])
                 )
                 used.append(profile)
                 used_planes.add(plane["raw_support_sha256"])
@@ -224,12 +231,27 @@ class LocalDeckProfileCache:
             enough = (
                 bool(used) and min(counts) >= config["boundary"]["profile_min_points"]
             )
+            unique = (
+                face is not None
+                or not used
+                or np.ptp([p["rho"] for p in used])
+                <= config["boundary"]["corner_join_m"]
+            )
+            if face is None and used:
+                rho = float(np.median([p["rho"] for p in used]))
             ids = self.measurement.raw_point_indexes[indexes[outside | inside]]
             rows.append(
                 dict(
                     span=[lo, hi],
                     rho=float(rho),
-                    supported=enough,
+                    supported=bool(enough and unique),
+                    geometry_status=(
+                        "OBSERVED_PROFILE_OR_FACE"
+                        if unique and enough
+                        else (
+                            "MULTIMODE_PROFILE_GEOMETRY" if not unique else "UNOBSERVED"
+                        )
+                    ),
                     profile_count=len(used),
                     counts=counts,
                     min_observed_drop_m=min((p["drop_m"] for p in used), default=None),

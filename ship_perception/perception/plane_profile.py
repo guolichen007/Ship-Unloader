@@ -8,6 +8,25 @@ import numpy as np
 
 
 def observed_profile(points, tree, center, tangent, inward, plane, config):
+    row = profile_record(
+        points, tree, center, tangent, inward, plane, config, "LOCAL_RAW"
+    )
+    return row if row["valid"] else None
+
+
+def profile_record(points, tree, center, tangent, inward, plane, config, profile_id):
+    row = dict(
+        profile_id=profile_id,
+        sample_count=0,
+        deck_support_count=0,
+        lower_support_count=0,
+        break_position=None,
+        break_strength=None,
+        residual=None,
+        valid=False,
+        reason="INSUFFICIENT_PROFILE_POINTS",
+        face_position=None,
+    )
     b = config["boundary"]
     half, width, step = (
         b["profile_half_length_m"],
@@ -16,13 +35,13 @@ def observed_profile(points, tree, center, tangent, inward, plane, config):
     )
     ids = tree.query_ball_point(center, half + width)
     if not ids:
-        return None
+        return row
     local = points[ids].astype(float)
     delta = local[:, :2] - center
     along = delta @ inward
     use = (abs(delta @ tangent) <= width) & (abs(along) <= half)
     if int(use.sum()) < b["profile_min_points"]:
-        return None
+        return row
     local, along = local[use], along[use]
     residual = local @ plane[0] + plane[1]
     precision = (
@@ -51,10 +70,30 @@ def observed_profile(points, tree, center, tangent, inward, plane, config):
         values[starts + low] + delta * fraction,
     )
     positions = (keys + 0.5) * step
+    face = (
+        (counts >= max(3, config["geometry"]["normal_min_points"] // 2))
+        & (
+            values[starts + counts - 1] - values[starts]
+            >= b["face_vertical_span_min_m"]
+        )
+        & (values[starts + counts - 1] >= -config["roi"]["support_band_m"])
+        & (values[starts] <= -b["profile_min_drop_m"])
+    )
+    if face.any():
+        choices = positions[face]
+        row["face_position"] = (
+            center + choices[np.argmin(abs(choices))] * inward
+        ).tolist()
     deck = abs(quantiles) <= config["roi"]["support_band_m"]
     lower = quantiles < -b["profile_min_drop_m"]
+    row.update(
+        sample_count=len(keys),
+        deck_support_count=int(deck.sum()),
+        lower_support_count=int(lower.sum()),
+    )
     if len(keys) < b["profile_min_points"] or deck.sum() < 3 or lower.sum() < 3:
-        return None
+        row["reason"] = "DECK_OR_LOWER_NOT_OBSERVED"
+        return row
     options = []
     for index in np.flatnonzero(lower):
         prior = np.flatnonzero(
@@ -89,17 +128,21 @@ def observed_profile(points, tree, center, tangent, inward, plane, config):
             )
         )
     if not options:
-        return None
+        row["reason"] = "NO_OBSERVED_DECK_TO_LOWER_BREAK"
+        return row
     options.sort(key=lambda item: (abs(item[0]), -item[1]))
     best = options[0]
     if any(
         abs(other[0] - best[0]) > b["profile_breakpoint_stability_m"]
         for other in options
     ):
-        return None
-    return dict(
+        row["reason"] = "COMPETING_BREAKS"
+        return row
+    row.update(
         break_position=(center + best[0] * inward).tolist(),
         break_strength=float(best[1]),
         residual=float(best[2] / 2),
         valid=True,
+        reason=None,
     )
+    return row

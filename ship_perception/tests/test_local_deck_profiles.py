@@ -8,7 +8,7 @@ from scipy.spatial import cKDTree
 
 from ship_perception.r1_static.run import resolve_config
 from ship_perception.r1_static.boundary_refinement import _profile
-from ship_perception.perception.plane_profile import observed_profile
+from ship_perception.perception.plane_profile import observed_profile, profile_record
 from ship_perception.perception.measurement import BudgetedLocalSurfaceNormals
 from ship_perception.perception.measurement import RawSpatialIndex
 from ship_perception.perception.local_deck_profiles import LocalDeckProfileCache
@@ -51,6 +51,16 @@ class LocalDeckProfiles(unittest.TestCase):
                 )
                 old = _profile(*args, "ORIGINAL")
                 new = observed_profile(*args)
+                record = profile_record(*args, "ORIGINAL")
+                self.assertEqual(record["face_position"], old["face_position"])
+                for key in (
+                    "valid",
+                    "reason",
+                    "sample_count",
+                    "deck_support_count",
+                    "lower_support_count",
+                ):
+                    self.assertEqual(record[key], old[key])
                 self.assertEqual(old["valid"], new is not None)
                 if new is not None:
                     np.testing.assert_allclose(
