@@ -104,7 +104,10 @@ def annotate_measurements(ax, hatches):
             z = height.get("z_m")
             if z is not None and not np.isfinite(z):
                 raise ValueError("INVALID_CORNER_HEIGHT")
-            z_label = "Z≈{:.3f}米".format(z) if z is not None else "Z=未观测"
+            z_text = "{:.3f}".format(z) if z is not None else None
+            if z_text == "-0.000":
+                z_text = "0.000"
+            z_label = "Z≈" + z_text + "米" if z_text is not None else "Z=未观测"
             position = ax.transData.transform(point)
             left = position[0] <= center[0]
             below = position[1] <= center[1]

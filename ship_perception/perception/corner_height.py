@@ -50,12 +50,13 @@ class CornerHeightMeasurement:
         if not len(points):
             row["reason"] = "NO_LOCAL_RAW_RETURNS"
             return row
-        # Keep the external corner quadrant of the measured opening, rather
-        # than using cargo or the hold floor to assign an upper-surface Z.
+        # The two adjacent exterior deck strips form an L around the opening.
+        # Keep their union: requiring the external quadrant of BOTH sides
+        # discards valid near-corner deck returns in a sparse scan.
         orientation = (
             1 if np.cross(polygon, np.roll(polygon, -1, axis=0)).sum() >= 0 else -1
         )
-        outside = np.ones(len(points), dtype=bool)
+        outside = np.zeros(len(points), dtype=bool)
         for edge_index in ((index - 1) % 4, index):
             start, end = polygon[edge_index], polygon[(edge_index + 1) % 4]
             inward_distance = (
@@ -63,7 +64,7 @@ class CornerHeightMeasurement:
                 * np.cross(end - start, points[:, :2] - start)
                 / np.linalg.norm(end - start)
             )
-            outside &= inward_distance <= 0
+            outside |= inward_distance <= 0
         points = points[outside]
         minimum = config["geometry"]["min_plane_points"]
         if len(points) < minimum:

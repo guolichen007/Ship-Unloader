@@ -17,8 +17,10 @@ class CornerHeightContracts(unittest.TestCase):
     def setUpClass(cls):
         cls.config, _ = resolve_config()
 
-    def scene(self):
-        u, v = np.meshgrid(np.arange(0.0, 10.01, 0.1), np.arange(0.0, 10.01, 0.1))
+    def scene(self, spacing=0.1):
+        u, v = np.meshgrid(
+            np.arange(0.0, 10.01, spacing), np.arange(0.0, 10.01, spacing)
+        )
         inside = (u > 2) & (u < 8) & (v > 2) & (v < 8)
         xyz = np.column_stack(
             (
@@ -115,6 +117,7 @@ class CornerHeightContracts(unittest.TestCase):
         ]
         exported = corner_coordinates(source, "sha")
         self.assertEqual(exported["coordinate_dimensions"], ["x", "y", "z"])
+        self.assertEqual(exported["schema"], "ship_perception.hatch_corners.2")
         self.assertEqual(
             [c["z_m"] for c in exported["hatches"][0]["corners"]], [3.1, 3.2, None, 3.4]
         )
@@ -125,3 +128,8 @@ class CornerHeightContracts(unittest.TestCase):
         source["geometry_only"]["hatches"][0]["corner_heights"][0]["z_m"] = float("nan")
         with self.assertRaisesRegex(ValueError, "INVALID_CORNER_HEIGHT"):
             corner_coordinates(source, "sha")
+
+    def test_sparse_returns_on_either_adjacent_deck_strip_are_retained(self):
+        xyz, result = self.scene(spacing=0.12)
+        heights = self.measure(xyz, result)
+        self.assertTrue(all(h["z_m"] is not None for h in heights))

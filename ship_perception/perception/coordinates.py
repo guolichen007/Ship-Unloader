@@ -104,7 +104,7 @@ def corner_coordinates(payload, source_result_sha256):
             )
         )
     return dict(
-        schema="ship_perception.hatch_corners.1",
+        schema="ship_perception.hatch_corners.2",
         source_result_schema=payload["schema"],
         source_result_sha256=source_result_sha256,
         software_git_sha=payload["software_git_sha"],
