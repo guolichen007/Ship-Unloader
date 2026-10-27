@@ -55,6 +55,73 @@ class VesselEvidence:
 
 
 @dataclass(frozen=True)
+class BoundarySourceSlice:
+    origin: object
+    point_indexes: np.ndarray
+    point_index_sha256: str
+    support_ids: tuple
+
+    @property
+    def vessel_id(self):
+        return self.origin.vessel_id
+
+    def identity(self):
+        return dict(
+            self.origin.identity(),
+            point_count=len(self.point_indexes),
+            point_index_sha256=self.point_index_sha256,
+            support_ids=list(self.support_ids),
+            origin_point_index_sha256=self.origin.point_index_sha256,
+            origin_support_ids=thaw(self.origin.public["source_support_ids"]),
+            attribution_method="UNIQUE_SUPPORT_MINUS_OTHER_SUPPORT_CELL_BOUNDS",
+            context_ownership_confirmed=False,
+        )
+
+
+def _mixed_support_slice(source, unique_supports, xyz, support_bounds, cell_m):
+    """Recover only points that cannot belong to any other original support.
+
+    B1 has already merged these support IDs into one unresolved source. Its
+    cell bounds are conservative necessary membership conditions. Removing
+    every other support's bounds proves a subset of the unique support union;
+    overlapping and missing-bound cases remain unattributed.
+    """
+    ids = set(source.public["source_support_ids"])
+    allowed = ids.intersection(unique_supports)
+    if not allowed or xyz is None or support_bounds is None or cell_m is None:
+        return None
+    if any(ident not in support_bounds for ident in ids):
+        return None
+    indexes = source.point_indexes
+    # Membership follows B1's float32 cell assignment. Geometry retains the
+    # original unmodified Raw values indexed by the resulting immutable slice.
+    xy = np.asarray(xyz[indexes, :2], dtype=np.float32)
+
+    def inside(ident):
+        bounds = np.asarray(support_bounds[ident], dtype=float)
+        return np.all(
+            (xy >= bounds[:2] - cell_m / 2) & (xy <= bounds[2:] + cell_m / 2), axis=1
+        )
+
+    keep = np.zeros(len(indexes), dtype=bool)
+    for ident in sorted(allowed):
+        keep |= inside(ident)
+    for ident in sorted(ids - allowed):
+        keep &= ~inside(ident)
+    values = np.frombuffer(
+        np.asarray(indexes[keep], dtype="<i8").tobytes(), dtype="<i8"
+    )
+    if not len(values):
+        return None
+    return BoundarySourceSlice(
+        source,
+        values,
+        hashlib.sha256(memoryview(values).cast("B")).hexdigest(),
+        tuple(sorted(allowed)),
+    )
+
+
+@dataclass(frozen=True)
 class BoundaryMeasurementContext:
     vessel_id: str
     sources: tuple
@@ -64,7 +131,7 @@ class BoundaryMeasurementContext:
     unattributed_sources: tuple = ()
 
     @classmethod
-    def build(cls, vessel, vessels):
+    def build(cls, vessel, vessels, xyz=None, support_bounds=None, cell_m=None):
         """Retain unresolved sibling measurements without changing ownership.
 
         A spatial support can contain several physical bodies. Siblings are
@@ -109,6 +176,17 @@ class BoundaryMeasurementContext:
                 key=lambda other: other.vessel_id,
             )
         )
+        slices = []
+        sibling_ids = {s.vessel_id for s in siblings}
+        for other in unattributed:
+            if other.vessel_id in sibling_ids:
+                continue
+            part = _mixed_support_slice(
+                other, unique_supports, xyz, support_bounds, cell_m
+            )
+            if part is not None:
+                slices.append(part)
+        siblings = tuple(sorted(siblings + tuple(slices), key=lambda s: s.vessel_id))
         sources = (vessel,) + siblings
         indexes = np.concatenate([source.point_indexes for source in sources])
         order = np.argsort(indexes, kind="stable")
@@ -133,7 +211,7 @@ class BoundaryMeasurementContext:
         )
 
     @classmethod
-    def build_all(cls, vessels):
+    def build_all(cls, vessels, xyz=None, support_bounds=None, cell_m=None):
         # Unrelated spatial supports need no pairwise vessel comparison.
         by_support = {}
         for vessel in vessels:
@@ -144,7 +222,9 @@ class BoundaryMeasurementContext:
             neighbors = {}
             for support in vessel.public["source_support_ids"]:
                 neighbors.update(by_support[support])
-            contexts.append(cls.build(vessel, neighbors.values()))
+            contexts.append(
+                cls.build(vessel, neighbors.values(), xyz, support_bounds, cell_m)
+            )
         return tuple(contexts)
 
     def identity(self):
@@ -160,7 +240,17 @@ class BoundaryMeasurementContext:
                 memoryview(self.point_source_codes).cast("B")
             ).hexdigest(),
             context_ownership_confirmed=False,
-            method="OWNED_CORE_AND_UNRESOLVED_SIBLINGS_OF_UNIQUE_SUPPORT_CORE",
+            method=(
+                "OWNED_CORE_AND_UNRESOLVED_SIBLINGS_OF_UNIQUE_SUPPORT_CORE"
+                + (
+                    "_WITH_CONSERVATIVE_MIXED_SUPPORT_SLICES"
+                    if any(
+                        isinstance(source, BoundarySourceSlice)
+                        for source in self.sources
+                    )
+                    else ""
+                )
+            ),
         )
 
 
@@ -199,7 +289,15 @@ class SceneEvidenceContext:
             software_sha,
             freeze(scene),
             tuple(vessels),
-            BoundaryMeasurementContext.build_all(vessels),
+            BoundaryMeasurementContext.build_all(
+                vessels,
+                frame.xyz,
+                {
+                    s["support_id"]: s["bbox_xy"]
+                    for s in scene["scene_support_candidates"]
+                },
+                private["grid"].cell_m,
+            ),
         )
 
     def boundary_context(self, vessel_id):

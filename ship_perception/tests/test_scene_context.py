@@ -20,6 +20,68 @@ class SceneContextContracts(unittest.TestCase):
     def setUpClass(cls):
         cls.config, _ = resolve_config()
 
+    def test_mixed_unresolved_source_recovers_only_proven_single_support_subset(self):
+        def source(name, indexes, status, supports):
+            values = np.frombuffer(
+                np.asarray(indexes, dtype="<i8").tobytes(), dtype="<i8"
+            )
+            return VesselEvidence(
+                freeze(
+                    dict(
+                        vessel_hypothesis_id=name,
+                        classification_status=status,
+                        source_support_ids=supports,
+                        local_axes=[[1, 0], [0, 1]],
+                        bbox_xy=[0, 0, 20, 3],
+                    )
+                ),
+                values,
+                name + "-hash",
+            )
+
+        xyz = np.array(
+            [[3, 1, 0], [4, 1, 0], [9, 1, 0], [12, 1, 0], [5, 1, 0]], dtype=float
+        )
+        core = source("core", [0], "VESSEL_HYPOTHESIS", ["S0"])
+        mixed = source("mixed", [1, 2, 3], "UNRESOLVED", ["S0", "S1"])
+        bounds = dict(S0=[0, 0, 10, 3], S1=[8, 0, 20, 3])
+        context = BoundaryMeasurementContext.build(
+            core, [core, mixed], xyz, bounds, 1.0
+        )
+        np.testing.assert_array_equal(context.point_indexes, [0, 1])
+        np.testing.assert_array_equal(core.point_indexes, [0])
+        np.testing.assert_array_equal(mixed.point_indexes, [1, 2, 3])
+        self.assertFalse(context.identity()["context_ownership_confirmed"])
+        part = context.sources[1]
+        self.assertEqual(part.identity()["origin_point_index_sha256"], "mixed-hash")
+        self.assertEqual(part.identity()["support_ids"], ["S0"])
+        with self.assertRaises(ValueError):
+            part.point_indexes.setflags(write=True)
+        # Bounds overlap and the unrelated support stay unknown. Missing
+        # support bounds and a second resolved core both forbid borrowing.
+        missing = BoundaryMeasurementContext.build(
+            core, [core, mixed], xyz, dict(S0=bounds["S0"]), 1.0
+        )
+        np.testing.assert_array_equal(missing.point_indexes, [0])
+        second = source("second", [4], "VESSEL_HYPOTHESIS", ["S0"])
+        separated = BoundaryMeasurementContext.build(
+            core, [core, mixed, second], xyz, bounds, 1.0
+        )
+        np.testing.assert_array_equal(separated.point_indexes, [0])
+        other_xyz = xyz.copy()
+        other_xyz[4, 0] = 13.0
+        other_core = source("other", [4], "VESSEL_HYPOTHESIS", ["S1"])
+        isolated = BoundaryMeasurementContext.build(
+            core, [core, mixed, other_core], other_xyz, bounds, 1.0
+        )
+        np.testing.assert_array_equal(isolated.point_indexes, [0, 1])
+        self.assertEqual(
+            isolated.identity(),
+            BoundaryMeasurementContext.build(
+                core, [other_core, mixed, core], other_xyz, bounds, 1.0
+            ).identity(),
+        )
+
     def test_frozen_context_rejects_same_xyz_different_wire_identity(self):
         from ship_perception.r1_static.heightmap_batch import RESEARCH_CONFIG
 
