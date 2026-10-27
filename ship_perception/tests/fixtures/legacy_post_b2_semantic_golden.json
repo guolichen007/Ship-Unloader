@@ -1,0 +1,363 @@
+{
+  "schema": "ship_perception.legacy_post_b2_semantic_golden.1",
+  "source_sha": "51410e3f4f932fcbdcc7fc88b8f9979c60c2b954",
+  "usage": "PATH_AVAILABILITY_NOT_STEEL_GOLDEN",
+  "scenes": [
+    {
+      "input_sha256": "d266e36b17a6c9a374ecdc783c4c1bcc0a7814d9d4735a528080701045d9f69c",
+      "candidate_count": 2,
+      "candidates": [
+        {
+          "candidate_id": "legacy:H001",
+          "b2_proposal_id": "V0001:H0006",
+          "separator_topology": "TWO_MEASURED_FACES",
+          "side_evidence_availability": {
+            "U0": {
+              "raw3d": true,
+              "bev": true
+            },
+            "U1": {
+              "raw3d": true,
+              "bev": true
+            },
+            "V0": {
+              "raw3d": true,
+              "bev": true
+            },
+            "V1": {
+              "raw3d": true,
+              "bev": true
+            }
+          },
+          "support_side_count": 4,
+          "profile_observation_count": null,
+          "profile_evidence_types": [
+            "OBSERVED_3D_FACE",
+            "OBSERVED_PROFILE_BREAK"
+          ],
+          "local_physical_candidate_available": true,
+          "steel_role_certified": false,
+          "profile_observations_available": true
+        },
+        {
+          "candidate_id": "legacy:H000",
+          "b2_proposal_id": "V0001:H0011",
+          "separator_topology": "TWO_MEASURED_FACES",
+          "side_evidence_availability": {
+            "U0": {
+              "raw3d": true,
+              "bev": true
+            },
+            "U1": {
+              "raw3d": true,
+              "bev": true
+            },
+            "V0": {
+              "raw3d": true,
+              "bev": true
+            },
+            "V1": {
+              "raw3d": true,
+              "bev": true
+            }
+          },
+          "support_side_count": 4,
+          "profile_observation_count": null,
+          "profile_evidence_types": [
+            "OBSERVED_3D_FACE",
+            "OBSERVED_PROFILE_BREAK"
+          ],
+          "local_physical_candidate_available": true,
+          "steel_role_certified": false,
+          "profile_observations_available": true
+        }
+      ]
+    },
+    {
+      "input_sha256": "509d36b0a09908b5d7ec5890ced38912f37fa491c54a2d6769ec2afa076a0d92",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "candidate_id": "legacy:H000",
+          "b2_proposal_id": "V0001:H0000",
+          "separator_topology": "UNSPLIT",
+          "side_evidence_availability": {
+            "U0": {
+              "raw3d": true,
+              "bev": true
+            },
+            "U1": {
+              "raw3d": true,
+              "bev": true
+            },
+            "V0": {
+              "raw3d": true,
+              "bev": true
+            },
+            "V1": {
+              "raw3d": true,
+              "bev": true
+            }
+          },
+          "support_side_count": 4,
+          "profile_observation_count": null,
+          "profile_evidence_types": [
+            "OBSERVED_3D_FACE",
+            "OBSERVED_PROFILE_BREAK"
+          ],
+          "local_physical_candidate_available": true,
+          "steel_role_certified": false,
+          "profile_observations_available": true
+        }
+      ]
+    },
+    {
+      "input_sha256": "555b4857f35248bfc744b7cb12b66aa3c64d598db96b7207ccaa6cca475b44e6",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "candidate_id": "legacy:H000",
+          "b2_proposal_id": "V0001:H0000",
+          "separator_topology": "UNSPLIT",
+          "side_evidence_availability": {
+            "U0": {
+              "raw3d": true,
+              "bev": true
+            },
+            "U1": {
+              "raw3d": true,
+              "bev": true
+            },
+            "V0": {
+              "raw3d": true,
+              "bev": true
+            },
+            "V1": {
+              "raw3d": true,
+              "bev": true
+            }
+          },
+          "support_side_count": 4,
+          "profile_observation_count": null,
+          "profile_evidence_types": [
+            "OBSERVED_3D_FACE",
+            "OBSERVED_PROFILE_BREAK"
+          ],
+          "local_physical_candidate_available": true,
+          "steel_role_certified": false,
+          "profile_observations_available": true
+        }
+      ]
+    },
+    {
+      "input_sha256": "18f5b28b70dc18f1024a223ebfd643ecd097f5b6ec2e15bb3ea78800412ca72e",
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "candidate_id": "legacy:H000",
+          "b2_proposal_id": null,
+          "separator_topology": "UNSPLIT",
+          "side_evidence_availability": {
+            "U0": {
+              "raw3d": true,
+              "bev": true
+            },
+            "U1": {
+              "raw3d": true,
+              "bev": true
+            },
+            "V0": {
+              "raw3d": false,
+              "bev": false
+            },
+            "V1": {
+              "raw3d": true,
+              "bev": true
+            }
+          },
+          "support_side_count": 3,
+          "profile_observation_count": null,
+          "profile_evidence_types": [
+            "OBSERVED_3D_FACE",
+            "OBSERVED_PROFILE_BREAK"
+          ],
+          "local_physical_candidate_available": true,
+          "steel_role_certified": false,
+          "profile_observations_available": true
+        }
+      ]
+    },
+    {
+      "input_sha256": "cc3a2550bc3b75a21e0b1d02fffa67f9d71d4859a1fd7735f013bde84ce97f2a",
+      "candidate_count": 2,
+      "candidates": [
+        {
+          "candidate_id": "legacy:H000",
+          "b2_proposal_id": "V0000:H0058",
+          "separator_topology": "UNSPLIT",
+          "side_evidence_availability": {
+            "U0": {
+              "raw3d": true,
+              "bev": true
+            },
+            "U1": {
+              "raw3d": false,
+              "bev": false
+            },
+            "V0": {
+              "raw3d": false,
+              "bev": false
+            },
+            "V1": {
+              "raw3d": true,
+              "bev": true
+            }
+          },
+          "support_side_count": 2,
+          "profile_observation_count": null,
+          "profile_evidence_types": [
+            "OBSERVED_3D_FACE",
+            "OBSERVED_PROFILE_BREAK"
+          ],
+          "local_physical_candidate_available": true,
+          "steel_role_certified": false,
+          "profile_observations_available": true
+        },
+        {
+          "candidate_id": "legacy:H001",
+          "b2_proposal_id": "V0000:H0084",
+          "separator_topology": "UNSPLIT",
+          "side_evidence_availability": {
+            "U0": {
+              "raw3d": true,
+              "bev": true
+            },
+            "U1": {
+              "raw3d": true,
+              "bev": true
+            },
+            "V0": {
+              "raw3d": false,
+              "bev": false
+            },
+            "V1": {
+              "raw3d": true,
+              "bev": true
+            }
+          },
+          "support_side_count": 3,
+          "profile_observation_count": null,
+          "profile_evidence_types": [
+            "OBSERVED_3D_FACE",
+            "OBSERVED_PROFILE_BREAK"
+          ],
+          "local_physical_candidate_available": true,
+          "steel_role_certified": false,
+          "profile_observations_available": true
+        }
+      ]
+    },
+    {
+      "input_sha256": "269bc4d62927501fd081da1326f61733ee9574a32dd12aa94771499c49e42cb7",
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "candidate_id": "legacy:H000",
+          "b2_proposal_id": "V0001:H0003",
+          "separator_topology": "UNSPLIT",
+          "side_evidence_availability": {
+            "U0": {
+              "raw3d": true,
+              "bev": true
+            },
+            "U1": {
+              "raw3d": true,
+              "bev": true
+            },
+            "V0": {
+              "raw3d": false,
+              "bev": false
+            },
+            "V1": {
+              "raw3d": false,
+              "bev": false
+            }
+          },
+          "support_side_count": 2,
+          "profile_observation_count": null,
+          "profile_evidence_types": [
+            "OBSERVED_3D_FACE",
+            "OBSERVED_PROFILE_BREAK"
+          ],
+          "local_physical_candidate_available": true,
+          "steel_role_certified": false,
+          "profile_observations_available": true
+        },
+        {
+          "candidate_id": "legacy:H002",
+          "b2_proposal_id": "V0001:H0002",
+          "separator_topology": "UNSPLIT",
+          "side_evidence_availability": {
+            "U0": {
+              "raw3d": true,
+              "bev": true
+            },
+            "U1": {
+              "raw3d": true,
+              "bev": true
+            },
+            "V0": {
+              "raw3d": false,
+              "bev": false
+            },
+            "V1": {
+              "raw3d": false,
+              "bev": false
+            }
+          },
+          "support_side_count": 2,
+          "profile_observation_count": null,
+          "profile_evidence_types": [
+            "OBSERVED_3D_FACE",
+            "OBSERVED_PROFILE_BREAK"
+          ],
+          "local_physical_candidate_available": true,
+          "steel_role_certified": false,
+          "profile_observations_available": true
+        },
+        {
+          "candidate_id": "legacy:H001",
+          "b2_proposal_id": null,
+          "separator_topology": "UNSPLIT",
+          "side_evidence_availability": {
+            "U0": {
+              "raw3d": true,
+              "bev": true
+            },
+            "U1": {
+              "raw3d": true,
+              "bev": true
+            },
+            "V0": {
+              "raw3d": false,
+              "bev": false
+            },
+            "V1": {
+              "raw3d": false,
+              "bev": false
+            }
+          },
+          "support_side_count": 2,
+          "profile_observation_count": null,
+          "profile_evidence_types": [
+            "OBSERVED_3D_FACE",
+            "OBSERVED_PROFILE_BREAK"
+          ],
+          "local_physical_candidate_available": true,
+          "steel_role_certified": false,
+          "profile_observations_available": true
+        }
+      ]
+    }
+  ]
+}
