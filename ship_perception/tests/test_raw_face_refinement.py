@@ -9,6 +9,7 @@ from ship_perception.perception.context import VesselEvidence, freeze
 from ship_perception.perception.local_evidence import VesselLocalEvidence
 from ship_perception.perception.final_boundary import FinalBoundaryRefiner
 from ship_perception.perception.raw_face_refinement import raw_face_section
+from ship_perception.perception.raw_mode_consensus import resolve_section_modes
 from ship_perception.r1_static.hatch_proposal import _opening_evidence
 from ship_perception.r1_static.run import resolve_config
 
@@ -70,6 +71,98 @@ def context(points):
 
 
 class RawFaceRefinement(unittest.TestCase):
+    def raw_mode(self, rho):
+        return dict(
+            status="UNIQUE_SIGNED_RAW_STEP",
+            rho=rho,
+            modes=[rho],
+            continuous=[rho, 0.05, 25, True],
+            height=dict(transition=True),
+        )
+
+    def test_unique_raw_sections_resolve_only_one_continuous_measured_mode(self):
+        cfg, _ = resolve_config()
+        spans = [(0, 3), (3, 6), (6, 9), (9, 12)]
+        records = [
+            self.raw_mode(10),
+            dict(
+                status="MULTIMODE_BOUNDARY_CONFLICT",
+                modes=[10.06, 11.2],
+                mode_candidates=[self.raw_mode(10.06), self.raw_mode(11.2)],
+            ),
+            dict(
+                status="MULTIMODE_BOUNDARY_CONFLICT",
+                modes=[10.12, 11.8],
+                mode_candidates=[self.raw_mode(10.12), self.raw_mode(11.8)],
+            ),
+            self.raw_mode(10.18),
+        ]
+        result = resolve_section_modes(records, spans, cfg)
+        self.assertEqual(
+            [r["continuous"][0] for r in result], [10, 10.06, 10.12, 10.18]
+        )
+        self.assertEqual(records[1]["status"], "MULTIMODE_BOUNDARY_CONFLICT")
+
+    def test_two_spatially_supported_raw_line_families_stay_unresolved(self):
+        cfg, _ = resolve_config()
+        spans = [(0, 3), (3, 6), (6, 9), (9, 12)]
+        records = [
+            dict(
+                status="MULTIMODE_BOUNDARY_CONFLICT",
+                modes=[10, 11],
+                mode_candidates=[self.raw_mode(10), self.raw_mode(11)],
+            )
+            for _ in spans
+        ]
+        result = resolve_section_modes(records, spans, cfg)
+        self.assertTrue(
+            all(r["status"] == "MULTIMODE_BOUNDARY_CONFLICT" for r in result)
+        )
+
+    def test_second_stable_family_is_not_hidden_by_two_unique_end_sections(self):
+        cfg, _ = resolve_config()
+        spans = [(i * 3, (i + 1) * 3) for i in range(6)]
+        ambiguous = dict(
+            status="MULTIMODE_BOUNDARY_CONFLICT",
+            modes=[10, 11],
+            mode_candidates=[self.raw_mode(10), self.raw_mode(11)],
+        )
+        records = [
+            self.raw_mode(10),
+            ambiguous,
+            ambiguous,
+            ambiguous,
+            ambiguous,
+            self.raw_mode(10),
+        ]
+        self.assertEqual(resolve_section_modes(records, spans, cfg), records)
+
+    def test_two_equally_consistent_alternatives_are_never_averaged(self):
+        cfg, _ = resolve_config()
+        spans = [(0, 3), (3, 6), (6, 9), (9, 12)]
+        ambiguous = dict(
+            status="MULTIMODE_BOUNDARY_CONFLICT",
+            modes=[9.7, 10.3],
+            mode_candidates=[self.raw_mode(9.7), self.raw_mode(10.3)],
+        )
+        records = [self.raw_mode(10), ambiguous, ambiguous, self.raw_mode(10)]
+        self.assertEqual(resolve_section_modes(records, spans, cfg), records)
+
+    def test_raw_line_consensus_cannot_fill_a_missing_physical_section(self):
+        cfg, _ = resolve_config()
+        spans = [(0, 3), (3, 6), (6, 9), (9, 12)]
+        records = [
+            self.raw_mode(10),
+            dict(
+                status="MULTIMODE_BOUNDARY_CONFLICT",
+                modes=[10, 11],
+                mode_candidates=[self.raw_mode(10), self.raw_mode(11)],
+            ),
+            dict(status="INSUFFICIENT_RAW_SUPPORT", modes=[]),
+            self.raw_mode(10),
+        ]
+        self.assertEqual(resolve_section_modes(records, spans, cfg), records)
+
     def test_measured_inner_face_excludes_higher_terrace_with_mixed_returns(self):
         cfg, cache, proposal = context(terrace_scene())
         with mock.patch.object(

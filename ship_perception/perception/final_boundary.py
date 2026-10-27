@@ -214,6 +214,16 @@ class FinalBoundaryRefiner:
             side_elapsed[name] = time.perf_counter() - side_started
         for name, elapsed in side_elapsed.items():
             self.side_elapsed.setdefault(name, {})["RAW_MEASUREMENT"] = elapsed
+        from .raw_mode_consensus import resolve_section_modes
+
+        for name, axis, _, _ in SIDE_SPECS:
+            edges = physical_sections((box[1 - axis], box[3 - axis]), cell, config)
+            spans = list(zip(edges[:-1], edges[1:]))
+            records = [raw_sections[name, i] for i in range(len(spans))]
+            for i, record in enumerate(
+                resolve_section_modes(records, spans, config, self.budget)
+            ):
+                raw_sections[name, i] = record
         self.profiler["last_raw_side_elapsed_s"] = side_elapsed
         # Raster phases only query boundary bands. All original raw points
         # remain available to the spatial index and raw section measurements.
@@ -714,7 +724,27 @@ class FinalBoundaryRefiner:
                     >= minimum
                 )
                 if prior_positive >= minimum and prior_adjacent:
-                    continue
+                    prior_raw = [
+                        self._raw_section(points, axis, box[position], s, sign)
+                        for s in spans
+                    ]
+                    from .raw_mode_consensus import resolve_section_modes
+
+                    prior_raw = resolve_section_modes(
+                        prior_raw, spans, config, self.budget
+                    )
+                    unique_raw = sum(
+                        r["status"] == "UNIQUE_SIGNED_RAW_STEP"
+                        and r["height"]["transition"]
+                        and r["continuous"][3]
+                        for r in prior_raw
+                    )
+                    state["prior_unique_raw_sections"] = unique_raw
+                    # Height polarity can be clear while two step positions
+                    # remain ambiguous. Only unique Raw geometry may skip
+                    # independent structural/normal-face resolution.
+                    if unique_raw >= minimum:
+                        continue
                 candidates = proposal.get("measured_side_candidates", {}).get(name, [])
                 measured = []
                 candidate_heights = {}
@@ -738,12 +768,12 @@ class FinalBoundaryRefiner:
                         for s in spans
                     ]
                     candidate_heights[anchor] = heights
-                    positive = sum(h["transition"] for h in heights)
-                    if positive < minimum:
-                        continue
                     raw = [
                         self._raw_section(points, axis, anchor, s, sign) for s in spans
                     ]
+                    from .raw_mode_consensus import resolve_section_modes
+
+                    raw = resolve_section_modes(raw, spans, config, self.budget)
                     unique = [
                         s
                         for s in raw
@@ -1078,6 +1108,34 @@ class FinalBoundaryRefiner:
                 groups.append([rho])
         measured = [float(np.median(group)) for group in groups]
         if len(measured) != 1:
+            candidates = []
+            for mode_rho in measured:
+                width = config["geometry"]["candidate_voxel_m"]
+                continuous = _continuous_rho(
+                    profile.window(mode_rho - width, mode_rho + width),
+                    self.observations,
+                    axis,
+                    mode_rho,
+                    span,
+                    sign,
+                    config,
+                )
+                height = profile.height(continuous[0], sign)
+                if (
+                    continuous[1] <= config["boundary"]["corner_join_m"]
+                    and continuous[3]
+                    and height["transition"]
+                ):
+                    candidates.append(
+                        dict(
+                            status="UNIQUE_SIGNED_RAW_STEP",
+                            rho=mode_rho,
+                            modes=[mode_rho],
+                            continuous=list(continuous),
+                            height=height,
+                            profile_method="EXACT_RAW_MODE_ALTERNATIVE",
+                        )
+                    )
             return dict(
                 status=(
                     "MULTIMODE_BOUNDARY_CONFLICT"
@@ -1085,6 +1143,7 @@ class FinalBoundaryRefiner:
                     else "INSUFFICIENT_RAW_SUPPORT"
                 ),
                 modes=measured,
+                mode_candidates=candidates,
             )
         width = config["geometry"]["candidate_voxel_m"]
         continuous = _continuous_rho(

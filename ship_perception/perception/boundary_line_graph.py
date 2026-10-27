@@ -27,7 +27,10 @@ class BoundaryLineGraph:
             ]
             # A measured vertical face with unknown polarity may nominate a
             # search. It is never labelled as a signed physical edge here.
-            self._signs[key] = measured or ([1, -1] if family["normal_face"] else [])
+            # Cargo can reverse a height comparison across a real coaming.
+            # A verified face nominates either side at this cheap stage;
+            # candidate-local Raw measurement must establish opening polarity.
+            self._signs[key] = [1, -1] if family["normal_face"] else measured
         return self._signs[key]
 
     def overlap(self, family, span):

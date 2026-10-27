@@ -36,6 +36,24 @@ class RecallPerfContracts(unittest.TestCase):
             ),
         )
 
+    def test_cargo_height_polarity_cannot_remove_a_verified_face_search_side(self):
+        face = dict(
+            provider_ids=("face",),
+            rho=10.0,
+            interval=(0.0, 20.0),
+            raw3d=True,
+            bev=True,
+            normal_face=True,
+        )
+        graph = BoundaryLineGraph(
+            {0: [face], 1: []},
+            self.config,
+            height=lambda axis, rho, span, sign: sign * 2.0,
+        )
+        self.assertEqual(set(graph.signs(0, face)), {1, -1})
+        nominal = dict(face, provider_ids=("height",), normal_face=False)
+        self.assertEqual(graph.signs(0, nominal), [1])
+
     def test_scheduler_measurable_enclosure_precedes_thin_many_face_strip(self):
         p = self.proposal(ident="broad")
         broad = PhysicalBoundaryQuery("broad", "V", p.bounds, (p,), ())
@@ -56,6 +74,37 @@ class RecallPerfContracts(unittest.TestCase):
         self.assertEqual(
             [q.query_id for q, _ in ordered], [broad.query_id, thin.query_id]
         )
+
+    def test_narrow_regions_cannot_preempt_the_next_measurable_hypothesis(self):
+        p = self.proposal()
+        a = PhysicalBoundaryQuery("A", "V", p.bounds, (p,), ())
+        b = PhysicalBoundaryQuery("B", "V", p.bounds, (p,), ())
+        p = self.proposal(box=(40, 0, 60, 1))
+        narrow = PhysicalBoundaryQuery("N", "V", p.bounds, (p,), ())
+        ordered = list(
+            PrecisionScheduler([(a, {}), (b, {}), (narrow, {})], self.config)
+        )
+        self.assertEqual([q.query_id for q, _ in ordered], ["A", "B", "N"])
+
+    def test_parent_overlap_cannot_put_two_adjacent_openings_in_one_search_region(self):
+        ready = []
+        for ident, box in [
+            ("parent", (0, 0, 60, 12)),
+            ("left", (0, 0, 28, 12)),
+            ("right", (32, 0, 60, 12)),
+        ]:
+            p = self.proposal(box=box)
+            ready.append((PhysicalBoundaryQuery(ident, "V", p.bounds, (p,), ()), {}))
+        scheduler = PrecisionScheduler(ready, self.config)
+        self.assertGreaterEqual(len(scheduler.regions), 2)
+        regions = {
+            q.query_id: i
+            for i, r in enumerate(scheduler.regions)
+            for q, _ in r["queue"]
+        }
+        self.assertNotEqual(regions["left"], regions["right"])
+        self.assertNotEqual(regions["parent"], regions["left"])
+        self.assertNotEqual(regions["parent"], regions["right"])
 
     def test_scheduler_alternates_independent_paths_within_one_region(self):
         p = self.proposal()
@@ -92,7 +141,15 @@ class RecallPerfContracts(unittest.TestCase):
         )
         historical = (
             PhysicalBoundaryQuery("L", "V", p.bounds, (p,), ()),
-            dict(legacy_post_b2=post),
+            dict(
+                legacy_post_b2=post,
+                deck_ring=dict(
+                    sides={
+                        name: dict(vertical_face_support=True)
+                        for name in ("U0", "V0", "V1")
+                    }
+                ),
+            ),
         )
         measured = (
             PhysicalBoundaryQuery("S", "V", p.bounds, (p,), ()),
@@ -206,10 +263,11 @@ class RecallPerfContracts(unittest.TestCase):
         )
         rows = graph.enclosures()
         adjacent = [r for r in rows if r["closure_kind"] == "ADJACENT"]
-        self.assertEqual(len(adjacent), 12)
-        self.assertTrue(
-            all(r["bounds_axial"][2] - r["bounds_axial"][0] == 20 for r in adjacent)
-        )
+        widths = [r["bounds_axial"][2] - r["bounds_axial"][0] for r in adjacent]
+        self.assertEqual(widths.count(20), 12)
+        # Reversed face polarity can nominate the next closure across a deck
+        # gap. These eleven alternatives are searches, not accepted hatches.
+        self.assertEqual(widths.count(21), 11)
         self.assertTrue(all(not r["signed_roles_resolved"] for r in rows))
         outer = [r for r in rows if r["closure_kind"] == "SUPPORTED_OUTER_ENVELOPE"]
         self.assertTrue(outer)

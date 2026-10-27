@@ -26,6 +26,20 @@ class PrecisionScheduler:
                     if r["topology"] == separator
                     and box_overlap(r["bounds"], query.bounds)
                     >= config["roi"]["min_enclosure_ratio"]
+                    and sum(
+                        abs(a - b) <= config["roi"]["support_search_m"]
+                        for a, b in zip(r["bounds"], query.bounds)
+                    )
+                    >= 3
+                    and all(
+                        abs(
+                            (r["bounds"][axis] + r["bounds"][axis + 2])
+                            - (query.bounds[axis] + query.bounds[axis + 2])
+                        )
+                        / 2
+                        <= config["roi"]["support_search_m"]
+                        for axis in (0, 1)
+                    )
                 ),
                 None,
             )
@@ -65,8 +79,8 @@ class PrecisionScheduler:
         )
         return (
             -int(nominal_capacity >= 3),
-            -int(self.has_post_structure(row)),
             -int(coaming >= 3),
+            -int(self.has_post_structure(row)),
             -coaming,
             -int(
                 post.get("derived_search_evidence", False)
@@ -83,8 +97,14 @@ class PrecisionScheduler:
         # Each region gets one visit per round. There is no fixed hatch count
         # or top-K: every unexplained region remains in the pending queues.
         while any(r["queue"] for r in self.regions):
+            capacity_tier = min(
+                self.rank(r["queue"][0])[0] for r in self.regions if r["queue"]
+            )
             for region in self.regions:
-                if region["queue"]:
+                if (
+                    region["queue"]
+                    and self.rank(region["queue"][0])[0] == capacity_tier
+                ):
                     queue = region["queue"]
                     first_tier = self.rank(queue[0])[0]
                     # Independent proposal paths must get a turn within the
