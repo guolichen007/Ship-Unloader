@@ -5,6 +5,8 @@ retained in every derived physical candidate's provenance. No global legacy
 pipeline or legacy final precision is executed here.
 """
 
+from .precision_diagnostics import stage as precision_stage, side_completed
+
 import hashlib
 import numpy as np
 
@@ -24,6 +26,7 @@ class LegacyPostB2EvidenceAdapter:
         self.evidence = {}
         self.profile_cache = {}
 
+    @precision_stage("raw_profile")
     def measure_profiles(self, query, probe, measurement):
         """Reuse the historical per-segment Raw profile primitive locally."""
         from scipy.spatial import cKDTree

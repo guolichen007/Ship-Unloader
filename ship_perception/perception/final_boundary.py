@@ -1,5 +1,7 @@
 """Single four-side refiner using existing raw and multi-section primitives."""
 
+from .precision_diagnostics import stage as precision_stage, side_completed
+
 import warnings
 import copy
 import json
@@ -29,6 +31,10 @@ from .raw_face_refinement import (
     raw_face_section,
     primary_core_attachment,
 )
+
+
+_section_transition = precision_stage("raster")(_section_transition)
+guarded_intersections = precision_stage("corner")(guarded_intersections)
 
 
 def polygon(box):
@@ -254,6 +260,7 @@ class FinalBoundaryRefiner:
                     raw_normal_face=role.get("raw_normal_face"),
                 )
                 report["supported_side_count"] = len(cached)
+                side_completed(name, "RAW_SIDE_INVESTIGATION", "STRONG_UNIQUE_EDGE")
             report["status"] = "COMPLETED"
         finally:
             report["elapsed_s"] = time.perf_counter() - started
@@ -574,6 +581,7 @@ class FinalBoundaryRefiner:
                         and s["height"].get("transition", False)
                         and s["raw_search"]["status"] != "MULTIMODE_BOUNDARY_CONFLICT"
                     ]
+                    side_completed(name, "RASTER_PHASE_" + str(phase), "MEASURED")
                     estimate, fit = self._fit(good, box[position])
                     phase_results[name].append(
                         dict(
@@ -848,6 +856,7 @@ class FinalBoundaryRefiner:
             geometry_role="REVIEW_NOT_CERTIFIED_STEEL",
         )
 
+    @precision_stage("anchor_role")
     def _inner_role_anchors(self, proposal, box, cell):
         """Reject wrong-polarity shell lines before counting geometric support.
 
@@ -1375,6 +1384,7 @@ class FinalBoundaryRefiner:
             return dict(unresolved_face_candidates=[public_face(f) for f in qualified])
         return qualified[0] if qualified else None
 
+    @precision_stage("raw_profile")
     def _raw_section(self, roi, axis, anchor, span, sign, measured_face=None):
         """Search the physical ROI with the existing raw midpoint primitive.
 
@@ -1432,6 +1442,7 @@ class FinalBoundaryRefiner:
             )
         return self.raw_section_cache[key]
 
+    @precision_stage("raw_edge_search")
     def _search_raw_section(self, roi, axis, anchor, span, sign):
         config = self.config
         search = config["roi"]["boundary_search_m"]
@@ -1615,6 +1626,7 @@ class FinalBoundaryRefiner:
             ),
         )
 
+    @precision_stage("height")
     def _height_measurement(self, points, axis, rho, span, sign, config):
         key = (axis, float(rho), tuple(span), sign)
         if key not in self.height_cache:
@@ -1623,6 +1635,7 @@ class FinalBoundaryRefiner:
             )
         return self.height_cache[key]
 
+    @precision_stage("raw_edge_search")
     def _continuous_measurement(
         self, points, observations, axis, rho, span, sign, config
     ):
@@ -1633,6 +1646,7 @@ class FinalBoundaryRefiner:
             )
         return self.continuous_cache[key]
 
+    @precision_stage("line_fit")
     def _fit(self, rows, fallback):
         from .consensus import SpatialEvidenceConsensus
 

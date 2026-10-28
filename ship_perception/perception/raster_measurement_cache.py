@@ -1,5 +1,7 @@
 """Lazy exact Raw quantiles on a shared vessel-local four-phase lattice."""
 
+from .precision_diagnostics import stage as precision_stage, side_completed
+
 from collections import OrderedDict
 import numpy as np
 from ship_perception.r1_static.height_grid import R1HeightGrid
@@ -64,6 +66,7 @@ class RasterPhaseMeasurementCache:
             self.bytes += byte_count
         return tile
 
+    @precision_stage("raster")
     def grid(self, box, margin, phase):
         origin = self.origin + np.asarray(phase) * self.cell
         low = np.floor((np.asarray(box[:2]) - margin - origin) / self.cell).astype(int)

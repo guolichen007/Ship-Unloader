@@ -141,6 +141,7 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
     output_dir.mkdir(parents=True, exist_ok=True)
     final = output_dir / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     ownership = payload.pop("_ownership_indexes", {})
+    runtime_patch = payload.pop("_runtime_patch", None)
     payload["intensity_fusion"] = auxiliary_review(payload, frame, ownership)
     payload["intensity_status"]["used"] = payload["intensity_fusion"]["intensity_used"]
     with tempfile.TemporaryDirectory(
@@ -148,6 +149,17 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
     ) as temporary:
         staged = Path(temporary) / "result"
         staged.mkdir()
+        identity = payload.get("software_source_identity", {})
+        if identity.get("git_worktree_dirty") is True:
+            if runtime_patch is None:
+                from .runtime_patch import git_source_state
+
+                _, runtime_patch = git_source_state(Path(__file__).resolve().parents[2])
+            if runtime_patch is None or hashlib.sha256(
+                runtime_patch.encode("utf-8")
+            ).hexdigest() != identity.get("git_diff_sha256"):
+                raise ValueError("RUNTIME_PATCH_IDENTITY_MISMATCH")
+            (staged / "runtime_patch.diff").write_bytes(runtime_patch.encode("utf-8"))
         import os
 
         with tempfile.TemporaryDirectory(prefix="ship_hatch_mpl_") as mpl_cache:

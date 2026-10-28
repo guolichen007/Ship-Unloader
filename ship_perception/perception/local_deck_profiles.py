@@ -1,5 +1,7 @@
 """Candidate-local Raw deck families; ambiguous planes never become one deck."""
 
+from .precision_diagnostics import stage as precision_stage, side_completed
+
 from collections import OrderedDict
 import hashlib
 import json
@@ -29,6 +31,7 @@ class LocalDeckProfileCache:
         counters = self.measurement.counters
         counters[name] = counters.get(name, 0) + 1
 
+    @precision_stage("height")
     def section(self, axis, anchor, span, sign, profile_at=None):
         key = (axis, float(anchor), tuple(span), sign, profile_at)
         if self.enabled and key in self.entries:
@@ -172,6 +175,7 @@ class LocalDeckProfileCache:
             for lo, hi in zip(edges[:-1], edges[1:])
         ]
 
+    @precision_stage("height")
     def section_evidence(
         self, axis, anchor, span, sign, face=None, whole=None, patches=None
     ):

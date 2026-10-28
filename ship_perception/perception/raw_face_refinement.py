@@ -1,5 +1,7 @@
 """Measured local-normal faces resolve a mixed-return height profile, not steel role."""
 
+from .precision_diagnostics import stage as precision_stage, side_completed
+
 import hashlib
 
 import numpy as np
@@ -7,6 +9,9 @@ import numpy as np
 from ship_perception.r1_static.boundary_refinement import _fit_line
 from ship_perception.r1_static.rectangle_refinement import _continuous_rho
 from .sections import robust_height_support
+
+
+_fit_line = precision_stage("line_fit")(_fit_line)
 
 
 def face_position(face, along):
@@ -18,6 +23,7 @@ def face_position(face, along):
     )
 
 
+@precision_stage("normal")
 def measured_faces(normals, axis, anchor, span, spans, config):
     """Reuse the existing robust line fit on independently qualified 3D points."""
     # Fit complete faces within the existing side search ROI. Clipping each
@@ -159,6 +165,7 @@ def primary_core_attachment(points, indexes, axis, config):
     )
 
 
+@precision_stage("height")
 def raw_face_section(xyz, face, axis, span, sign, config, local_profiles=None):
     """A raw-normal measurement is distinct from a paired-height midpoint."""
     points = face["points"]

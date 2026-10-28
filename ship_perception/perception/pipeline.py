@@ -64,26 +64,10 @@ def source_identity():
         digest.update(path.relative_to(package).as_posix().encode())
         digest.update(b"\0")
         digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
-    dirty = None
-    if (package.parent / ".git").exists():
-        dirty = bool(
-            subprocess.check_output(
-                [
-                    "git",
-                    "status",
-                    "--porcelain",
-                    "--untracked-files=normal",
-                    "--",
-                    "ship_perception",
-                    "scripts",
-                    "requirements-ros.txt",
-                ],
-                cwd=str(package.parent),
-                stderr=subprocess.DEVNULL,
-                text=True,
-            ).strip()
-        )
-    return dict(runtime_source_sha256=digest.hexdigest(), git_worktree_dirty=dirty)
+    from .runtime_patch import git_source_state
+
+    state, _ = git_source_state(package.parent)
+    return dict(runtime_source_sha256=digest.hexdigest(), **state)
 
 
 def numerical_environment():

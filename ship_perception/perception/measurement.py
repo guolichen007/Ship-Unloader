@@ -1,5 +1,7 @@
 """Exact raw-point indexing and once-per-section normal-coordinate profiles."""
 
+from .precision_diagnostics import stage as precision_stage, side_completed
+
 from dataclasses import dataclass, field
 from collections import OrderedDict
 import numpy as np
@@ -9,11 +11,13 @@ from ship_perception.r1_static.raw_surface_normals import LocalSurfaceNormals
 class BudgetedLocalSurfaceNormals(LocalSurfaceNormals):
     """Same exact estimator with cooperative stops between memory batches."""
 
+    @precision_stage("normal")
     def __init__(self, xyz, config, budget, counters):
         super().__init__(xyz, config)
         self.input_point_indexes = np.lexsort((xyz[:, 2], xyz[:, 1], xyz[:, 0]))
         self.budget, self.counters = budget, counters
 
+    @precision_stage("normal")
     def _estimate(self, indexes):
         pending = indexes[~self.computed[indexes]]
         for start in range(0, len(pending), 8192):
@@ -128,6 +132,7 @@ class RawSectionProfile:
             self.config,
         )
 
+    @precision_stage("raw_edge_search")
     def edge_modes(self, anchor, sign):
         """Find robust signed changes once; refine raw midpoints only at modes.
 
@@ -226,6 +231,7 @@ class BoundarySideMeasurementCache:
         self.bytes = 0
         self.origin = spatial.xyz[:, :2].min(0)
 
+    @precision_stage("raw_profile")
     def profile(self, axis, anchor, span):
         band = (
             self.config["roi"]["boundary_search_m"]

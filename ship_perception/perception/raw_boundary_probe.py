@@ -1,5 +1,7 @@
 """Cheap exact-XYZ edge investigation, without rasters, normals or corners."""
 
+from .precision_diagnostics import stage as precision_stage, side_completed
+
 import time
 import copy
 import numpy as np
@@ -71,6 +73,7 @@ class SignedRoleResolver:
         cache[key] = tuple(modes)
         return cache[key]
 
+    @precision_stage("raw_edge_search")
     def side(
         self, axis, anchor, span, sign, candidates, extended=False, normal_range=None
     ):
@@ -229,6 +232,7 @@ class RawBoundaryProbe:
         self.measurement, self.refiner = measurement, refiner
         self.resolver = SignedRoleResolver(measurement, refiner)
 
+    @precision_stage("raw_profile")
     def evaluate(self, query, row, side_candidates):
         box = query.bounds
         started = time.perf_counter()
@@ -260,6 +264,7 @@ class RawBoundaryProbe:
                 if name in cached
                 else self.resolver.side(axis, box[position], span, sign, candidates)
             )
+            side_completed(name, "RAW_PROBE", sides[name]["status"])
             sides[name]["elapsed_s"] = time.perf_counter() - side_start
             report["raw_probe_support_side_count"] = sum(
                 s["status"] == "STRONG_UNIQUE_EDGE" for s in sides.values()
