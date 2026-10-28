@@ -7,6 +7,8 @@
 
 ## 分支、提交、PR 与 main
 
+2026-10-28 V2.3 用户任务要求先完整保存 V2.2 暂停现场并允许推送 `codex/hatch-v22-paused-audit`；审计快照为 `469953a58d37ec1f0a948d36228a878b746a8e16`。随后从 `1a0c9d0` 创建 `codex/hatch-v23-conservative-recall`。真实六景拓扑与覆盖门通过前，不引入新的 wall/contact、Expert、阈值或精修性能优化。当前独立冻结链路重放在 7-16 仍失败，新增代码仅作离线审计 checkpoint，不作为新识别基线，不合入 main、不 tag、不删除旧分支。
+
 2026-10-28 V2.2 用户任务授权在 `cd13726` 上开发、验证并最终推送 `codex/hatch-v22-berth-region-precision`，仍禁止 merge main/tag。两个未提交的标量缓存实验先归档，再对三场景各作两版本三次冷进程 A/B；真实测试未证明稳定耗时改善，已恢复，不将无收益实验提交。后续区域优先搜索、协作调度、泊位参考和状态拆分按本轮明确任务实施，冻结源码、Raw 精度、物理门与 GT 隔离约束继续有效。
 
 2026-10-26 V2 任务仅授权推送 `codex/hatch-v2-multi-expert` 开发分支，明确不 merge main。真实单调回归或现场门失败时保留失败报告与独立历史，不把开发提交包装为生产放行，也不 force push、tag 或清理其他分支。

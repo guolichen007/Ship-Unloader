@@ -2,7 +2,7 @@
 
 双激光雷达卸船机船舱识别与船体稳定跟踪系统。
 
-本分支是 **V2.1 召回与性能优化开发验证版**，运行环境为 Ubuntu 22.04 / ROS2 Humble。PCD 和 `/ship_scan/map` 共用纯 XYZ 主链，输出中文全景图、逐边证据、四角坐标与不确定性。真实历史场景的单调回归门尚未通过，不能替代 main 现场基线，也不用于自动控制。V1.4 船体跟踪源码继续冻结保留。
+本分支是 **V2.3 拓扑召回纠偏审计版**，运行环境为 Ubuntu 22.04 / ROS2 Humble。默认识别入口保留 `1a0c9d0` 的区域搜索与协作调度；新增冻结拓扑 provider 先独立复算真实历史输入，尚未接入默认识别入口。历史完整开口召回门未通过，不能替代 main 现场基线，也不用于自动控制。V1.4 船体跟踪源码继续冻结保留。
 
 ## 两个现场入口
 
@@ -70,6 +70,14 @@ output/YYYYMMDD_HHMMSS_microseconds/
 - 没有独立钢内沿 Golden，不能声明厘米级精度、商业泛化或现场自动作业通过。未开舱船需人工确认范围，当前没有自动开闭舱分类。
 
 当前 Normal6 与 V2 单调回归门均未通过。程序退出成功、复核对象数量和较快耗时不能代替完整开口覆盖与水面误检复核。开发回归与正式验收、Windows 与 Ubuntu、Synthetic 与 SITE 分别记录，见 [测试与验收](docs/04_测试与验收说明.md)。旧 C++ V1.5 Quick 的既有失败继续保留。
+
+V2.3 的离线拓扑审计入口如下；它从当前 Raw 重算冻结 `prepare_geometry / review_points`，输出区域及逐边证据，保留空角点的未决区域。虚线图为保守候选区域，四角 Z 缺测保持 `null`。整套历史重放仍有昂贵组合搜索，且 7-16 尚未恢复完整舱区，因此不接入默认主链、不作为提速方案，召回门通过前暂停新的精修性能优化。
+
+```bash
+OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+python3 -m ship_perception.tools.recompute_legacy_topology \
+  --pcd /data/input.pcd --output-dir /data/review/topology
+```
 
 ## ROS2 安装入口
 
