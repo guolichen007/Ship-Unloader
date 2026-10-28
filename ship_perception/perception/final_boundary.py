@@ -1383,21 +1383,37 @@ class FinalBoundaryRefiner:
                 if standard_sections < minimum:
                     if local_profiles is None:
                         continue
-                    face["local_deck_profile_support"] = True
-                    face["local_deck_profile_reference"] = dict(
-                        rho=face_position(face, sum(span) / 2), span=list(span)
-                    )
-                    if (
-                        sum(
-                            raw_face_section(
-                                points, face, axis, s, sign, self.config, local_profiles
-                            )
-                            is not None
-                            for s in spans
+                    face["local_deck_wall_height_support"] = True
+                    wall_sections = sum(
+                        raw_face_section(
+                            points, face, axis, s, sign, self.config, local_profiles
                         )
-                        < minimum
-                    ):
-                        continue
+                        is not None
+                        for s in spans
+                    )
+                    if wall_sections < minimum:
+                        face.pop("local_deck_wall_height_support", None)
+                        face["local_deck_profile_support"] = True
+                        face["local_deck_profile_reference"] = dict(
+                            rho=face_position(face, sum(span) / 2), span=list(span)
+                        )
+                        if (
+                            sum(
+                                raw_face_section(
+                                    points,
+                                    face,
+                                    axis,
+                                    s,
+                                    sign,
+                                    self.config,
+                                    local_profiles,
+                                )
+                                is not None
+                                for s in spans
+                            )
+                            < minimum
+                        ):
+                            continue
                 face.update(
                     core_adjacency=adjacency,
                     provider_ids=candidate["provider_ids"],
@@ -1431,7 +1447,10 @@ class FinalBoundaryRefiner:
                 else (
                     measured_face["point_index_sha256"],
                     json.dumps(
-                        measured_face.get("local_deck_profile_reference"),
+                        [
+                            measured_face.get("local_deck_profile_reference"),
+                            bool(measured_face.get("local_deck_wall_height_support")),
+                        ],
                         sort_keys=True,
                     ),
                 )

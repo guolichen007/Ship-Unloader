@@ -32,14 +32,16 @@ class LocalDeckProfileCache:
         counters[name] = counters.get(name, 0) + 1
 
     @precision_stage("height")
-    def section(self, axis, anchor, span, sign, profile_at=None):
-        key = (axis, float(anchor), tuple(span), sign, profile_at)
+    def section(self, axis, anchor, span, sign, profile_at=None, include_profiles=True):
+        key = (axis, float(anchor), tuple(span), sign, profile_at, include_profiles)
         if self.enabled and key in self.entries:
             self.entries.move_to_end(key)
             self._count("local_deck_profile_cache_hit")
             return self.entries[key]
         self._check()
         self._count("local_deck_profile_build_count")
+        if not include_profiles:
+            self._count("local_deck_plane_only_build_count")
         config = self.config
         band = (
             config["roi"]["support_search_m"]
@@ -109,6 +111,8 @@ class LocalDeckProfileCache:
                 )
                 plane_index = len(entry["planes"])
                 entry["planes"].append(plane)
+                if not include_profiles:
+                    continue
                 positions = (
                     [profile_at]
                     if profile_at is not None
@@ -165,6 +169,118 @@ class LocalDeckProfileCache:
             self.entries[key] = entry
             self.bytes += size
         return entry
+
+    @precision_stage("height")
+    def wall_height_evidence(self, axis, span, sign, face):
+        """Measure a vertical wall's height from its observed outside plane.
+
+        A horizontal cargo/floor profile is not required to measure an
+        independently qualified normal face. Plane contact and lower wall
+        returns must actually be present in this original physical section.
+        """
+        config = self.config
+        rho = face_position(face, sum(span) / 2)
+        entry = self.section(axis, rho, span, sign, include_profiles=False)
+        points = entry["points"]
+        alternatives = []
+        if len(points):
+            along = points[:, 1 - axis]
+            a, b = np.asarray(face["a_xy"]), np.asarray(face["b_xy"])
+            tangent = (b - a) / np.linalg.norm(b - a)
+            actual = a[axis] + (along - a[1 - axis]) * (b[axis] - a[axis]) / (
+                b[1 - axis] - a[1 - axis]
+            )
+            signed = sign * (points[:, axis] - actual)
+            own = (along >= span[0]) & (along <= span[1])
+            wall = own & (
+                abs(np.cross(tangent, points[:, :2] - a))
+                <= config["boundary"]["line_inlier_m"]
+            )
+            # Exact 3D connectivity supplies the contact evidence at a wall's
+            # top, where the normal estimator can legitimately mix wall/deck
+            # neighbours. A nearby horizontal deck alone is not wall contact.
+            contact_path = np.zeros(len(points), bool)
+            input_order = face.get("_point_indexes_in_point_order")
+            if input_order is not None and wall.any():
+                ids = np.flatnonzero(wall)
+                seeds = np.flatnonzero(np.isin(entry["indexes"][ids], input_order))
+                tree = cKDTree(points[ids])
+                reached = np.zeros(len(ids), bool)
+                reached[seeds] = True
+                queue = seeds.tolist()
+                cursor = 0
+                while cursor < len(queue):
+                    if cursor % 256 == 0:
+                        self._check()
+                    neighbors = np.asarray(
+                        tree.query_ball_point(
+                            points[ids[queue[cursor]]],
+                            config["boundary"]["max_support_gap_m"],
+                        ),
+                        dtype=int,
+                    )
+                    new = neighbors[~reached[neighbors]]
+                    reached[new] = True
+                    queue.extend(new.tolist())
+                    cursor += 1
+                contact_path[ids[reached]] = True
+            for plane in entry["planes"]:
+                self._check()
+                normal = np.asarray(plane["normal"])
+                residual = (points @ normal + plane["offset"]) / normal[2]
+                outside = (
+                    own
+                    & (signed <= 0)
+                    & (signed >= -config["roi"]["support_search_m"])
+                    & (
+                        abs(residual * normal[2])
+                        <= config["geometry"]["plane_inlier_m"]
+                    )
+                )
+                contact = contact_path & (
+                    abs(residual) <= config["roi"]["support_band_m"]
+                )
+                lower = wall & (residual <= -config["roi"]["opening_drop_m"])
+                counts = [int(outside.sum()), int(lower.sum())]
+                if (
+                    min(counts) < config["boundary"]["profile_min_points"]
+                    or int(contact.sum()) < config["boundary"]["line_min_points"]
+                ):
+                    continue
+                ids = self.measurement.raw_point_indexes[
+                    entry["indexes"][outside | lower | contact]
+                ]
+                alternatives.append(
+                    dict(
+                        plane=plane,
+                        counts=counts,
+                        wall_contact_raw_count=int(contact.sum()),
+                        wall_contact_basis="EXACT_RAW_3D_CONNECTION_FROM_QUALIFIED_NORMAL_FACE_TO_PLANE",
+                        normal_face_source_sha256=face.get(
+                            "source_raw_point_index_sha256",
+                            face.get("point_index_sha256"),
+                        ),
+                        min_observed_drop_m=float(min(-residual[lower])),
+                        source_raw_point_indexes_sha256=hashlib.sha256(
+                            np.sort(ids).astype("<i8", copy=False).tobytes()
+                        ).hexdigest(),
+                    )
+                )
+        return dict(
+            supported=bool(alternatives),
+            counts=[
+                min((a["counts"][i] for a in alternatives), default=0) for i in (0, 1)
+            ],
+            min_observed_drop_m=min(
+                (a["min_observed_drop_m"] for a in alternatives), default=None
+            ),
+            uncertainty_m=max(
+                (a["plane"]["residual_p95_m"] for a in alternatives), default=0.0
+            ),
+            alternatives=alternatives,
+            source="OBSERVED_NORMAL_WALL_CONTACT_AND_LOWER_RETURNS_WITH_MEASURED_OUTSIDE_PLANE",
+            geometry_inferred=False,
+        )
 
     def evidence(self, axis, anchor, span, sign, face=None):
         config = self.config

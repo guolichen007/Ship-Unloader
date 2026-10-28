@@ -75,6 +75,9 @@ def measured_faces(normals, axis, anchor, span, spans, config):
                 b_xy=b.tolist(),
                 points=observed,
                 point_indexes=ids,
+                _point_indexes_in_point_order=(
+                    canonical_ids if order is None else order[canonical_ids]
+                ),
                 point_index_frame=(
                     "INPUT_RAW" if order is not None else "CANONICAL_NORMALS"
                 ),
@@ -175,7 +178,9 @@ def raw_face_section(xyz, face, axis, span, sign, config, local_profiles=None):
     if len(selected) < config["boundary"]["line_min_points"]:
         return None
     rho = face_position(face, (span[0] + span[1]) / 2)
-    if face.get("local_deck_profile_support"):
+    if face.get("local_deck_profile_support") or face.get(
+        "local_deck_wall_height_support"
+    ):
         if local_profiles is None:
             return None
         # Borrowed deck context may supply a surface reference, but it cannot
@@ -190,9 +195,17 @@ def raw_face_section(xyz, face, axis, span, sign, config, local_profiles=None):
             "primary_core_attachment", {}
         ).get("supported", False):
             return None
-        reference = face["local_deck_profile_reference"]
-        whole = local_profiles.section(axis, reference["rho"], reference["span"], sign)
-        evidence = local_profiles.section_evidence(axis, rho, span, sign, face, whole)
+        wall_basis = face.get("local_deck_wall_height_support", False)
+        if wall_basis:
+            evidence = local_profiles.wall_height_evidence(axis, span, sign, face)
+        else:
+            reference = face["local_deck_profile_reference"]
+            whole = local_profiles.section(
+                axis, reference["rho"], reference["span"], sign
+            )
+            evidence = local_profiles.section_evidence(
+                axis, rho, span, sign, face, whole
+            )
         if not evidence["supported"]:
             return None
         return dict(
@@ -212,13 +225,21 @@ def raw_face_section(xyz, face, axis, span, sign, config, local_profiles=None):
                 robust_lower_contrast_m=None,
                 z_mad_m=None,
                 transition=True,
-                support_basis="RAW_NORMAL_FACE_AND_MEASURED_LOCAL_DECK_PROFILES",
+                support_basis=(
+                    "RAW_NORMAL_FACE_AND_MEASURED_OUTSIDE_PLANE_WALL_HEIGHT"
+                    if wall_basis
+                    else "RAW_NORMAL_FACE_AND_MEASURED_LOCAL_DECK_PROFILES"
+                ),
                 local_deck_profiles=evidence,
             ),
             raw_measurement_present=True,
             raw_normal_face_count=len(selected),
             primary_normal_face_count=count,
-            measurement_source="RAW_NORMAL_FACE_WITH_LOCAL_DECK_PROFILES",
+            measurement_source=(
+                "RAW_NORMAL_FACE_WITH_MEASURED_WALL_HEIGHT"
+                if wall_basis
+                else "RAW_NORMAL_FACE_WITH_LOCAL_DECK_PROFILES"
+            ),
             surface_pair_present=False,
             raw_normal_face_identity=face["point_index_sha256"],
         )

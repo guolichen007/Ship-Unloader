@@ -25,6 +25,112 @@ class LocalDeckProfiles(unittest.TestCase):
     def setUpClass(cls):
         cls.config, _ = resolve_config()
 
+    def wall_fixture(self, bottom=-3.0, top=0.0, plane_side=-1):
+        x, y = np.meshgrid(
+            np.arange(0.1, 4.01, 0.1) * plane_side, np.arange(0.0, 12.01, 0.1)
+        )
+        deck = np.column_stack((x.ravel(), y.ravel(), np.zeros(x.size)))
+        y, z = np.meshgrid(
+            np.arange(0.0, 12.01, 0.1), np.arange(bottom, top + 0.01, 0.1)
+        )
+        wall = np.column_stack((np.zeros(y.size), y.ravel(), z.ravel()))
+        x, y = np.meshgrid(np.arange(0.1, 4.01, 0.1), np.arange(0.0, 12.01, 0.1))
+        cargo = np.column_stack((x.ravel(), y.ravel(), np.full(x.size, 0.6)))
+        points = np.vstack((deck, wall, cargo))
+        measurement = SimpleNamespace(
+            raw_uvz=points,
+            raw_point_indexes=np.arange(len(points)),
+            counters={},
+            budget=None,
+        )
+        measurement.spatial = RawSpatialIndex(points, measurement.counters)
+        cache = LocalDeckProfileCache(measurement, self.config)
+        normals = BudgetedLocalSurfaceNormals(points, self.config, None, {})
+        faces = measured_faces(
+            normals, 0, 0.0, (0.0, 12.0), [(0, 3), (3, 6), (6, 9), (9, 12)], self.config
+        )
+        self.assertTrue(faces)
+        face = min(faces, key=lambda f: abs(f["a_xy"][0]))
+        face.update(
+            local_deck_wall_height_support=True, _primary_normal_points=face["points"]
+        )
+        return points, face, cache
+
+    def test_measured_wall_height_does_not_require_a_horizontal_floor_profile(self):
+        points, face, cache = self.wall_fixture()
+        original = points.copy()
+        for span in ((0, 3), (3, 6), (6, 9), (9, 12)):
+            result = raw_face_section(points, face, 0, span, 1, self.config, cache)
+            self.assertIsNotNone(result)
+            self.assertFalse(result["surface_pair_present"])
+            self.assertFalse(result["continuous"][3])
+            self.assertIn("MEASURED_WALL_HEIGHT", result["measurement_source"])
+            self.assertGreaterEqual(
+                min(result["height"]["counts"]),
+                self.config["boundary"]["profile_min_points"],
+            )
+            self.assertEqual(
+                result["raw_normal_face_count"],
+                int(
+                    np.count_nonzero(
+                        (face["points"][:, 1] >= span[0])
+                        & (face["points"][:, 1] <= span[1])
+                    )
+                ),
+            )
+            self.assertTrue(result["height"]["local_deck_profiles"]["alternatives"])
+        self.assertEqual(
+            cache.measurement.counters.get("local_deck_raw_profile_query_count", 0), 0
+        )
+        np.testing.assert_array_equal(points, original)
+
+    def test_plane_only_reference_keeps_the_same_original_plane_families(self):
+        points, face, cache = self.wall_fixture()
+        plane_only = cache.section(0, 0.0, (0.0, 3.0), 1, include_profiles=False)
+        profiles = cache.section(0, 0.0, (0.0, 3.0), 1)
+        self.assertEqual(plane_only["planes"], profiles["planes"])
+        self.assertEqual(plane_only["profiles"], [])
+        np.testing.assert_array_equal(plane_only["points"], profiles["points"])
+
+    def test_wall_height_rejects_missing_contact_missing_lower_and_wrong_plane_side(
+        self,
+    ):
+        for args in ((-3.0, -1.0, -1), (0.0, 3.0, -1), (-3.0, 0.0, 1)):
+            with self.subTest(args=args):
+                points, face, cache = self.wall_fixture(*args)
+                self.assertIsNone(
+                    raw_face_section(points, face, 0, (3, 6), 1, self.config, cache)
+                )
+
+    def test_wall_height_cannot_borrow_an_unowned_quay_face(self):
+        points, face, cache = self.wall_fixture()
+        face["_primary_normal_points"] = points[:0]
+        self.assertIsNone(
+            raw_face_section(points, face, 0, (3, 6), 1, self.config, cache)
+        )
+
+    def test_two_horizontal_return_layers_do_not_become_an_observed_wall(self):
+        x, y = np.meshgrid(np.arange(-2.0, 2.01, 0.1), np.arange(0.0, 12.01, 0.1))
+        xy = np.column_stack((x.ravel(), y.ravel()))
+        points = np.vstack(
+            (
+                np.column_stack((xy, np.zeros(len(xy)))),
+                np.column_stack((xy, np.full(len(xy), -2.0))),
+            )
+        )
+        normals = BudgetedLocalSurfaceNormals(points, self.config, None, {})
+        self.assertEqual(
+            measured_faces(
+                normals,
+                0,
+                0.0,
+                (0.0, 12.0),
+                [(0, 3), (3, 6), (6, 9), (9, 12)],
+                self.config,
+            ),
+            [],
+        )
+
     def test_batched_quantiles_preserve_observed_breaks_and_rejections(self):
         rng = np.random.default_rng(818)
         for dtype in (np.float32, np.float64):
