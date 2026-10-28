@@ -571,6 +571,9 @@ class FinalBoundaryRefiner:
                                 ],
                                 height=height,
                                 raw_search=direct,
+                                physical_mode_associated=direct.get(
+                                    "physical_mode_associated", True
+                                ),
                                 raster_transition_support=bool(measured),
                             )
                         )
@@ -579,7 +582,8 @@ class FinalBoundaryRefiner:
                     )
                     for sample in samples:
                         sample["height_bev_corroborated"] = bool(
-                            ring_side.get("bev_support")
+                            sample["physical_mode_associated"]
+                            and ring_side.get("bev_support")
                             and sample["height"].get("transition")
                             and min(sample["height"].get("counts", [0, 0]))
                             >= config["boundary"]["profile_min_points"]
@@ -600,6 +604,7 @@ class FinalBoundaryRefiner:
                         )
                         and s["height"].get("transition", False)
                         and s["raw_search"]["status"] != "MULTIMODE_BOUNDARY_CONFLICT"
+                        and s["physical_mode_associated"]
                     ]
                     side_completed(name, "RASTER_PHASE_" + str(phase), "MEASURED")
                     estimate, fit = self._fit(good, box[position])
@@ -663,25 +668,42 @@ class FinalBoundaryRefiner:
                 )
                 minimum_sections = min(r["support_section_count"] for r in runs)
                 raw_sections = min(
-                    sum(s["raw_subvoxel"] for s in r["samples"]) for r in runs
+                    sum(
+                        s["raw_subvoxel"] and s["physical_mode_associated"]
+                        for s in r["samples"]
+                    )
+                    for r in runs
                 )
                 normal_face_sections = min(
                     sum(
-                        s["raw_normal_face_count"]
+                        s["physical_mode_associated"]
+                        and s["raw_normal_face_count"]
                         >= config["boundary"]["line_min_points"]
                         for s in r["samples"]
                     )
                     for r in runs
                 )
                 paired_surface_sections = min(
-                    sum(s["surface_pair_present"] for s in r["samples"]) for r in runs
+                    sum(
+                        s["surface_pair_present"] and s["physical_mode_associated"]
+                        for s in r["samples"]
+                    )
+                    for r in runs
                 )
                 profile_sections = min(
-                    sum(s["profile_observation_count"] > 0 for s in r["samples"])
+                    sum(
+                        s["profile_observation_count"] > 0
+                        and s["physical_mode_associated"]
+                        for s in r["samples"]
+                    )
                     for r in runs
                 )
                 positive_sections = min(
-                    sum(s["height"].get("transition", False) for s in r["samples"])
+                    sum(
+                        s["height"].get("transition", False)
+                        and s["physical_mode_associated"]
+                        for s in r["samples"]
+                    )
                     for r in runs
                 )
                 conflict = reanchors[name][
@@ -1477,6 +1499,27 @@ class FinalBoundaryRefiner:
             )
             if result is None:
                 result = self._search_raw_section(roi, axis, anchor, span, sign)
+                if (
+                    measured_face is not None
+                    and result.get("status") == "UNIQUE_SIGNED_RAW_STEP"
+                ):
+                    expected = face_position(measured_face, sum(span) / 2)
+                    observed = result["continuous"][0]
+                    if abs(expected - observed) > config["boundary"]["corner_join_m"]:
+                        result = dict(
+                            result,
+                            status="UNASSOCIATED_RAW_SURFACE_MODE",
+                            physical_mode_associated=False,
+                            physical_mode_guard=dict(
+                                action="KEEP_ALTERNATIVE_NOT_ASSIGNED_TO_MEASURED_FACE",
+                                measured_face_rho_m=expected,
+                                alternative_raw_rho_m=observed,
+                                association_tolerance_m=config["boundary"][
+                                    "corner_join_m"
+                                ],
+                            ),
+                            alternative_raw_measurement=copy.deepcopy(result),
+                        )
             # Eviction only repeats measurements. It never changes a gate or
             # removes a candidate. Cache scalars/diagnostics, not point arrays.
             if len(self.raw_section_cache) >= 8192:

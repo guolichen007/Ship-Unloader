@@ -25,6 +25,43 @@ class LocalDeckProfiles(unittest.TestCase):
     def setUpClass(cls):
         cls.config, _ = resolve_config()
 
+    def test_unobserved_wall_section_cannot_borrow_a_different_floor_step(self):
+        from ship_perception.perception.final_boundary import FinalBoundaryRefiner
+
+        for step, associated in ((0.0, True), (1.0, False)):
+            x, y = np.meshgrid(np.arange(-1.5, 2.01, 0.05), np.arange(0.0, 3.01, 0.05))
+            floor = np.column_stack(
+                (x.ravel(), y.ravel(), np.where(x.ravel() < step, 0.0, -2.0))
+            )
+            y, z = np.meshgrid(np.arange(6.0, 9.01, 0.1), np.arange(-2.0, 0.01, 0.1))
+            wall = np.column_stack((np.zeros(y.size), y.ravel(), z.ravel()))
+            points = np.vstack((floor, wall))
+            face = dict(
+                normal_axis=0,
+                a_xy=[0.0, 6.0],
+                b_xy=[0.0, 9.0],
+                points=wall,
+                point_index_sha256="actual_separate_wall_section",
+                residual_p95_m=0.0,
+            )
+            result = FinalBoundaryRefiner(points, [], self.config)._raw_section(
+                points, 0, 0.0, (0.0, 3.0), 1, face
+            )
+            self.assertEqual(result.get("physical_mode_associated", True), associated)
+            self.assertTrue(result["height"]["transition"])
+            self.assertTrue(result["continuous"][3])
+            self.assertAlmostEqual(result["continuous"][0], step, delta=0.1)
+            if not associated:
+                self.assertEqual(result["status"], "UNASSOCIATED_RAW_SURFACE_MODE")
+                self.assertEqual(
+                    result["alternative_raw_measurement"]["status"],
+                    "UNIQUE_SIGNED_RAW_STEP",
+                )
+                self.assertEqual(
+                    result["physical_mode_guard"]["action"],
+                    "KEEP_ALTERNATIVE_NOT_ASSIGNED_TO_MEASURED_FACE",
+                )
+
     def wall_fixture(self, bottom=-3.0, top=0.0, plane_side=-1):
         x, y = np.meshgrid(
             np.arange(0.1, 4.01, 0.1) * plane_side, np.arange(0.0, 12.01, 0.1)
