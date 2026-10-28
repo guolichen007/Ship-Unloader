@@ -11,7 +11,10 @@ from ship_perception.perception.candidate_union import (
     PhysicalBoundaryQuery,
 )
 from ship_perception.perception.proposal_compiler import ProposalCompiler
-from ship_perception.perception.measurement import VesselMeasurementContext
+from ship_perception.perception.measurement import (
+    VesselMeasurementContext,
+    RawSectionProfile,
+)
 from ship_perception.perception.final_boundary import FinalBoundaryRefiner
 from ship_perception.perception.raw_boundary_probe import RawBoundaryProbe
 from ship_perception.perception.precision_scheduler import PrecisionScheduler
@@ -20,6 +23,97 @@ from ship_perception.tests.test_hatch_metamorphic import vessel_points
 
 
 class RecallPerfContracts(unittest.TestCase):
+    def test_shared_rank_index_preserves_contiguous_and_along_filtered_raw_views(self):
+        rng = np.random.default_rng(671)
+        xyz = rng.uniform([-8, -8, -5], [8, 8, 3], (4000, 3))
+        m = self.measurement(xyz)
+        for span in ((-3.0, 3.0), (-2.0, 5.0)):
+            for anchor in (0.1, 0.2, 0.3):
+                p = m.side_measurements.profile(0, anchor, span).view(-1.5, 1.5)
+                n = len(p.points)
+                starts = rng.integers(0, n - 12, 100)
+                stops = np.array([rng.integers(a + 12, n + 1) for a in starts])
+                q = rng.choice([0.25, 0.5, 0.75], len(starts))
+                wanted = np.array(
+                    [
+                        np.quantile(p.sorted_points[a:b, 2], v)
+                        for a, b, v in zip(starts, stops, q)
+                    ]
+                )
+                np.testing.assert_array_equal(
+                    p._window_quantiles(starts, stops, q), wanted
+                )
+                np.testing.assert_array_equal(
+                    p._window_quantiles(starts, stops, q), wanted
+                )
+        self.assertGreater(m.counters["raw_quantile_index_cache_hit"], 0)
+        self.assertLessEqual(m.side_measurements.quantile_bytes, 64 * 1024 * 1024)
+
+    def test_batched_quartiles_preserve_signed_raw_modes_and_exact_thresholds(self):
+        def scalar(profile, anchor, sign):
+            cfg = self.config
+            search, step = (
+                cfg["roi"]["boundary_search_m"],
+                cfg["boundary"]["profile_step_m"],
+            )
+            probe, minimum = (
+                cfg["boundary"]["side_probe_m"],
+                cfg["boundary"]["profile_min_points"],
+            )
+            changes = []
+            for rho in np.arange(anchor - search, anchor + search + step / 2, step):
+                low = profile.window(rho - probe, rho, include_high=sign == -1)[:, 2]
+                high = profile.window(rho, rho + probe, include_low=sign == 1)[:, 2]
+                inside, outside = (high, low) if sign == 1 else (low, high)
+                if min(len(inside), len(outside)) < minimum:
+                    continue
+                contrast = float(np.quantile(outside, 0.25) - np.quantile(inside, 0.75))
+                if contrast >= cfg["roi"]["opening_drop_m"]:
+                    changes.append((float(rho), contrast))
+            groups = []
+            for item in changes:
+                if groups and item[0] - groups[-1][-1][0] <= step * 1.5:
+                    groups[-1].append(item)
+                else:
+                    groups.append([item])
+            return [
+                dict(
+                    peak_rho=max(g, key=lambda x: x[1])[0],
+                    center_rho=float(np.median([x[0] for x in g])),
+                    contrast_m=max(x[1] for x in g),
+                    observed_station_count=len(g),
+                )
+                for g in groups
+            ]
+
+        rng = np.random.default_rng(20261028)
+        for dtype in (np.float32, np.float64):
+            for origin in (0.0, 100000.0):
+                for contrast in (
+                    0.0,
+                    np.nextafter(0.3, 0),
+                    0.3,
+                    np.nextafter(0.3, 1),
+                    3.0,
+                ):
+                    x = np.r_[
+                        rng.uniform(-3, 3, 1200), np.repeat(np.arange(-2, 2, 0.05), 4)
+                    ]
+                    z = np.where(x < 0, contrast, 0.0)
+                    z[::7] += 0.5  # Mixed returns cannot be removed by batching.
+                    xyz = np.column_stack(
+                        (x + origin, rng.uniform(0, 6, len(x)), z)
+                    ).astype(dtype)
+                    p = RawSectionProfile(xyz, 0, (0, 6), self.config)
+                    for sign in (-1, 1):
+                        self.assertEqual(
+                            p.edge_modes(origin, sign), scalar(p, origin, sign)
+                        )
+        xyz = rng.uniform(-2, 2, (300, 3))
+        xyz[::13, 2] = np.nan
+        p = RawSectionProfile(xyz, 0, (-2, 2), self.config)
+        self.assertEqual(p.edge_modes(0, 1), scalar(p, 0, 1))
+
     def test_indexed_deck_evidence_preserves_exact_boundaries_and_provider_order(self):
         from ship_perception.perception.validation import deck_ring
 
@@ -528,6 +622,115 @@ class RecallPerfContracts(unittest.TestCase):
                 results[0]["sides"][name]["rho_after_m"],
                 results[1]["sides"][name]["rho_after_m"],
             )
+
+    def test_probe_reuses_actual_shared_side_measurements_without_new_geometry(self):
+        xyz, boxes = vessel_points(1, spacing=0.15)
+        m = self.measurement(xyz)
+        p = self.proposal(box=boxes[0])
+        q = PhysicalBoundaryQuery("Q", "V", p.bounds, (p,), ())
+        row = dict(bounds_axial=list(p.bounds), vessel_hypothesis_id="V")
+        refiner = FinalBoundaryRefiner(xyz, [], self.config, m)
+        with patch.object(
+            refiner, "refine", side_effect=AssertionError("Full precision")
+        ):
+            report = refiner.investigate_sides(q, row, {})
+        self.assertEqual(report["supported_side_count"], 4)
+        self.assertFalse(report["final_coordinates_created"])
+        self.assertEqual(m.counters.get("raster_build_count", 0), 0)
+        self.assertEqual(m.counters.get("normal_points_evaluated", 0), 0)
+        probe = RawBoundaryProbe(m, refiner)
+        with patch.object(
+            probe.resolver, "side", side_effect=AssertionError("Recomputed side")
+        ):
+            result = probe.evaluate(q, row, {})
+        self.assertTrue(result["full_precision_allowed"])
+        self.assertEqual(result["raw_probe_support_side_count"], 4)
+        for side in result["sides"].values():
+            self.assertTrue(side["cached_physical_measurement"])
+            self.assertGreaterEqual(
+                side["fit"]["inlier_section_count"],
+                self.config["boundary"]["profile_min_sections"],
+            )
+        # A cache record is specific to this physical query and vessel.
+        other = PhysicalBoundaryQuery("Q", "OTHER", p.bounds, (p,), ())
+        with patch.object(probe.resolver, "side", wraps=probe.resolver.side) as resolve:
+            probe.evaluate(other, {}, {})
+        self.assertGreater(resolve.call_count, 0)
+
+    def test_shared_side_cache_does_not_fill_missing_physical_sections(self):
+        xyz, boxes = vessel_points(1, spacing=0.15)
+        m = self.measurement(xyz)
+        p = self.proposal(box=boxes[0])
+        q = PhysicalBoundaryQuery("Q", "V", p.bounds, (p,), ())
+        refiner = FinalBoundaryRefiner(xyz, [], self.config, m)
+        with patch.object(
+            refiner,
+            "_raw_section",
+            return_value=dict(status="INSUFFICIENT_RAW_SUPPORT"),
+        ):
+            report = refiner.investigate_sides(q, {}, {})
+        self.assertEqual(report["supported_side_count"], 0)
+        self.assertEqual(m.investigated_sides[refiner.investigation_key(q)], {})
+
+    def test_raster_anchor_cannot_replace_observed_wall_with_a_floor_pair(self):
+        from ship_perception.perception.line_geometry import SIDE_SPECS
+
+        xyz, boxes = vessel_points(1, spacing=0.15)
+        box = list(boxes[0])
+        refiner = FinalBoundaryRefiner(xyz, [], self.config, self.measurement(xyz))
+        roles = {
+            name: dict(status="UNCHANGED_ANCHOR", rho=box[pos])
+            for name, _, pos, _ in SIDE_SPECS
+        }
+
+        def measured_wall(roi, axis, anchor, span, sign, measured_face=None):
+            return dict(
+                status="UNIQUE_SIGNED_RAW_STEP",
+                modes=[anchor],
+                continuous=[anchor, 0.05, 30, False],
+                raw_measurement_present=True,
+                raw_normal_face_count=30,
+                measurement_source="RAW_NORMAL_FACE_WITH_LOCAL_DECK_PROFILES",
+                height=dict(transition=True, counts=[30, 30]),
+            )
+
+        def shifted_raster(grid, span, anchor, side, config, section_edges):
+            return dict(
+                samples=[
+                    ((lo + hi) / 2, anchor + 0.2)
+                    for lo, hi in zip(section_edges[:-1], section_edges[1:])
+                ],
+                reason="OFFSET_RASTER_ANCHOR",
+            )
+
+        proposal = dict(
+            bounds_axial=box,
+            vessel_hypothesis_id="V",
+            deck_ring=dict(
+                sides={
+                    name: dict(raw3d_support=True, bev_support=True)
+                    for name, *_ in SIDE_SPECS
+                }
+            ),
+        )
+        with patch.object(
+            refiner, "_inner_role_anchors", return_value=roles
+        ), patch.object(
+            refiner, "_raw_section", side_effect=measured_wall
+        ), patch.object(
+            refiner,
+            "_continuous_measurement",
+            side_effect=AssertionError("Unrelated floor pair"),
+        ), patch(
+            "ship_perception.perception.final_boundary._section_transition",
+            side_effect=shifted_raster,
+        ):
+            result = refiner.refine(proposal, np.eye(2))
+        for name, _, pos, _ in SIDE_SPECS:
+            side = result["sides"][name]
+            self.assertAlmostEqual(side["rho_after_m"], box[pos])
+            self.assertEqual(side["paired_surface_section_count"], 0)
+            self.assertGreaterEqual(side["raw_normal_face_section_count"], 4)
 
     def test_overlapping_section_spans_share_sort_without_changing_raw_measurement(
         self,

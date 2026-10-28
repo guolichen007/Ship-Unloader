@@ -134,6 +134,31 @@ def public_face(face):
     }
 
 
+def primary_core_attachment(points, indexes, axis, config):
+    """A measured core patch links a context face without promoting ownership.
+
+    The complete face already passes min_plane_points, vertical extent and
+    four-section tests. Its link to the core is a line-support measurement,
+    not a second plane fit on a source-label subset. Context ownership stays
+    unconfirmed even when this measured link exists.
+    """
+    along_span = float(np.ptp(points[:, 1 - axis])) if len(points) else 0.0
+    return dict(
+        supported=bool(
+            len(points) >= config["boundary"]["line_min_points"]
+            and along_span >= config["roi"]["min_deck_span_m"]
+        ),
+        core_normal_point_count=len(points),
+        along_span_m=along_span,
+        core_z_span_m=float(np.ptp(points[:, 2])) if len(points) else 0.0,
+        core_point_index_sha256=hashlib.sha256(
+            np.sort(indexes).astype("<i8", copy=False).tobytes()
+        ).hexdigest(),
+        source="OBSERVED_PRIMARY_CORE_PATCH_ON_SAME_MEASURED_FACE",
+        ownership_confirmed=False,
+    )
+
+
 def raw_face_section(xyz, face, axis, span, sign, config, local_profiles=None):
     """A raw-normal measurement is distinct from a paired-height midpoint."""
     points = face["points"]
@@ -154,7 +179,9 @@ def raw_face_section(xyz, face, axis, span, sign, config, local_profiles=None):
                 (primary[:, 1 - axis] >= span[0]) & (primary[:, 1 - axis] <= span[1])
             )
         )
-        if count < config["boundary"]["line_min_points"]:
+        if count < config["boundary"]["line_min_points"] and not face.get(
+            "primary_core_attachment", {}
+        ).get("supported", False):
             return None
         reference = face["local_deck_profile_reference"]
         whole = local_profiles.section(axis, reference["rho"], reference["span"], sign)

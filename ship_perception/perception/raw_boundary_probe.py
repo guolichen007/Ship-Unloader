@@ -1,6 +1,7 @@
 """Cheap exact-XYZ edge investigation, without rasters, normals or corners."""
 
 import time
+import copy
 import numpy as np
 
 from .line_geometry import SIDE_SPECS
@@ -242,6 +243,9 @@ class RawBoundaryProbe:
             raw_probe_missing_side_count=0,
         )
         row["raw_probe"] = report
+        cached = getattr(self.measurement, "investigated_sides", {}).get(
+            (query.vessel_id, query.query_id, tuple(query.bounds)), {}
+        )
         for name, axis, position, sign in SIDE_SPECS:
             side_start = time.perf_counter()
             span = (box[1 - axis], box[3 - axis])
@@ -251,8 +255,10 @@ class RawBoundaryProbe:
                 for c in side_candidates.get(name, [])
                 if (c["rho"] - (box[axis] + box[axis + 2]) / 2) * sign < 0
             ]
-            sides[name] = self.resolver.side(
-                axis, box[position], span, sign, candidates
+            sides[name] = (
+                copy.deepcopy(cached[name])
+                if name in cached
+                else self.resolver.side(axis, box[position], span, sign, candidates)
             )
             sides[name]["elapsed_s"] = time.perf_counter() - side_start
             report["raw_probe_support_side_count"] = sum(

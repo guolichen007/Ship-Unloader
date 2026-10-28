@@ -451,6 +451,23 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                         refiner.observations = []
                         refiner.observation_key = ""
                         raw_probe = probe.evaluate(query, row, side_candidates)
+                        if not raw_probe[
+                            "full_precision_allowed"
+                        ] and refiner.can_investigate_sides(
+                            query, row, side_candidates
+                        ):
+                            row["raw_probe_before_shared_measurements"] = dict(
+                                elapsed_s=raw_probe["elapsed_s"],
+                                sides={
+                                    name: side["status"]
+                                    for name, side in raw_probe["sides"].items()
+                                },
+                            )
+                            refiner.investigate_sides(query, row, side_candidates)
+                            # RawProbe only consumes completed independent Raw
+                            # measurements. It still computes no new normals,
+                            # raster or corners, and applies the same admission.
+                            raw_probe = probe.evaluate(query, row, side_candidates)
                         row["raw_probe"] = raw_probe
                         row["full_precision_allowed"] = raw_probe[
                             "full_precision_allowed"
@@ -477,6 +494,9 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                             row,
                             measured_side_candidates=side_candidates,
                             profile_observations=observations,
+                            shared_physical_measurements=bool(
+                                row.get("raw_face_investigation")
+                            ),
                         )
                         # All nominal inputs remain available for directional
                         # movement guards even after physical-mode dedup.

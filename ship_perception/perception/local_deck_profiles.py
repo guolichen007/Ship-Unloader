@@ -29,8 +29,8 @@ class LocalDeckProfileCache:
         counters = self.measurement.counters
         counters[name] = counters.get(name, 0) + 1
 
-    def section(self, axis, anchor, span, sign):
-        key = (axis, float(anchor), tuple(span), sign)
+    def section(self, axis, anchor, span, sign, profile_at=None):
+        key = (axis, float(anchor), tuple(span), sign, profile_at)
         if self.enabled and key in self.entries:
             self.entries.move_to_end(key)
             self._count("local_deck_profile_cache_hit")
@@ -100,10 +100,18 @@ class LocalDeckProfileCache:
                     ).hexdigest(),
                     outward_width_m=deck["candidate_outward_widths"][i],
                     along_coverage=deck["candidate_along_coverages"][i],
+                    residual_p95_m=float(
+                        np.quantile(abs(points[ids] @ normal + offset), 0.95)
+                    ),
                 )
                 plane_index = len(entry["planes"])
                 entry["planes"].append(plane)
-                for along in np.arange(span[0] + spacing / 2, span[1], spacing):
+                positions = (
+                    [profile_at]
+                    if profile_at is not None
+                    else np.arange(span[0] + spacing / 2, span[1], spacing)
+                )
+                for along in positions:
                     self._check()
                     self._count("local_deck_raw_profile_query_count")
                     center = start.copy()
@@ -134,6 +142,7 @@ class LocalDeckProfileCache:
                             drop_m=float(drop),
                             uncertainty_m=observed["residual"],
                             plane_index=plane_index,
+                            query_anchor_m=float(anchor),
                         )
                     )
         size = (
@@ -163,7 +172,9 @@ class LocalDeckProfileCache:
             for lo, hi in zip(edges[:-1], edges[1:])
         ]
 
-    def section_evidence(self, axis, anchor, span, sign, face=None, whole=None):
+    def section_evidence(
+        self, axis, anchor, span, sign, face=None, whole=None, patches=None
+    ):
         config = self.config
         rows = []
         for lo, hi in [span]:
@@ -172,6 +183,8 @@ class LocalDeckProfileCache:
             entry = self.section(axis, rho, (lo, hi), sign)
             points, indexes = entry["points"], entry["indexes"]
             outside, inside = np.zeros(len(points), bool), np.zeros(len(points), bool)
+            near_outside = np.zeros(len(points), bool)
+            plane_residuals = {}
             used = []
             used_planes = set()
             along_values = points[:, 1 - axis]
@@ -192,6 +205,11 @@ class LocalDeckProfileCache:
                     for profile in whole["profiles"]
                     if lo <= profile["along"] <= hi
                 )
+            for patch in patches or []:
+                observations.extend(
+                    (profile, patch["planes"][profile["plane_index"]])
+                    for profile in patch["profiles"]
+                )
             for profile, plane in observations:
                 expected = (
                     rho if face is None else face_position(face, profile["along"])
@@ -199,12 +217,17 @@ class LocalDeckProfileCache:
                 if abs(profile["rho"] - expected) > config["boundary"]["corner_join_m"]:
                     continue
                 normal = np.asarray(plane["normal"])
-                residual = (points @ normal + plane["offset"]) / normal[2]
+                plane_key = (tuple(plane["normal"]), plane["offset"])
+                if plane_key not in plane_residuals:
+                    plane_residuals[plane_key] = (
+                        points @ normal + plane["offset"]
+                    ) / normal[2]
+                residual = plane_residuals[plane_key]
                 tube = (
                     abs(along_values - profile["along"])
                     <= config["boundary"]["profile_half_width_m"]
                 ) & (
-                    abs(points[:, axis] - rho)
+                    abs(points[:, axis] - profile.get("query_anchor_m", rho))
                     <= config["boundary"]["profile_half_length_m"]
                 )
                 # Profile construction sees padded neighbours, but each
@@ -215,10 +238,24 @@ class LocalDeckProfileCache:
                     if face is None
                     else signed
                 )
-                outside |= (
+                near_outside |= (
                     tube
                     & (observed_signed <= 0)
                     & (abs(residual) <= config["roi"]["support_band_m"])
+                )
+                # The wall supplies geometric position; reference height is
+                # independently supported by the measured outside plane in the
+                # existing support ROI. Keep these actual Raw counts distinct
+                # from near-step pairs rather than inventing missing returns.
+                outside |= (
+                    (along_values >= lo)
+                    & (along_values <= hi)
+                    & (observed_signed <= 0)
+                    & (observed_signed >= -config["roi"]["support_search_m"])
+                    & (
+                        abs(residual) * normal[2]
+                        <= config["geometry"]["plane_inlier_m"]
+                    )
                 )
                 inside |= (
                     tube
@@ -239,6 +276,33 @@ class LocalDeckProfileCache:
             )
             if face is None and used:
                 rho = float(np.median([p["rho"] for p in used]))
+            if not (enough and unique) and patches is None:
+                spacing = max(
+                    config["boundary"]["profile_step_m"],
+                    min(
+                        config["boundary"]["max_support_gap_m"] * 0.8,
+                        config["geometry"]["coarse_voxel_m"] / 2,
+                    ),
+                )
+                length = (
+                    config["roi"]["min_deck_span_m"]
+                    + 2 * config["boundary"]["profile_half_width_m"]
+                )
+                patches = []
+                for along in np.arange(lo + spacing / 2, hi, spacing):
+                    position = anchor if face is None else face_position(face, along)
+                    patches.append(
+                        self.section(
+                            axis,
+                            position,
+                            (float(along - length / 2), float(along + length / 2)),
+                            sign,
+                            float(along),
+                        )
+                    )
+                return self.section_evidence(
+                    axis, anchor, span, sign, face, whole, patches
+                )
             ids = self.measurement.raw_point_indexes[indexes[outside | inside]]
             rows.append(
                 dict(
@@ -254,6 +318,12 @@ class LocalDeckProfileCache:
                     ),
                     profile_count=len(used),
                     counts=counts,
+                    near_profile_support_counts=[
+                        int(near_outside.sum()),
+                        int(inside.sum()),
+                    ],
+                    deck_reference_support_count=counts[0],
+                    height_support_basis="MEASURED_OUTSIDE_LOCAL_PLANE_AND_OBSERVED_NEAR_FACE_LOWER_RETURNS",
                     min_observed_drop_m=min((p["drop_m"] for p in used), default=None),
                     uncertainty_m=max((p["uncertainty_m"] for p in used), default=0.0),
                     profile_raw_support_sha256=hashlib.sha256(

@@ -27,6 +27,7 @@ from .raw_face_refinement import (
     public_face,
     face_position,
     raw_face_section,
+    primary_core_attachment,
 )
 
 
@@ -82,6 +83,185 @@ class FinalBoundaryRefiner:
         self.budget = getattr(measurement_context, "budget", None)
         self.side_elapsed = {}
         self.observation_key = ""
+        self.role_measurement_cache = {}
+        self.side_investigation_reports = {}
+
+    @staticmethod
+    def investigation_key(query):
+        return (query.vessel_id, query.query_id, tuple(query.bounds))
+
+    def can_investigate_sides(self, query, row, side_candidates):
+        """Escalate observed structural ambiguity, never an empty search box."""
+        if (
+            self.measurement_context is None
+            or self.investigation_key(query) in self.side_investigation_reports
+        ):
+            return False
+        if row.get("independent_support_sides", 0) < 3:
+            return False
+        if not any(
+            s.get("status") != "UNOBSERVED"
+            for s in row.get("raw_probe", {}).get("sides", {}).values()
+        ):
+            return False
+        box = query.bounds
+        capacity = sum(
+            2
+            * (
+                len(
+                    physical_sections(
+                        (box[1 - axis], box[3 - axis]),
+                        self.config["geometry"]["refine_voxel_m"],
+                        self.config,
+                    )
+                )
+                - 1
+                >= self.config["boundary"]["profile_min_sections"]
+            )
+            for axis in (0, 1)
+        )
+        if capacity < 3:
+            return False
+        providers = {
+            p["provider_id"]: p
+            for p in self.measurement_context.local.structural_providers()
+        }
+        return any(
+            min(c["primary_raw3d"], c["primary_bev"])
+            >= self.config["roi"]["min_enclosure_ratio"]
+            and any(
+                "RAW3D_VERIFIED_VERTICAL_FACE"
+                in providers.get(pid, {}).get("evidence_types", [])
+                for pid in c["provider_ids"]
+            )
+            for candidates in side_candidates.values()
+            for c in candidates
+        )
+
+    def investigate_sides(self, query, row, side_candidates):
+        """Fill the same Raw measurement cache before any full raster/corners.
+
+        This is the existing role/normal fallback of this shared refiner. The
+        caller still reruns ordinary RawProbe admission on actual measured
+        evidence; this method never grants full precision from nominal counts.
+        """
+        key = self.investigation_key(query)
+        if key in self.side_investigation_reports:
+            return self.side_investigation_reports[key]
+        started = time.perf_counter()
+        cached = {}
+        report = dict(
+            status="INTERRUPTED",
+            supported_side_count=0,
+            sides={},
+            raster_build_count=0,
+            final_coordinates_created=False,
+        )
+        row["raw_face_investigation"] = report
+        self.side_investigation_reports[key] = report
+        self.measurement_context.investigated_sides[key] = cached
+        self.profiler["raw_face_investigation_count"] = (
+            self.profiler.get("raw_face_investigation_count", 0) + 1
+        )
+        proposal = dict(
+            row,
+            measured_side_candidates=side_candidates,
+            shared_physical_measurements=True,
+        )
+        box = list(query.bounds)
+        try:
+            roles = self._inner_role_anchors(
+                proposal, box, self.config["geometry"]["refine_voxel_m"]
+            )
+            from .raw_mode_consensus import resolve_section_modes
+
+            for name, axis, pos, sign in SIDE_SPECS:
+                if self.budget is not None:
+                    self.budget.check()
+                role = roles[name]
+                if role.get("status") == "MULTIMODE_BOUNDARY_CONFLICT":
+                    report["sides"][name] = dict(status="MULTIMODE_CONFLICT")
+                    continue
+                anchor = role["rho"]
+                span = (box[1 - axis], box[3 - axis])
+                edges = physical_sections(
+                    span, self.config["geometry"]["refine_voxel_m"], self.config
+                )
+                spans = list(zip(edges[:-1], edges[1:]))
+                records = [
+                    self._raw_section(
+                        self.xyz,
+                        axis,
+                        anchor,
+                        s,
+                        sign,
+                        measured_face=role.get("_raw_normal_face"),
+                    )
+                    for s in spans
+                ]
+                records = resolve_section_modes(
+                    records, spans, self.config, self.budget
+                )
+                sections = []
+                for s, record in zip(spans, records):
+                    if not (
+                        record.get("status") == "UNIQUE_SIGNED_RAW_STEP"
+                        and record.get("height", {}).get("transition")
+                        and (
+                            record.get("raw_measurement_present")
+                            or record["continuous"][3]
+                        )
+                    ):
+                        continue
+                    sections.append(
+                        dict(
+                            along=sum(s) / 2,
+                            rho=record["continuous"][0],
+                            physical_span=list(s),
+                            measurement_source=record.get(
+                                "measurement_source", "PAIRED_RAW_SURFACES"
+                            ),
+                            raw_point_count=record["continuous"][2],
+                            raw_normal_face_count=record.get(
+                                "raw_normal_face_count", 0
+                            ),
+                            height=record["height"],
+                            surface_pair_present=bool(record["continuous"][3]),
+                        )
+                    )
+                estimate, fit = self._fit(sections, anchor)
+                if fit["status"] != "CONSENSUS":
+                    report["sides"][name] = dict(
+                        status="INSUFFICIENT_SUPPORT",
+                        supported_sections=len(sections),
+                        fit=fit,
+                    )
+                    continue
+                estimate += fit["slope"] * (sum(span) / 2 - fit["reference_along_m"])
+                cached[name] = dict(
+                    status="STRONG_UNIQUE_EDGE",
+                    rho=float(estimate),
+                    fit=fit,
+                    sections=sections,
+                    measurement_source="CACHED_INDEPENDENT_RAW_SIDE_MEASUREMENTS",
+                    final_coordinate=False,
+                    cached_physical_measurement=True,
+                )
+                report["sides"][name] = dict(
+                    status="MEASURED",
+                    supported_sections=len(sections),
+                    rho=float(estimate),
+                    raw_normal_face=role.get("raw_normal_face"),
+                )
+                report["supported_side_count"] = len(cached)
+            report["status"] = "COMPLETED"
+        finally:
+            report["elapsed_s"] = time.perf_counter() - started
+            self.profiler["raw_face_investigation_elapsed_s"] = (
+                self.profiler.get("raw_face_investigation_elapsed_s", 0.0)
+                + report["elapsed_s"]
+            )
+        return report
 
     @contextmanager
     def _timed_side(self, name, scope):
@@ -112,6 +292,7 @@ class FinalBoundaryRefiner:
                         "raw_support_scope",
                         "opening_evidence",
                         "profile_observations",
+                        "shared_physical_measurements",
                     )
                 },
                 {
@@ -292,7 +473,15 @@ class FinalBoundaryRefiner:
                                     config,
                                 )
                             )
-                        if not paired and anchor != box[position]:
+                        # A normal face is genuine Raw geometry even though it
+                        # has no pair of horizontal surfaces. A raster offset
+                        # must not replace that wall with a nearby floor step
+                        # while retaining the wall's height/source metadata.
+                        if (
+                            not direct.get("raw_measurement_present", False)
+                            and not paired
+                            and anchor != box[position]
+                        ):
                             prior_rho, prior_uncertainty, prior_count, prior_paired = (
                                 self._continuous_measurement(
                                     raw_points,
@@ -668,6 +857,22 @@ class FinalBoundaryRefiner:
         scene identity are never supplied as hints.
         """
         config = self.config
+        role_key = json.dumps(
+            [
+                box,
+                proposal.get("vessel_hypothesis_id"),
+                proposal.get("measured_side_candidates"),
+                proposal.get("opening_evidence"),
+                proposal.get("deck_ring"),
+                self.observation_key,
+            ],
+            sort_keys=True,
+        )
+        if role_key in self.role_measurement_cache:
+            self.profiler["role_measurement_cache_hit"] = (
+                self.profiler.get("role_measurement_cache_hit", 0) + 1
+            )
+            return copy.deepcopy(self.role_measurement_cache[role_key])
         minimum = config["boundary"]["profile_min_sections"]
         support = config["roi"]["min_enclosure_ratio"]
         output = {}
@@ -963,6 +1168,12 @@ class FinalBoundaryRefiner:
                     rho=float(np.median(positions)),
                     measured_modes=measured,
                 )
+        if proposal.get("shared_physical_measurements"):
+            # Storage eviction only repeats measurements; it never removes a
+            # physical candidate or changes a gate.
+            if len(self.role_measurement_cache) >= 64:
+                self.role_measurement_cache.pop(next(iter(self.role_measurement_cache)))
+            self.role_measurement_cache[role_key] = copy.deepcopy(output)
         return output
 
     def _normal_face_reanchor(
@@ -1021,17 +1232,17 @@ class FinalBoundaryRefiner:
                     p["provider_id"]: p
                     for p in self.measurement_context.local.structural_providers()
                 }
-                if not any(
+                verified_nomination = any(
                     "RAW3D_VERIFIED_VERTICAL_FACE"
                     in providers.get(pid, {}).get("evidence_types", [])
                     for pid in candidate["provider_ids"]
-                ):
-                    continue
-                # Cheap local Raw profiles precede any new normal queries.
-                # Unexplained nominal frames must not trigger costly geometry.
-                evidence = local_profiles.evidence(axis, anchor, span, sign)
-                if sum(e["supported"] for e in evidence) < minimum:
-                    continue
+                )
+                if not proposal.get("shared_physical_measurements"):
+                    if not verified_nomination:
+                        continue
+                    evidence = local_profiles.evidence(axis, anchor, span, sign)
+                    if sum(e["supported"] for e in evidence) < minimum:
+                        continue
             # This query is lazy and cached per refiner, never per grid phase.
             if self.face_normals is None:
                 from ship_perception.r1_static.raw_surface_normals import (
@@ -1086,11 +1297,37 @@ class FinalBoundaryRefiner:
                     )
                 face_lines = copy.deepcopy(faces[key])
             for face in face_lines:
+                measured_rho = face_position(face, sum(span) / 2)
                 if (
-                    abs(face_position(face, (span[0] + span[1]) / 2) - anchor)
-                    > self.config["boundary"]["corner_join_m"]
+                    abs(measured_rho - anchor) > self.config["roi"]["support_search_m"]
+                    or (measured_rho - middle) * sign >= 0
                 ):
                     continue
+                if self.measurement_context is not None:
+                    if face.get("point_index_frame") != "INPUT_RAW":
+                        continue
+                    context = self.measurement_context.local.measurement_context
+                    ids = face["point_indexes"]
+                    owned = (
+                        context.sources[0].point_indexes
+                        if context is not None
+                        else self.measurement_context.raw_point_indexes
+                    )
+                    global_ids = self.measurement_context.raw_point_indexes[ids]
+                    primary_ids = ids[np.isin(global_ids, owned)]
+                    face["_primary_normal_points"] = self.xyz[primary_ids]
+                    attachment = primary_core_attachment(
+                        face["_primary_normal_points"],
+                        self.measurement_context.raw_point_indexes[primary_ids],
+                        axis,
+                        self.config,
+                    )
+                    if not attachment["supported"]:
+                        continue
+                    face["primary_core_attachment"] = attachment
+                    face["source_raw_point_index_sha256"] = hashlib.sha256(
+                        np.sort(global_ids).astype("<i8", copy=False).tobytes()
+                    ).hexdigest()
                 adjacency = []
                 if lower_context:
                     adjacency = core_adjacency(
@@ -1110,19 +1347,6 @@ class FinalBoundaryRefiner:
                 if standard_sections < minimum:
                     if local_profiles is None:
                         continue
-                    context = self.measurement_context.local.measurement_context
-                    ids = face["point_indexes"]
-                    owned = (
-                        context.sources[0].point_indexes
-                        if context is not None
-                        else self.measurement_context.raw_point_indexes
-                    )
-                    primary_ids = ids[
-                        np.isin(self.measurement_context.raw_point_indexes[ids], owned)
-                    ]
-                    # point_indexes are sorted; face.points retain fit order.
-                    # Index the original Raw array to preserve their association.
-                    face["_primary_normal_points"] = self.xyz[primary_ids]
                     face["local_deck_profile_support"] = True
                     face["local_deck_profile_reference"] = dict(
                         rho=face_position(face, sum(span) / 2), span=list(span)

@@ -97,6 +97,13 @@ class RawSectionProfile:
         result.axis, result.span, result.config = self.axis, span, self.config
         result.sorted_points = result.points
         result.coordinates = result.points[:, self.axis]
+        # Only contiguous normal-axis views share an index. An along filter
+        # creates a new sequence, with its own exact order-statistics index.
+        if span == self.span:
+            result.quantile_owner = getattr(self, "quantile_owner", self)
+            result.quantile_offset = getattr(self, "quantile_offset", 0) + int(
+                np.searchsorted(self.coordinates, low, side="left")
+            )
         return result
 
     def window(self, low, high, *, include_low=True, include_high=True):
@@ -131,16 +138,31 @@ class RawSectionProfile:
         step = self.config["boundary"]["profile_step_m"]
         probe = self.config["boundary"]["side_probe_m"]
         minimum = self.config["boundary"]["profile_min_points"]
-        changes = []
-        for rho in np.arange(anchor - search, anchor + search + step / 2, step):
-            low = self.window(rho - probe, rho, include_high=sign == -1)[:, 2]
-            high = self.window(rho, rho + probe, include_low=sign == 1)[:, 2]
-            inside, outside = (high, low) if sign == 1 else (low, high)
-            if min(len(inside), len(outside)) < minimum:
-                continue
-            contrast = float(np.quantile(outside, 0.25) - np.quantile(inside, 0.75))
-            if contrast >= self.config["roi"]["opening_drop_m"]:
-                changes.append((float(rho), contrast))
+        stations = np.arange(anchor - search, anchor + search + step / 2, step)
+        low_start = np.searchsorted(self.coordinates, stations - probe, side="left")
+        low_stop = np.searchsorted(
+            self.coordinates, stations, side="right" if sign == -1 else "left"
+        )
+        high_start = np.searchsorted(
+            self.coordinates, stations, side="left" if sign == 1 else "right"
+        )
+        high_stop = np.searchsorted(self.coordinates, stations + probe, side="right")
+        observed = np.minimum(low_stop - low_start, high_stop - high_start) >= minimum
+        stations = stations[observed]
+        starts = np.r_[low_start[observed], high_start[observed]]
+        stops = np.r_[low_stop[observed], high_stop[observed]]
+        quantiles = np.r_[
+            np.full(len(stations), 0.25 if sign == 1 else 0.75),
+            np.full(len(stations), 0.75 if sign == 1 else 0.25),
+        ]
+        values = self._window_quantiles(starts, stops, quantiles)
+        low, high = np.split(values, 2)
+        contrasts = low - high if sign == 1 else high - low
+        changes = [
+            (float(rho), float(contrast))
+            for rho, contrast in zip(stations, contrasts)
+            if contrast >= self.config["roi"]["opening_drop_m"]
+        ]
         groups = []
         for item in changes:
             if groups and item[0] - groups[-1][-1][0] <= step * 1.5:
@@ -157,6 +179,40 @@ class RawSectionProfile:
             for g in groups
         ]
 
+    def _window_quantiles(self, starts, stops, quantiles):
+        """Reuse exact order statistics without sorting each sliding window."""
+        if not len(starts):
+            return np.empty(0, dtype=float)
+        owner = getattr(self, "quantile_owner", self)
+        offset = getattr(self, "quantile_offset", 0)
+        z = owner.sorted_points[:, 2]
+        if (
+            not np.issubdtype(z.dtype, np.floating)
+            or not np.isfinite(z).all()
+            or getattr(owner, "quantile_reserved_bytes", 0) > 64 * 1024 * 1024
+        ):
+            return np.array(
+                [
+                    np.quantile(z[a + offset : b + offset], q)
+                    for a, b, q in zip(starts, stops, quantiles)
+                ]
+            )
+        from .raw_window_quantiles import RawWindowQuantileIndex
+
+        counters = getattr(owner, "quantile_counters", {})
+        if not hasattr(owner, "quantile_index"):
+            owner.quantile_index = RawWindowQuantileIndex(z)
+            counters["raw_quantile_index_build_count"] = (
+                counters.get("raw_quantile_index_build_count", 0) + 1
+            )
+        else:
+            counters["raw_quantile_index_cache_hit"] = (
+                counters.get("raw_quantile_index_cache_hit", 0) + 1
+            )
+        return owner.quantile_index.quantiles(
+            starts + offset, stops + offset, quantiles
+        )
+
 
 class BoundarySideMeasurementCache:
     """Cache immutable spatial bands; every anchor still measures its own modes."""
@@ -165,6 +221,8 @@ class BoundarySideMeasurementCache:
         self.spatial, self.config, self.counters = spatial, config, counters
         self.enabled = enabled
         self.profiles = OrderedDict()
+        self.quantile_profiles = OrderedDict()
+        self.quantile_bytes = 0
         self.bytes = 0
         self.origin = spatial.xyz[:, :2].min(0)
 
@@ -214,7 +272,35 @@ class BoundarySideMeasurementCache:
             self.counters["raw_profile_cache_hit"] = (
                 self.counters.get("raw_profile_cache_hit", 0) + 1
             )
-        return profile.view(anchor - band, anchor + band, span)
+        # Nearby anchors share the same along-filtered Raw sequence. Only
+        # storage is bounded; every requested window still contains all Raw.
+        span_key = (key, tuple(span))
+        along = self.quantile_profiles.get(span_key) if self.enabled else None
+        if along is None:
+            along = profile.view(-np.inf, np.inf, span)
+            along.quantile_counters = self.counters
+            n = len(along.points)
+            reserve = (
+                2 * along.points.nbytes
+                + 8 * n
+                + 4 * (n + 1) * max(1, (n - 1).bit_length())
+            )
+            along.quantile_reserved_bytes = reserve
+            owner = getattr(along, "quantile_owner", along)
+            owner.quantile_counters = self.counters
+            owner.quantile_reserved_bytes = reserve
+            while (
+                self.quantile_profiles
+                and self.quantile_bytes + reserve > 64 * 1024 * 1024
+            ):
+                _, old = self.quantile_profiles.popitem(last=False)
+                self.quantile_bytes -= old.quantile_reserved_bytes
+            if self.enabled and reserve <= 64 * 1024 * 1024:
+                self.quantile_profiles[span_key] = along
+                self.quantile_bytes += reserve
+        else:
+            self.quantile_profiles.move_to_end(span_key)
+        return along.view(anchor - band, anchor + band)
 
 
 class VesselMeasurementContext:
@@ -250,6 +336,7 @@ class VesselMeasurementContext:
         self.height_profiles = {}
         self.raw_edge_modes = {}
         self.face_evidence = {}
+        self.investigated_sides = {}
         self.local_surface_normals = None
         from .local_deck_profiles import LocalDeckProfileCache
 

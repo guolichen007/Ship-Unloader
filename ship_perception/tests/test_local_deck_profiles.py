@@ -16,6 +16,7 @@ from ship_perception.perception.sections import robust_height_support
 from ship_perception.perception.raw_face_refinement import (
     measured_faces,
     raw_face_section,
+    primary_core_attachment,
 )
 
 
@@ -163,6 +164,28 @@ class LocalDeckProfiles(unittest.TestCase):
                 min(row["counts"]), self.config["boundary"]["profile_min_points"]
             )
             self.assertFalse(row["geometry_inferred"])
+
+    def test_core_patch_links_context_without_filling_an_absent_wall_section(self):
+        minimum = self.config["boundary"]["line_min_points"]
+        along = np.linspace(0, self.config["roi"]["min_deck_span_m"], minimum)
+        points = np.column_stack((np.full(minimum, 4.0), along, np.zeros(minimum)))
+        ids = np.arange(minimum)
+        attachment = primary_core_attachment(points, ids, 0, self.config)
+        self.assertTrue(attachment["supported"])
+        self.assertFalse(attachment["ownership_confirmed"])
+        self.assertFalse(
+            primary_core_attachment(points[:0], ids[:0], 0, self.config)["supported"]
+        )
+        self.assertFalse(
+            primary_core_attachment(points[:-1], ids[:-1], 0, self.config)["supported"]
+        )
+        face = dict(points=points, primary_core_attachment=attachment)
+        profiles = SimpleNamespace(
+            section=lambda *args: self.fail("Missing actual wall")
+        )
+        self.assertIsNone(
+            raw_face_section(points, face, 0, (3, 6), 1, self.config, profiles)
+        )
 
 
 if __name__ == "__main__":
