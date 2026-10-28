@@ -312,15 +312,25 @@ class BoundarySideMeasurementCache:
 class VesselMeasurementContext:
     """A single vessel's shared immutable raw coordinates and lazy caches."""
 
-    def __init__(self, cache):
+    def __init__(self, cache, raw_uvz=None, raw_point_indexes=None):
         self.local = cache
-        self.raw_uvz = cache.context_xyz if cache.context_xyz is not None else cache.xyz
+        self.raw_uvz = (
+            raw_uvz
+            if raw_uvz is not None
+            else (cache.context_xyz if cache.context_xyz is not None else cache.xyz)
+        )
         self.raw_uvz.setflags(write=False)
         self.raw_point_indexes = (
-            cache.measurement_context.point_indexes
-            if cache.measurement_context is not None
-            else cache.vessel.point_indexes
+            raw_point_indexes
+            if raw_point_indexes is not None
+            else (
+                cache.measurement_context.point_indexes
+                if cache.measurement_context is not None
+                else cache.vessel.point_indexes
+            )
         )
+        if len(self.raw_uvz) != len(self.raw_point_indexes):
+            raise ValueError("RAW_MEASUREMENT_SOURCE_INDEX_ALIGNMENT_ERROR")
         self.counters = dict(
             raw_profile_build_count=0,
             raw_profile_cache_hit=0,

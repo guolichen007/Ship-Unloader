@@ -92,6 +92,11 @@ def corner_coordinates(payload, source_result_sha256):
                 hatch_id=hatch["hatch_id"],
                 vessel_hypothesis_id=hatch["vessel_hypothesis_id"],
                 status=hatch["status"],
+                geometry_status=hatch.get("geometry_status", "UNSPECIFIED"),
+                steel_edge_benchmark_status=hatch.get(
+                    "steel_edge_benchmark_status", "NOT_CERTIFIED"
+                ),
+                operator_confirmation=hatch.get("operator_confirmation", "PENDING"),
                 candidate_type=hatch.get("candidate_type", "HATCH_REVIEW_CANDIDATE"),
                 individual_hatch_count=hatch.get("individual_hatch_count"),
                 geometry_role=hatch["geometry_role"],

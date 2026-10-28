@@ -51,6 +51,7 @@ from .budget import (
 )
 from .precision_diagnostics import PrecisionDiagnostics
 from .opening_regions import build_regions, associate_region
+from .review_state import apply_review_state
 
 
 def _deferred(row, axes, reason=None):
@@ -271,7 +272,13 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
             )
             if base_cache.context_xyz is base_cache.xyz:
                 cache = base_cache
-            measurement = VesselMeasurementContext(cache)
+            selected_points = frame.xyz[selected.raw_point_indexes]
+            selected_uvz = np.column_stack(
+                (selected_points[:, :2] @ vessel.axes.T, selected_points[:, 2])
+            )
+            measurement = VesselMeasurementContext(
+                cache, selected_uvz, selected.raw_point_indexes
+            )
             measurement.budget = budget
             cache.v2_measurement = measurement
             with timing.stage("LOCAL_RECALL"), budget.stage("LOCAL_RECALL"):
@@ -837,6 +844,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                     else []
                 ),
             )
+            apply_review_state(result)
             hatches.append(result)
         if measurement is not None:
             profiler.update(measurement.counters)

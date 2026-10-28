@@ -20,6 +20,12 @@ STATUS_LABELS = {
     "UNRESOLVED": "待复核",
     "UNRESOLVED_VESSEL_REVIEW": "船体归属待定",
 }
+GEOMETRY_LABELS = {
+    "VALIDATED": "算法几何已验证",
+    "PARTIAL": "部分边界待复核",
+    "UNRESOLVED": "算法几何未决",
+}
+REVIEW_CONFIRMATION_LABEL = "待人工确认｜钢内沿精度认证未完成"
 
 
 def chinese_plot_style():
@@ -31,6 +37,8 @@ def chinese_plot_style():
         for character in (
             "".join(FIGURE_TEXT.values())
             + "".join(STATUS_LABELS.values())
+            + "".join(GEOMETRY_LABELS.values())
+            + REVIEW_CONFIRMATION_LABEL
             + "开口组舱数未定状态待核对角点长宽米未观测"
         )
         if ord(character) > 127
@@ -73,6 +81,12 @@ def annotate_measurements(ax, hatches):
             if hatch.get("candidate_type") == "UNRESOLVED_OPENING_GROUP"
             else STATUS_LABELS.get(hatch["status"], "状态待核对")
         )
+        if hatch.get("geometry_status") in GEOMETRY_LABELS:
+            status = (
+                GEOMETRY_LABELS[hatch["geometry_status"]]
+                + "\n"
+                + REVIEW_CONFIRMATION_LABEL
+            )
         centers.append(
             ax.text(
                 *polygon.mean(0),
