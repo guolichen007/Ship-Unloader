@@ -44,8 +44,13 @@ from .physical_validation import UnifiedPhysicalValidation, resolve_physical_mod
 from .layout import VesselLayoutModel, cross_deck_evidence
 from .final_boundary import FinalBoundaryRefiner, polygon
 from .intensity import admission_stats
-from .budget import PerformanceBudget, PerformanceBudgetExceeded
+from .budget import (
+    PerformanceBudget,
+    PerformanceBudgetExceeded,
+    CandidateDeferredPerformance,
+)
 from .precision_diagnostics import PrecisionDiagnostics
+from .opening_regions import build_regions, associate_region
 
 
 def _deferred(row, axes, reason=None):
@@ -60,6 +65,11 @@ def _deferred(row, axes, reason=None):
         proposal_boundary_uv=uv.tolist(),
         proposal_boundary_xy=(uv @ axes).tolist(),
         precision_admitted=False,
+        performance_status=(
+            "DEFERRED_PERFORMANCE"
+            if "PERFORMANCE" in (reason or row.get("reason", ""))
+            else "NOT_DEFERRED_BY_PERFORMANCE"
+        ),
     )
 
 
@@ -291,8 +301,22 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                 cache.provider_build_count = base_cache.provider_build_count
                 if legacy_evidence:
                     cache._v21_post_b2_queries = adapter.adapt(batch, budget)
+                expert_started = time.perf_counter()
+                height_proposals = HeightBasinExpert().propose(cache, research, budget)
+                batches.append(height_proposals)
+                proposals_seen.extend(height_proposals)
+                expert_elapsed["HEIGHT_BASIN"] = time.perf_counter() - expert_started
+                core_bounds = (
+                    *base_cache.xyz[:, :2].min(0),
+                    *base_cache.xyz[:, :2].max(0),
+                )
+                cache.opening_regions, item["region_recall_diagnostics"] = (
+                    build_regions(cache, tuple(proposals_seen), core_bounds)
+                )
+                item["opening_regions"] = [
+                    region.audit() for region in cache.opening_regions
+                ]
                 for expert in (
-                    HeightBasinExpert(),
                     StructuralLineExpert(),
                     LocalEnclosureExpert(),
                     LoadedHoldExpert(),
@@ -324,6 +348,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                 for query in queries:
                     budget.check()
                     row = validation.evaluate(query)
+                    associate_region(query, row, cache.opening_regions)
                     query_rows.append(row)
                     if row["state"] == "REJECTED":
                         rejected.append(row)
@@ -391,6 +416,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                                 ]
                             continue
                         row = validation.evaluate(query)
+                        associate_region(query, row, cache.opening_regions)
                         query_rows.append(row)
                         if row.get("raw_edge_probe_allowed", row["precision_allowed"]):
                             ready.append((query, row))
@@ -435,161 +461,195 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                 measured_family = []
                 for position, (query, row) in enumerate(scheduler):
                     trace = precision_diagnostics.schedule(query, row)
-                    with trace.visit():
-                        try:
-                            budget.check()
-                            if scheduler.explained(query, row):
-                                row["precision_disposition"] = (
-                                    "EXPLAINED_BY_MEASURED_REVIEW_REGION"
-                                )
-                                continue
-                            if row.get("alternate_hypothesis"):
-                                original_row = row
-                                row = validation.evaluate(query)
-                                row.update(
-                                    alternate_hypothesis=True,
-                                    scheduler_region_bounds=original_row[
-                                        "scheduler_region_bounds"
-                                    ],
-                                )
-                                query_rows.append(row)
-                                if row["state"] == "REJECTED":
-                                    continue
-                            row["legacy_post_b2"] = adapter.evidence.get(
-                                query.query_id, row.get("legacy_post_b2", {})
+                    try:
+                        with trace.visit(), budget.candidate_slice(
+                            1
+                            + scheduler.pending_region_count(
+                                row["scheduler_region_bounds"]
                             )
-                            side_candidates = cache.side_candidates(query.bounds)
-                            refiner.observations = []
-                            refiner.observation_key = ""
-                            raw_probe = probe.evaluate(query, row, side_candidates)
-                            if not raw_probe[
-                                "full_precision_allowed"
-                            ] and refiner.can_investigate_sides(
-                                query, row, side_candidates
-                            ):
-                                row["raw_probe_before_shared_measurements"] = dict(
-                                    elapsed_s=raw_probe["elapsed_s"],
-                                    sides={
-                                        name: side["status"]
-                                        for name, side in raw_probe["sides"].items()
-                                    },
+                        ):
+                            try:
+                                budget.check()
+                                if scheduler.explained(query, row):
+                                    row["precision_disposition"] = (
+                                        "EXPLAINED_BY_MEASURED_REVIEW_REGION"
+                                    )
+                                    continue
+                                if row.get("alternate_hypothesis"):
+                                    original_row = row
+                                    row = validation.evaluate(query)
+                                    associate_region(query, row, cache.opening_regions)
+                                    row.update(
+                                        alternate_hypothesis=True,
+                                        scheduler_region_bounds=original_row[
+                                            "scheduler_region_bounds"
+                                        ],
+                                    )
+                                    query_rows.append(row)
+                                    if row["state"] == "REJECTED":
+                                        continue
+                                row["legacy_post_b2"] = adapter.evidence.get(
+                                    query.query_id, row.get("legacy_post_b2", {})
                                 )
-                                refiner.investigate_sides(query, row, side_candidates)
-                                # RawProbe only consumes completed independent Raw
-                                # measurements. It still computes no new normals,
-                                # raster or corners, and applies the same admission.
+                                side_candidates = cache.side_candidates(query.bounds)
+                                for region_audit in item.get("opening_regions", []):
+                                    if region_audit["region_id"] == row.get(
+                                        "opening_region_id"
+                                    ):
+                                        visits = region_audit.setdefault(
+                                            "physical_search_visits", []
+                                        )
+                                        visits.append(
+                                            dict(
+                                                query_id=query.query_id,
+                                                bounds_axial=list(query.bounds),
+                                            )
+                                        )
+                                        region_audit["physical_edge_search_started"] = (
+                                            True
+                                        )
+                                refiner.observations = []
+                                refiner.observation_key = ""
                                 raw_probe = probe.evaluate(query, row, side_candidates)
-                            row["raw_probe"] = raw_probe
-                            row["full_precision_allowed"] = raw_probe[
-                                "full_precision_allowed"
-                            ]
-                            if not raw_probe["full_precision_allowed"]:
+                                if not raw_probe[
+                                    "full_precision_allowed"
+                                ] and refiner.can_investigate_sides(
+                                    query, row, side_candidates
+                                ):
+                                    row["raw_probe_before_shared_measurements"] = dict(
+                                        elapsed_s=raw_probe["elapsed_s"],
+                                        sides={
+                                            name: side["status"]
+                                            for name, side in raw_probe["sides"].items()
+                                        },
+                                    )
+                                    refiner.investigate_sides(
+                                        query, row, side_candidates
+                                    )
+                                    # RawProbe only consumes completed independent Raw
+                                    # measurements. It still computes no new normals,
+                                    # raster or corners, and applies the same admission.
+                                    raw_probe = probe.evaluate(
+                                        query, row, side_candidates
+                                    )
+                                row["raw_probe"] = raw_probe
+                                row["full_precision_allowed"] = raw_probe[
+                                    "full_precision_allowed"
+                                ]
+                                if not raw_probe["full_precision_allowed"]:
+                                    deferred.append(
+                                        _deferred(row, vessel.axes, raw_probe["reason"])
+                                    )
+                                    if not row.get("alternate_hypothesis"):
+                                        scheduler.alternate(query, row)
+                                    continue
+                                profile_started = time.perf_counter()
+                                try:
+                                    observations = (
+                                        adapter.measure_profiles(
+                                            query, raw_probe, measurement
+                                        )
+                                        if query.query_id in adapter.evidence
+                                        else []
+                                    )
+                                finally:
+                                    row["local_profile_elapsed_s"] = (
+                                        time.perf_counter() - profile_started
+                                    )
+                                proposal = dict(
+                                    row,
+                                    measured_side_candidates=side_candidates,
+                                    profile_observations=observations,
+                                    shared_physical_measurements=bool(
+                                        row.get("raw_face_investigation")
+                                    ),
+                                )
+                                # All nominal inputs remain available for directional
+                                # movement guards even after physical-mode dedup.
+                                boxes = np.array([p.bounds for p in query.proposals])
+                                proposal["bounds_before_separator"] = [
+                                    *boxes[:, :2].min(0),
+                                    *boxes[:, 2:].max(0),
+                                ]
+                                attempt = dict(
+                                    query_id=query.query_id,
+                                    bounds_axial=list(query.bounds),
+                                    status="INTERRUPTED",
+                                    result=dict(
+                                        status="UNRESOLVED",
+                                        error_code="FULL_PRECISION_BUDGET_INTERRUPTED",
+                                        sides={},
+                                    ),
+                                )
+                                precision_attempts.append(attempt)
+                                trace.row["full_precision_started"] = True
+                                result = refiner.refine(proposal, vessel.axes)
+                                attempt.update(status="COMPLETED", result=result)
+                                trace.row["full_precision_completed"] = True
+                            except PerformanceBudgetExceeded:
+                                deferred.extend(
+                                    _deferred(
+                                        r, vessel.axes, "PERFORMANCE_BUDGET_EXCEEDED"
+                                    )
+                                    for _, r in ready
+                                    if r.get("raw_probe") is None
+                                )
+                                raise
+                            if not result.get("boundary_xy"):
                                 deferred.append(
-                                    _deferred(row, vessel.axes, raw_probe["reason"])
+                                    _deferred(
+                                        row, vessel.axes, "RAW_PRECISION_UNRESOLVED"
+                                    )
                                 )
                                 if not row.get("alternate_hypothesis"):
                                     scheduler.alternate(query, row)
                                 continue
-                            profile_started = time.perf_counter()
-                            try:
-                                observations = (
-                                    adapter.measure_profiles(
-                                        query, raw_probe, measurement
+                            supported_sides = final_support_sides(result, config)
+                            support = len(supported_sides)
+                            result.update(
+                                proposal_id=query.query_id,
+                                vessel_hypothesis_id=active,
+                                proposal_source="MULTI_EXPERT_UNION",
+                                candidate_sources=query.sources,
+                                source_proposal_ids=[
+                                    p.proposal_id for p in query.proposals
+                                ],
+                                candidate_state="PARTIAL",
+                                containment=row["containment"],
+                                exterior=row["exterior"],
+                                deck_ring=row["deck_ring"],
+                                layout=row["layout"],
+                                review_support_side_count=support,
+                                independently_supported_sides=supported_sides,
+                                coverage_status="FULL_OPENING_COVERAGE_UNVERIFIED",
+                                individual_hatch_count=None,
+                            )
+                            if support < 3:
+                                deferred.append(
+                                    _deferred(
+                                        row,
+                                        vessel.axes,
+                                        "INSUFFICIENT_FINAL_PHYSICAL_SIDES",
                                     )
-                                    if query.query_id in adapter.evidence
-                                    else []
                                 )
-                            finally:
-                                row["local_profile_elapsed_s"] = (
-                                    time.perf_counter() - profile_started
-                                )
-                            proposal = dict(
-                                row,
-                                measured_side_candidates=side_candidates,
-                                profile_observations=observations,
-                                shared_physical_measurements=bool(
-                                    row.get("raw_face_investigation")
-                                ),
-                            )
-                            # All nominal inputs remain available for directional
-                            # movement guards even after physical-mode dedup.
-                            boxes = np.array([p.bounds for p in query.proposals])
-                            proposal["bounds_before_separator"] = [
-                                *boxes[:, :2].min(0),
-                                *boxes[:, 2:].max(0),
-                            ]
-                            attempt = dict(
-                                query_id=query.query_id,
-                                bounds_axial=list(query.bounds),
-                                status="INTERRUPTED",
-                                result=dict(
-                                    status="UNRESOLVED",
-                                    error_code="FULL_PRECISION_BUDGET_INTERRUPTED",
-                                    sides={},
-                                ),
-                            )
-                            precision_attempts.append(attempt)
-                            trace.row["full_precision_started"] = True
-                            result = refiner.refine(proposal, vessel.axes)
-                            attempt.update(status="COMPLETED", result=result)
-                            trace.row["full_precision_completed"] = True
-                        except PerformanceBudgetExceeded:
-                            deferred.extend(
-                                _deferred(r, vessel.axes, "PERFORMANCE_BUDGET_EXCEEDED")
-                                for _, r in ready
-                                if r.get("raw_probe") is None
-                            )
-                            raise
-                        if not result.get("boundary_xy"):
-                            deferred.append(
-                                _deferred(row, vessel.axes, "RAW_PRECISION_UNRESOLVED")
-                            )
-                            if not row.get("alternate_hypothesis"):
-                                scheduler.alternate(query, row)
-                            continue
-                        supported_sides = final_support_sides(result, config)
-                        support = len(supported_sides)
-                        result.update(
-                            proposal_id=query.query_id,
-                            vessel_hypothesis_id=active,
-                            proposal_source="MULTI_EXPERT_UNION",
-                            candidate_sources=query.sources,
-                            source_proposal_ids=[
-                                p.proposal_id for p in query.proposals
-                            ],
-                            candidate_state="PARTIAL",
-                            containment=row["containment"],
-                            exterior=row["exterior"],
-                            deck_ring=row["deck_ring"],
-                            layout=row["layout"],
-                            review_support_side_count=support,
-                            independently_supported_sides=supported_sides,
-                            coverage_status="FULL_OPENING_COVERAGE_UNVERIFIED",
-                            individual_hatch_count=None,
-                        )
-                        if support < 3:
-                            deferred.append(
-                                _deferred(
-                                    row,
-                                    vessel.axes,
-                                    "INSUFFICIENT_FINAL_PHYSICAL_SIDES",
+                                if not row.get("alternate_hypothesis"):
+                                    scheduler.alternate(query, row)
+                                continue
+                            result["status"] = "PARTIAL_HATCH"
+                            item["hatches"].append(result)
+                            scheduler.record(query, row, result)
+                            uv = np.asarray(result["boundary_uv"])
+                            measured_family.append(
+                                dict(
+                                    bounds=(*uv.min(0), *uv.max(0)),
+                                    independent_support_sides=support,
                                 )
                             )
-                            if not row.get("alternate_hypothesis"):
-                                scheduler.alternate(query, row)
-                            continue
-                        result["status"] = "PARTIAL_HATCH"
-                        item["hatches"].append(result)
-                        scheduler.record(query, row, result)
-                        uv = np.asarray(result["boundary_uv"])
-                        measured_family.append(
-                            dict(
-                                bounds=(*uv.min(0), *uv.max(0)),
-                                independent_support_sides=support,
-                            )
-                        )
-                        layout.fit(measured_family)
-                        scheduler.update_layout(layout)
+                            layout.fit(measured_family)
+                            scheduler.update_layout(layout)
+                    except CandidateDeferredPerformance:
+                        scheduler.defer_performance(query, row)
+                        continue
                 for result in item["hatches"]:
                     uv = np.asarray(result["boundary_uv"])
                     result["layout"] = layout.review((*uv.min(0), *uv.max(0)))

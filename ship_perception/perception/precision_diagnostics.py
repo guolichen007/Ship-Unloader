@@ -6,7 +6,7 @@ from functools import wraps
 import hashlib
 import json
 import time
-from .budget import PerformanceBudgetExceeded
+from .budget import PerformanceBudgetExceeded, CandidateDeferredPerformance
 
 _active = ContextVar("ship_precision_candidate", default=None)
 COMPONENTS = (
@@ -74,7 +74,9 @@ class CandidateTrace:
         try:
             yield
         except Exception as error:
-            if isinstance(error, PerformanceBudgetExceeded):
+            if isinstance(
+                error, (PerformanceBudgetExceeded, CandidateDeferredPerformance)
+            ):
                 self.row["timeout_stage"] = self.row["timeout_stage"] or name
             raise
         finally:
@@ -104,7 +106,9 @@ class CandidateTrace:
                 )
         except Exception as error:
             self.row["status"] = "INTERRUPTED"
-            if isinstance(error, PerformanceBudgetExceeded):
+            if isinstance(
+                error, (PerformanceBudgetExceeded, CandidateDeferredPerformance)
+            ):
                 self.row["timeout_stage"] = self.row["timeout_stage"] or (
                     self.stack[-1][0] if self.stack else "BETWEEN_COMPONENTS"
                 )
@@ -115,7 +119,9 @@ class CandidateTrace:
             self.row["interruption_type"] = type(error).__name__
             raise
         finally:
-            self.row["elapsed_total"] += self.clock() - started
+            visit_elapsed = self.clock() - started
+            self.row["elapsed_total"] += visit_elapsed
+            self.row.setdefault("visit_elapsed_s", []).append(visit_elapsed)
             self.row["unattributed_elapsed"] = max(
                 0.0,
                 self.row["elapsed_total"]
@@ -156,14 +162,16 @@ class PrecisionDiagnostics:
             precision_scheduled_count=len(rows),
             precision_started_count=sum(r["visits"] > 0 for r in rows),
             precision_completed_count=sum(r["full_precision_completed"] for r in rows),
-            precision_timeout_count=sum(
-                r["status"] == "DEFERRED_PERFORMANCE" for r in rows
-            ),
+            precision_timeout_count=sum(bool(r.get("interruption_type")) for r in rows),
             precision_deferred_count=sum(
                 not r["full_precision_completed"] for r in rows
             ),
             max_single_precision_time=max(
                 (r["elapsed_total"] for r in rows), default=0.0
+            ),
+            max_uninterrupted_precision_visit_s=max(
+                (elapsed for r in rows for elapsed in r.get("visit_elapsed_s", [])),
+                default=0.0,
             ),
             counting_semantics="Unique candidate bounds; started includes RawProbe/shared role investigation; completed means full refiner returned, irrespective of geometry success; deferred includes scheduled but no completed full refinement",
             candidates=rows,

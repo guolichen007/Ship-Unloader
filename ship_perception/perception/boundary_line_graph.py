@@ -158,3 +158,70 @@ class BoundaryLineGraph:
                     emit(left, rights[0], low, high, "SUPPORTED_OUTER_ENVELOPE")
                     emit(left, rights[-1], low, high, "SUPPORTED_OUTER_ENVELOPE")
         return output
+
+    def region_searches(self, regions):
+        """Nominate all local sides without constructing rectangle products.
+
+        The region is a work domain, not a measured closed hatch. Competing
+        nearby lines stay in its evidence for RawProbe and the one refiner.
+        """
+        output = []
+        self.region_metrics = dict(
+            structural_line_count_u=len(self.families[0]),
+            structural_line_count_v=len(self.families[1]),
+            left_right_pair_count=0,
+            top_bottom_pair_count=0,
+            rectangle_combination_count=0,
+            after_region_filter_count=0,
+            after_dedup_count=0,
+            combination_search_status="NOT_ENUMERATED_REGION_FIRST",
+        )
+        for region in regions:
+            if self.budget is not None:
+                self.budget.check()
+            box = region.bounds
+            sides = []
+            for axis, pos, sign in ((0, 0, 1), (0, 2, -1), (1, 1, 1), (1, 3, -1)):
+                span = (box[1 - axis], box[3 - axis])
+                nearby = [
+                    f
+                    for f in self.families[axis]
+                    if abs(f["rho"] - box[pos])
+                    <= self.config["roi"]["support_search_m"]
+                    and self.overlap(f, span) >= self.support
+                    and (f["rho"] - (box[axis] + box[axis + 2]) / 2) * sign < 0
+                ]
+                sides.append(nearby)
+            self.region_metrics["left_right_pair_count"] += len(sides[0]) * len(
+                sides[1]
+            )
+            self.region_metrics["top_bottom_pair_count"] += len(sides[2]) * len(
+                sides[3]
+            )
+            output.append(
+                dict(
+                    bounds_axial=list(box),
+                    opening_region_id=region.region_id,
+                    source_provider_ids=sorted(
+                        {
+                            pid
+                            for side in sides
+                            for f in side
+                            for pid in f["provider_ids"]
+                        }
+                    ),
+                    region_side_nominations=[[dict(f) for f in side] for side in sides],
+                    normal_face_sides=sum(
+                        any(f["normal_face"] for f in side) for side in sides
+                    ),
+                    geometry_role="REGION_LOCAL_SEARCH_NOT_STEEL",
+                    closure_kind="REGION_LOCAL_BOUNDARY_SEARCH",
+                    signed_roles_resolved=False,
+                    skipped_verified_face_count=0,
+                    internal_transverse_face_coverage=0.0,
+                )
+            )
+        self.region_metrics.update(
+            after_region_filter_count=len(output), after_dedup_count=len(output)
+        )
+        return output

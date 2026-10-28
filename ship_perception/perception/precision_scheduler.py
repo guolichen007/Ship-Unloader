@@ -23,28 +23,41 @@ class PrecisionScheduler:
                 (
                     r
                     for r in self.regions
-                    if r["topology"] == separator
-                    and box_overlap(r["bounds"], query.bounds)
-                    >= config["roi"]["min_enclosure_ratio"]
-                    and sum(
-                        abs(a - b) <= config["roi"]["support_search_m"]
-                        for a, b in zip(r["bounds"], query.bounds)
+                    if (
+                        row.get("opening_region_id")
+                        and r.get("opening_region_id") == row["opening_region_id"]
                     )
-                    >= 3
-                    and all(
-                        abs(
-                            (r["bounds"][axis] + r["bounds"][axis + 2])
-                            - (query.bounds[axis] + query.bounds[axis + 2])
+                    or (
+                        not row.get("opening_region_id")
+                        and r["topology"] == separator
+                        and box_overlap(r["bounds"], query.bounds)
+                        >= config["roi"]["min_enclosure_ratio"]
+                        and sum(
+                            abs(a - b) <= config["roi"]["support_search_m"]
+                            for a, b in zip(r["bounds"], query.bounds)
                         )
-                        / 2
-                        <= config["roi"]["support_search_m"]
-                        for axis in (0, 1)
+                        >= 3
+                        and all(
+                            abs(
+                                (r["bounds"][axis] + r["bounds"][axis + 2])
+                                - (query.bounds[axis] + query.bounds[axis + 2])
+                            )
+                            / 2
+                            <= config["roi"]["support_search_m"]
+                            for axis in (0, 1)
+                        )
                     )
                 ),
                 None,
             )
             if region is None:
-                region = dict(bounds=query.bounds, topology=separator, queue=deque())
+                region = dict(
+                    bounds=query.bounds,
+                    topology=separator,
+                    queue=deque(),
+                    deferred=deque(),
+                    opening_region_id=row.get("opening_region_id"),
+                )
                 self.regions.append(region)
             region["queue"].append((query, row))
         self.explanations = []
@@ -99,11 +112,18 @@ class PrecisionScheduler:
     def __iter__(self):
         # Each region gets one visit per round. There is no fixed hatch count
         # or top-K: every unexplained region remains in the pending queues.
-        while any(r["queue"] for r in self.regions):
+        while any(r["queue"] or r["deferred"] for r in self.regions):
             capacity_tier = min(
-                self.rank(r["queue"][0])[0] for r in self.regions if r["queue"]
+                self.rank((r["deferred"] or r["queue"])[0])[0]
+                for r in self.regions
+                if r["queue"] or r["deferred"]
             )
             for region in self.regions:
+                if region["deferred"]:
+                    query, row = region["deferred"].popleft()
+                    row["scheduler_region_bounds"] = list(region["bounds"])
+                    yield query, row
+                    continue
                 if (
                     region["queue"]
                     and self.rank(region["queue"][0])[0] == capacity_tier
@@ -130,6 +150,22 @@ class PrecisionScheduler:
                     row["scheduler_region_bounds"] = list(region["bounds"])
                     row["scheduler_evidence_family"] = region["last_family"]
                     yield query, row
+
+    def defer_performance(self, query, row):
+        region = next(
+            r
+            for r in self.regions
+            if tuple(row["scheduler_region_bounds"]) == tuple(r["bounds"])
+        )
+        row["precision_disposition"] = "DEFERRED_PERFORMANCE"
+        region["deferred"].append((query, row))
+
+    def pending_region_count(self, exclude_bounds=None):
+        return sum(
+            bool(r["queue"] or r["deferred"])
+            and (exclude_bounds is None or tuple(r["bounds"]) != tuple(exclude_bounds))
+            for r in self.regions
+        )
 
     @staticmethod
     def has_post_structure(row):

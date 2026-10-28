@@ -8,6 +8,10 @@ class PerformanceBudgetExceeded(RuntimeError):
     pass
 
 
+class CandidateDeferredPerformance(RuntimeError):
+    """A scheduling yield; never a physical rejection."""
+
+
 class PerformanceBudget:
     LIMITS = {
         "SCENE_PREPROCESS": 3.0,
@@ -24,6 +28,7 @@ class PerformanceBudget:
         self.events = []
         self.current = None
         self.deadline = None
+        self.candidate_deadline = None
 
     def check(self):
         now = time.perf_counter()
@@ -33,6 +38,29 @@ class PerformanceBudget:
             raise PerformanceBudgetExceeded(
                 "PERFORMANCE_BUDGET_EXCEEDED:" + str(self.current)
             )
+        if self.candidate_deadline is not None and now > self.candidate_deadline:
+            raise CandidateDeferredPerformance(
+                "DEFERRED_PERFORMANCE:" + str(self.current)
+            )
+
+    @contextmanager
+    def candidate_slice(self, pending_regions):
+        """Bound an uninterrupted visit; Raw precision and global limit stay fixed.
+
+        Five seconds is an execution quantum, not a geometry threshold. Share
+        the remaining stage time with different pending physical regions.
+        """
+        now = time.perf_counter()
+        remaining = max(
+            0.0, min(self.deadline or float("inf"), self.started + self.total_s) - now
+        )
+        previous = self.candidate_deadline
+        self.candidate_deadline = now + min(5.0, remaining / max(1, pending_regions))
+        try:
+            self.check()
+            yield
+        finally:
+            self.candidate_deadline = previous
 
     @contextmanager
     def stage(self, name, hard=False):

@@ -1,6 +1,7 @@
 """Single four-side refiner using existing raw and multi-section primitives."""
 
 from .precision_diagnostics import stage as precision_stage, side_completed
+from .budget import CandidateDeferredPerformance
 
 import warnings
 import copy
@@ -90,6 +91,7 @@ class FinalBoundaryRefiner:
         self.side_elapsed = {}
         self.observation_key = ""
         self.role_measurement_cache = {}
+        self.role_progress_cache = {}
         self.side_investigation_reports = {}
 
     @staticmethod
@@ -100,7 +102,10 @@ class FinalBoundaryRefiner:
         """Escalate observed structural ambiguity, never an empty search box."""
         if (
             self.measurement_context is None
-            or self.investigation_key(query) in self.side_investigation_reports
+            or self.side_investigation_reports.get(
+                self.investigation_key(query), {}
+            ).get("status")
+            == "COMPLETED"
         ):
             return False
         if row.get("independent_support_sides", 0) < 3:
@@ -152,11 +157,11 @@ class FinalBoundaryRefiner:
         evidence; this method never grants full precision from nominal counts.
         """
         key = self.investigation_key(query)
-        if key in self.side_investigation_reports:
+        if self.side_investigation_reports.get(key, {}).get("status") == "COMPLETED":
             return self.side_investigation_reports[key]
         started = time.perf_counter()
-        cached = {}
-        report = dict(
+        cached = self.measurement_context.investigated_sides.get(key, {})
+        report = self.side_investigation_reports.get(key) or dict(
             status="INTERRUPTED",
             supported_side_count=0,
             sides={},
@@ -184,6 +189,8 @@ class FinalBoundaryRefiner:
             for name, axis, pos, sign in SIDE_SPECS:
                 if self.budget is not None:
                     self.budget.check()
+                if name in report["sides"]:
+                    continue
                 role = roles[name]
                 if role.get("status") == "MULTIMODE_BOUNDARY_CONFLICT":
                     report["sides"][name] = dict(status="MULTIMODE_CONFLICT")
@@ -262,11 +269,14 @@ class FinalBoundaryRefiner:
                 report["supported_side_count"] = len(cached)
                 side_completed(name, "RAW_SIDE_INVESTIGATION", "STRONG_UNIQUE_EDGE")
             report["status"] = "COMPLETED"
+        except CandidateDeferredPerformance:
+            report["status"] = "DEFERRED_PERFORMANCE"
+            raise
         finally:
-            report["elapsed_s"] = time.perf_counter() - started
+            elapsed = time.perf_counter() - started
+            report["elapsed_s"] = report.get("elapsed_s", 0.0) + elapsed
             self.profiler["raw_face_investigation_elapsed_s"] = (
-                self.profiler.get("raw_face_investigation_elapsed_s", 0.0)
-                + report["elapsed_s"]
+                self.profiler.get("raw_face_investigation_elapsed_s", 0.0) + elapsed
             )
         return report
 
@@ -278,6 +288,16 @@ class FinalBoundaryRefiner:
         finally:
             scopes = self.side_elapsed.setdefault(name, {})
             scopes[scope] = scopes.get(scope, 0.0) + time.perf_counter() - started
+
+    @contextmanager
+    def _role_side_progress(self, key, name, output):
+        """Only completed physical-side work survives a scheduling yield."""
+        yield
+        state = output[name]
+        self.role_progress_cache.setdefault(key, {})[name] = copy.deepcopy(state)
+        while len(self.role_progress_cache) > 64:
+            self.role_progress_cache.pop(next(iter(self.role_progress_cache)))
+        side_completed(name, "ANCHOR_ROLE", state["status"])
 
     def refine(self, proposal, axes):
         if self.budget is not None:
@@ -886,7 +906,12 @@ class FinalBoundaryRefiner:
         support = config["roi"]["min_enclosure_ratio"]
         output = {}
         for name, axis, position, sign in SIDE_SPECS:
-            with self._timed_side(name, "ANCHOR_ROLE"):
+            if name in self.role_progress_cache.get(role_key, {}):
+                output[name] = copy.deepcopy(self.role_progress_cache[role_key][name])
+                continue
+            with self._timed_side(name, "ANCHOR_ROLE"), self._role_side_progress(
+                role_key, name, output
+            ):
                 span = (box[1 - axis], box[3 - axis])
                 edges = physical_sections(span, cell, config)
                 spans = list(zip(edges[:-1], edges[1:]))
@@ -1183,6 +1208,8 @@ class FinalBoundaryRefiner:
             if len(self.role_measurement_cache) >= 64:
                 self.role_measurement_cache.pop(next(iter(self.role_measurement_cache)))
             self.role_measurement_cache[role_key] = copy.deepcopy(output)
+        while len(self.role_progress_cache) > 64:
+            self.role_progress_cache.pop(next(iter(self.role_progress_cache)))
         return output
 
     def _normal_face_reanchor(

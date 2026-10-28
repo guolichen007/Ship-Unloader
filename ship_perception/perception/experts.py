@@ -119,12 +119,16 @@ def structural_enclosures(cache, budget=None):
         lambda axis, rho, span, sign: line_height(cache, axis, rho, span, sign),
         budget,
     )
-    candidates = graph.enclosures()
+    regions = getattr(cache, "opening_regions", None)
+    candidates = (
+        graph.region_searches(regions) if regions is not None else graph.enclosures()
+    )
     cache._v2_boundary_graph = dict(
         node_count=graph.nodes,
         intersection_count=graph.edges,
         adjacent_closure_count=len(candidates),
         raw_role_queries=0,
+        **getattr(graph, "region_metrics", {}),
     )
     cache._v2_structural_enclosures = candidates
     return candidates
