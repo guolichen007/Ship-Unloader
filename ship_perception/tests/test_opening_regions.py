@@ -78,7 +78,8 @@ class OpeningRegions(unittest.TestCase):
     def test_missing_reference_is_not_replaced_by_zero_height(self):
         compiler = OpeningRegionCompiler(self.config)
         regions = compiler.compile(
-            "VESSEL", [self.proposal((0, 0, 25, 12), 0, surrounding_height_m=None)]
+            "VESSEL", [self.proposal((0, 0, 25, 12), 0, surrounding_height_m=None,
+                                     height_rise_side_count=0)]
         )
         self.assertEqual(regions, ())
         self.assertEqual(len(compiler.secondary), 1)

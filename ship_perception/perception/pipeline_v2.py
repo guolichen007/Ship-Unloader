@@ -22,7 +22,8 @@ from .local_evidence import VesselLocalEvidence
 from .measurement import VesselMeasurementContext
 from .berth import load_berth_reference, select_berth_vessel
 from .selected_context import SelectedVesselRawContext
-from .legacy_expert import LegacyProposalExpert, verify_legacy_sources
+from .legacy_expert import (LegacyProposalExpert, verify_legacy_sources,
+                            verify_legacy_b2_core, legacy_full_chain_reference)
 from .candidate_union import candidate_union, physical_queries, PhysicalBoundaryQuery
 from .proposal_compiler import ProposalCompiler, evidence_lineage
 from .legacy_post_b2 import LegacyPostB2EvidenceAdapter
@@ -274,6 +275,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
             measurement = VesselMeasurementContext(cache)
             cache.input_frame = frame
             cache.primary_cache = base_cache
+            cache.s4_exterior = selected.exterior(frame, config)
             measurement.budget = budget
             cache.v2_measurement = measurement
             with timing.stage("LOCAL_RECALL"), budget.stage("LOCAL_RECALL"):
@@ -311,7 +313,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                     *base_cache.xyz[:, :2].max(0),
                 )
                 cache.opening_regions, item["region_recall_diagnostics"] = (
-                    build_regions(cache, tuple(proposals_seen), core_bounds)
+                    build_regions(cache, tuple(proposals_seen), core_bounds, research)
                 )
                 item["opening_regions"] = [
                     region.audit() for region in cache.opening_regions
@@ -345,7 +347,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
             ):
                 queries = _canonical_queries(union, cache)
                 item["candidate_union"]["physical_query_count"] = len(queries)
-                exterior = selected.exterior(frame, config)
+                exterior = cache.s4_exterior
                 validation = UnifiedPhysicalValidation(cache, exterior, selection)
                 for query in queries:
                     budget.check()
@@ -811,6 +813,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
             # This registry survives budget expiry, absent raw sides and a
             # failed refiner. It is independent of final review hatch output.
             formal = getattr(cache, "opening_identities", ())
+            item["s4_topology_bridge"] = getattr(cache, "s4_topology_bridge", None)
             item["structural_boundary_families"] = [
                 family.audit()
                 for family in getattr(cache, "structural_boundary_families", ())
@@ -968,6 +971,10 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
             legacy_expert_enabled=legacy_evidence,
         ),
         legacy_proposal_batches=legacy_batches,
+        legacy_freeze_contracts=dict(
+            legacy_b2_core=verify_legacy_b2_core() if legacy_evidence else dict(status="NOT_USED"),
+            legacy_full_chain_reference=legacy_full_chain_reference(),
+        ),
         physical_validation=bounded(query_rows),
         physical_candidate_registry=query_rows,
         precision_attempts=precision_attempts,

@@ -210,7 +210,7 @@ class OpeningRegionCompiler:
         )
 
 
-def build_regions(cache, proposals, core_bounds):
+def build_regions(cache, proposals, core_bounds, research=None):
     from .validation import deck_ring
 
     compiler = OpeningRegionCompiler(cache.config)
@@ -309,6 +309,17 @@ def build_regions(cache, proposals, core_bounds):
                 ),
             )
         )
+    # The current V2 compiler owns identities. S4 contributes only owned
+    # observations and graph relations, never legacy final rectangles.
+    if hasattr(cache, "xyz"):
+        if research is None:
+            import json
+            from ship_perception.r1_static.heightmap_batch import RESEARCH_CONFIG
+            research = json.loads(RESEARCH_CONFIG.read_bytes())
+        from .s4_topology_bridge import S4TopologyBridge
+        bridge = S4TopologyBridge(cache, research)
+        formal = bridge.compile_regions(formal)
+        cache.s4_topology_bridge = bridge.audit()
     cache.opening_identities = tuple(formal)
     from .structural_family import build_structural_families, attach_family_search
 
@@ -320,7 +331,8 @@ def build_regions(cache, proposals, core_bounds):
         r for r in regions if r.status != "REGION_DETECTED"
     ), dict(
         compiler.audit(),
-        opening_region_count=sum(r.status == "REGION_DETECTED" for r in regions),
+        opening_region_count=len(formal),
+        stable_s4_consumed=hasattr(cache, "s4_topology_bridge"),
         structural_fallback_count=sum(r.status != "REGION_DETECTED" for r in regions),
         visible_basin_search_area_m2=visible_area,
         core_search_area_m2=area(core_bounds),

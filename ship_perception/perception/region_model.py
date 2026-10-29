@@ -86,6 +86,7 @@ class OpeningRegion:
     precision_status: str = "UNRESOLVED"
     precision_attempts: list = field(default_factory=list)
     relationship: str = "INDEPENDENT_OPENING_CANDIDATE"
+    side_topology_support: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if self.status not in REGION_STATES:
@@ -122,6 +123,14 @@ class OpeningRegion:
                     name, "CONSERVATIVE_PRIOR", a[pos], source=source
                 )
                 for name, pos in (("U0", 0), ("U1", 2), ("V0", 1), ("V1", 3))
+            }
+        if not self.side_topology_support:
+            source = next((s.source for s in self.topology_support if s.source), None)
+            self.side_topology_support = {
+                name: TopologySupport(
+                    "STRUCTURAL_LINE_FAMILY", "UNOBSERVED", source=source
+                )
+                for name in ("U0", "U1", "V0", "V1")
             }
 
     @property
@@ -192,11 +201,19 @@ class OpeningRegion:
             region_status=self.status,
             topology_status=self.status,
             geometry_status=self.precision_status,
+            boundary_certification=(
+                "PARTIAL"
+                if self.precision_status == "PARTIAL_MEASUREMENT_AVAILABLE"
+                else "UNRESOLVED"
+            ),
             steel_edge_benchmark_status="NOT_CERTIFIED",
             operator_confirmation="PENDING",
             topology_support=[asdict(s) for s in self.topology_support],
             boundary_measurements={
                 k: asdict(v) for k, v in self.boundary_measurements.items()
+            },
+            side_topology_support={
+                k: asdict(v) for k, v in self.side_topology_support.items()
             },
             source_proposal_ids=list(self.source_proposal_ids),
             component_bounds=[list(b) for b in self.component_bounds],
