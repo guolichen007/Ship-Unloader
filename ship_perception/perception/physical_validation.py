@@ -225,6 +225,7 @@ class UnifiedPhysicalValidation:
             # Unknown B1 attribution is never upgraded to confirmed outside.
             return decide("UNRESOLVED", "VESSEL_BOUNDARY_OBSERVATION_INCOMPLETE")
         if ring["measured_strong_side_count"] < 3:
+            row["topology_disposition"] = "KEEP_REGION_BOUNDARY_MEASUREMENT_UNRESOLVED"
             return decide("UNRESOLVED", "INSUFFICIENT_INDEPENDENT_ENCLOSURE_SUPPORT")
         positive = ring["positive_height_side_count"]
         if positive < 2 and coaming < 3:

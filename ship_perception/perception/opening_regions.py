@@ -5,7 +5,7 @@ import hashlib
 import numpy as np
 
 from .candidate_union import canonical
-from .sections import physical_sections
+from .region_model import OpeningRegion, TopologySupport, EvidenceSource
 
 
 def intersection(first, second):
@@ -60,28 +60,12 @@ class OpeningRegionCompiler:
         """
         support = self.config["roi"]["min_enclosure_ratio"]
         proposals = tuple(proposals)
-        minimum = self.config["boundary"]["profile_min_sections"]
         candidates = []
         for proposal in proposals:
             row = proposal.evidence()
             if proposal.expert != "HEIGHT_BASIN":
                 continue
             box = proposal.bounds
-            capacities = [
-                max(
-                    0,
-                    len(
-                        physical_sections(
-                            (box[a], box[a + 2]),
-                            self.config["geometry"]["refine_voxel_m"],
-                            self.config,
-                        )
-                    )
-                    - 1,
-                )
-                for a in (0, 1)
-            ]
-            closed = not row.get("touches_grid_boundary", False)
             outside, inside = row.get("surrounding_height_m"), row.get(
                 "interior_height_m"
             )
@@ -91,12 +75,13 @@ class OpeningRegionCompiler:
                 if structural_support is not None
                 else row.get("search_independent_support_sides", 0)
             )
-            if (
-                min(capacities) < minimum
-                or not closed
-                or local_drop is None
-                or local_drop < self.config["roi"]["opening_drop_m"]
-                or max(row.get("height_rise_side_count", 0), structural) < 3
+            if not (
+                structural
+                or row.get("height_rise_side_count", 0)
+                or (
+                    local_drop is not None
+                    and abs(local_drop) >= self.config["roi"]["opening_drop_m"]
+                )
             ):
                 self.secondary.append(
                     dict(
@@ -272,7 +257,68 @@ def build_regions(cache, proposals, core_bounds):
                 ),
             )
         )
-    return tuple(regions), dict(
+    # Work domains remain search nominations. Actual opening identities carry
+    # topology support independently of whether any steel side was measured.
+    source_frame = getattr(cache, "input_frame", None)
+    transform = np.eye(4)
+    transform[:2, :2] = cache.vessel.axes
+    source = EvidenceSource(
+        source_frame.frame_id if source_frame else "UNKNOWN",
+        (
+            str(source_frame.provenance.get("sensor_id", "UNKNOWN"))
+            if source_frame
+            else "UNKNOWN"
+        ),
+        source_frame.stamp if source_frame else "UNKNOWN",
+        None,
+        tuple(tuple(row) for row in transform),
+        (cache.vessel.vessel_id,),
+    )
+    formal = []
+    by_id = {p.proposal_id: p for p in proposals}
+    for seed in regions:
+        if seed.status != "REGION_DETECTED":
+            continue
+        box = np.asarray(seed.bounds)
+        margin = cache.config["roi"]["support_search_m"]
+        envelope = tuple(np.r_[box[:2] - margin, box[2:] + margin])
+        formal.append(
+            OpeningRegion(
+                seed.region_id,
+                seed.vessel_id,
+                seed.bounds,
+                envelope,
+                (
+                    TopologySupport(
+                        "HEIGHT_TRANSITION",
+                        "SUPPORTING",
+                        seed.source_proposal_ids,
+                        source,
+                    ),
+                ),
+                seed.source_proposal_ids,
+                seed.component_bounds,
+                (
+                    "REGION_FOV_TRUNCATED"
+                    if any(
+                        by_id[pid].evidence().get("touches_grid_boundary", False)
+                        for pid in seed.source_proposal_ids
+                        if pid in by_id
+                    )
+                    else "REGION_PARTIAL"
+                ),
+            )
+        )
+    cache.opening_identities = tuple(formal)
+    from .structural_family import build_structural_families, attach_family_search
+
+    cache.structural_boundary_families = build_structural_families(cache)
+    cache.structural_family_associations = attach_family_search(
+        formal, cache.structural_boundary_families, cache.config
+    )
+    return tuple(formal) + tuple(
+        r for r in regions if r.status != "REGION_DETECTED"
+    ), dict(
         compiler.audit(),
         opening_region_count=sum(r.status == "REGION_DETECTED" for r in regions),
         structural_fallback_count=sum(r.status != "REGION_DETECTED" for r in regions),
@@ -290,7 +336,7 @@ def associate_region(query, row, regions):
             r,
         )
         for r in regions
-        if r.status == "REGION_DETECTED"
+        if isinstance(r, OpeningRegion) or r.status == "REGION_DETECTED"
     ]
     matched = [(overlap, region) for overlap, region in overlaps if overlap > 0.0]
     chosen = (
@@ -299,7 +345,14 @@ def associate_region(query, row, regions):
             key=lambda pair: (pair[0], -area(pair[1].bounds), pair[1].region_id),
         )[1]
         if matched
-        else next((r for r in regions if r.status != "REGION_DETECTED"), None)
+        else next(
+            (
+                r
+                for r in regions
+                if not isinstance(r, OpeningRegion) and r.status != "REGION_DETECTED"
+            ),
+            None,
+        )
     )
     row["opening_region_ids"] = [region.region_id for overlap, region in matched]
     row["opening_region_id"] = (

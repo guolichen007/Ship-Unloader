@@ -272,6 +272,8 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
             if base_cache.context_xyz is base_cache.xyz:
                 cache = base_cache
             measurement = VesselMeasurementContext(cache)
+            cache.input_frame = frame
+            cache.primary_cache = base_cache
             measurement.budget = budget
             cache.v2_measurement = measurement
             with timing.stage("LOCAL_RECALL"), budget.stage("LOCAL_RECALL"):
@@ -299,8 +301,6 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                 # precision without building another eager normal tree.
                 cache.providers = base_cache.structural_providers()
                 cache.provider_build_count = base_cache.provider_build_count
-                if legacy_evidence:
-                    cache._v21_post_b2_queries = adapter.adapt(batch, budget)
                 expert_started = time.perf_counter()
                 height_proposals = HeightBasinExpert().propose(cache, research, budget)
                 batches.append(height_proposals)
@@ -316,6 +316,8 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                 item["opening_regions"] = [
                     region.audit() for region in cache.opening_regions
                 ]
+                if legacy_evidence:
+                    cache._v21_post_b2_queries = adapter.adapt(batch, budget)
                 for expert in (
                     StructuralLineExpert(),
                     LocalEnclosureExpert(),
@@ -584,6 +586,11 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                                 precision_attempts.append(attempt)
                                 trace.row["full_precision_started"] = True
                                 result = refiner.refine(proposal, vessel.axes)
+                                for opening in getattr(cache, "opening_identities", ()):
+                                    if opening.region_id in row.get(
+                                        "opening_region_ids", ()
+                                    ):
+                                        opening.record_precision(result)
                                 attempt.update(status="COMPLETED", result=result)
                                 trace.row["full_precision_completed"] = True
                             except PerformanceBudgetExceeded:
@@ -801,6 +808,28 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
                 query_rows.append(pending)
                 deferred.append(_deferred(pending, vessel.axes))
         if cache is not None:
+            # This registry survives budget expiry, absent raw sides and a
+            # failed refiner. It is independent of final review hatch output.
+            formal = getattr(cache, "opening_identities", ())
+            item["structural_boundary_families"] = [
+                family.audit()
+                for family in getattr(cache, "structural_boundary_families", ())
+            ]
+            item["structural_family_associations"] = getattr(
+                cache, "structural_family_associations", ()
+            )
+            if formal:
+                item["opening_region_identities"] = [
+                    opening.audit() for opening in formal
+                ]
+                for region in item["opening_region_identities"]:
+                    box = region["conservative_bounds"]
+                    region["conservative_boundary_xy"] = (
+                        polygon(box) @ vessel.axes
+                    ).tolist()
+                    region["search_envelope_xy"] = (
+                        polygon(region["search_envelope"]) @ vessel.axes
+                    ).tolist()
             compiled_registry = getattr(cache, "_v21_compiled_registry", [])
             item["legacy_post_b2_evidence"] = (
                 list(adapter.evidence.values()) if adapter is not None else []
@@ -923,6 +952,11 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
             review_candidate_count=len(hatches),
             hatch_count_status="REVIEW_ONLY",
             hatches=hatches,
+            opening_regions=[
+                region
+                for item in by_vessel
+                for region in item.get("opening_region_identities", ())
+            ],
             intensity_used=False,
         ),
         pipeline_health=dict(

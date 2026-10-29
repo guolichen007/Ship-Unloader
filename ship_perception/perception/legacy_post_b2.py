@@ -141,8 +141,9 @@ class LegacyPostB2EvidenceAdapter:
             (row, [row])
             for row in raw["hatch_hypotheses"]
             if row["hatch_hypothesis_id"] not in grouped_ids
-            and row.get("measured_strong_side_count", 0) >= 3
-            and row.get("state") == "HATCH_PROPOSAL"
+            and row.get("state") in ("HATCH_PROPOSAL", "PARTIAL_HATCH", "UNRESOLVED")
+            and row.get("bounds_axial") is not None
+            and row.get("supporting_provider_ids")
         )
         for seed, members in groups:
             if budget is not None:
