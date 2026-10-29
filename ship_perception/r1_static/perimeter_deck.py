@@ -5,8 +5,57 @@ import math
 import numpy as np
 from scipy.spatial import cKDTree
 
-from .local_deck import _anchor_height, _huber_plane, _plane_angle, _plane_from_three
+from .local_deck import _anchor_height, _huber_plane, _plane_angle
 from .canonical_points import canonical_indexes
+
+
+def _gravity_hypotheses(raw, config):
+    """Grow distinct observed height modes using full, canonical Raw support.
+
+    Height bins only initialize hypotheses. Each hypothesis is fitted and
+    qualified against all original support points; modes are never averaged
+    into one compulsory deck plane.
+    """
+    threshold = config["geometry"]["plane_inlier_m"]
+    minimum = config["geometry"]["min_plane_points"]
+    max_angle = math.radians(config["geometry"]["normal_angle_deg"])
+    keys = np.floor((raw[:, 2] - raw[:, 2].min()) / threshold).astype(np.int64)
+    unique, counts = np.unique(keys, return_counts=True)
+    density = dict(zip(unique.tolist(), counts.tolist()))
+    peaks = [
+        k
+        for k in unique
+        if density[k] >= minimum
+        and density[k] >= density.get(k - 1, 0)
+        and density[k] > density.get(k + 1, 0)
+    ]
+    heights = [float(np.median(raw[:, 2]))] + [
+        float(np.median(raw[keys == k, 2])) for k in peaks
+    ]
+    hypotheses = []
+    for height in sorted(set(heights)):
+        plane = (np.array([0.0, 0.0, 1.0]), -height)
+        # Full support robust fit is one candidate, not a replacement for the
+        # independently grown modes. Existing gravity/inlier gates still apply.
+        initial = _huber_plane(raw, plane, threshold, max_angle)
+        starts = [plane] + ([initial] if initial is not None else [])
+        for seed in starts:
+            mask = abs(raw @ seed[0] + seed[1]) <= threshold
+            for _ in range(8):
+                if int(mask.sum()) < minimum:
+                    break
+                refined = _huber_plane(raw[mask], seed, threshold, max_angle)
+                if refined is None:
+                    break
+                updated = abs(raw @ refined[0] + refined[1]) <= threshold
+                seed = refined
+                if np.array_equal(updated, mask):
+                    mask = updated
+                    break
+                mask = updated
+            if int(mask.sum()) >= minimum:
+                hypotheses.append((int(mask.sum()), seed, mask))
+    return sorted(hypotheses, key=lambda r: (-r[0], tuple(r[1][0]), r[1][1]))
 
 
 def estimate_segment_deck(points, segment, config, tree=None):
@@ -64,21 +113,9 @@ def estimate_segment_deck(points, segment, config, tree=None):
         result["reason"] = "INSUFFICIENT_OUTWARD_RAW_SUPPORT"
         return result, None, forensic
     raw = points[raw_ids].astype(float)
-    rng = np.random.default_rng(2026)
-    sample_ids = rng.choice(len(raw), min(len(raw), 3000), replace=False)
-    sample = raw[sample_ids]
     threshold = config["geometry"]["plane_inlier_m"]
     max_angle = math.radians(config["geometry"]["normal_angle_deg"])
-    hypotheses = []
-    for _ in range(config["geometry"]["ransac_iterations"]):
-        plane = _plane_from_three(
-            sample[rng.choice(len(sample), 3, replace=False)], max_angle
-        )
-        if plane is None:
-            continue
-        mask = np.abs(sample @ plane[0] + plane[1]) <= threshold
-        if int(mask.sum()) >= minimum:
-            hypotheses.append((int(mask.sum()), plane, mask))
+    hypotheses = _gravity_hypotheses(raw, config)
     if not hypotheses:
         result["reason"] = "NO_GRAVITY_COMPATIBLE_PLANE"
         return result, None, forensic

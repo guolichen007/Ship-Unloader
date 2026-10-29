@@ -31,6 +31,7 @@ from .height_structure_forensics_p1 import _offset_from_height
 from .heightmap_batch import RESEARCH_CONFIG
 from .opening_seed import FovMap, perimeter_segments
 from .perimeter_deck import estimate_segment_deck
+from .canonical_points import point_order
 from .run import DEFAULT_CONFIG, REPO, _atomic_json, _git_sha, resolve_config
 
 REFERENCE_ROLE = "BROAD_PERIMETER_SUPPORT"
@@ -182,7 +183,7 @@ def analyze_scene_s4r1(points, config, research, baseline_result):
     grid = auxiliary["coarse"]
     fov = FovMap(points, config)
     tree = cKDTree(points[:, :2])
-    centroid = points.mean(axis=0)
+    centroid = points[point_order(points)].astype(float).mean(axis=0)
     node_geometries = {node.node_id: NodeGeometry(node, grid) for node in nodes}
 
     candidates = []
