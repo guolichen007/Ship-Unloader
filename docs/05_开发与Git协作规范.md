@@ -7,6 +7,8 @@
 
 ## 分支、提交、PR 与 main
 
+2026-10-29 V2.6 用户任务授权从 `29d43a81ed2b75e45bac1cff07628e011fe8a8cf` 建立 `codex/hatch-v26-s4-causal-fix`，限定 S4 首分叉、逐段 plane、确定性 line 和连续 4θ 聚合修复。保留规范点序、Region-First、既有物理阈值及 V1.4 冻结。两个稳定门通过后，7-16 仍无完整区域身份，按 `STABLE_S4_BUT_REGION_GENERATION_FAILS` 停止；宽矩形枚举候选不算已存在的完整 OpeningRegion，不能据此按历史参考挑框。旧全文件 Legacy 校验产生的入口错误保留，不绕过、不重写冻结清单。只保存明确未通过的实验 checkpoint，不推送、merge、tag 或晋升现场基线。
+
 2026-10-29 V2.4 用户任务授权从 `7ea5c78da9ac5367933d6166e1c17046fc6b5122` 建立 `codex/hatch-v24-structural-region`，并在独立 `Ship-Unloader-Bisect` 工作树作 914f869..51410e3 法证。允许本轮 Region/Boundary 解耦与当前架构内结构线族重建；不直接 revert bad commit，不修改冻结源或物理阈值。7-16 未形成完整区域身份时按 Stop Gate 2 停止并等待审查；失败实现只能保存为明确未通过的开发 checkpoint，不晋升基线。main、tag、分支删除及生产放行均未授权。
 
 2026-10-28 V2.3 用户任务要求先完整保存 V2.2 暂停现场并允许推送 `codex/hatch-v22-paused-audit`；审计快照为 `469953a58d37ec1f0a948d36228a878b746a8e16`。随后从 `1a0c9d0` 创建 `codex/hatch-v23-conservative-recall`。真实六景拓扑与覆盖门通过前，不引入新的 wall/contact、Expert、阈值或精修性能优化。当前独立冻结链路重放在 7-16 仍失败，新增代码仅作离线审计 checkpoint，不作为新识别基线，不合入 main、不 tag、不删除旧分支。

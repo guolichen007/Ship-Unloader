@@ -2,7 +2,7 @@
 
 双激光雷达卸船机船舱识别与船体稳定跟踪系统。
 
-本分支是 **V2.4 结构区域实验开发版**，运行环境为 Ubuntu 22.04 / ROS2 Humble。共用识别主链增加独立的 OpeningRegion、TopologySupport、BoundaryMeasurement 及船局部结构线族，完整召回仍未通过。当前停在 7-16 Gate 2：存在多个未决区域提名，尚未形成一个完整舱区身份。不能替代 main 现场基线，也不用于自动控制。V1.4 船体跟踪源码继续冻结保留。
+本分支是 **V2.6 S4 因果修复实验 checkpoint**，目标环境为 Ubuntu 22.04 / ROS2 Humble。逐段平面、边线与连续结构轴的观测稳定性检查通过，7-16 仍未形成完整 OpeningRegion 身份，真实召回未通过。本轮允许修改的 S4 文件仍在旧 56 文件冻结清单内，默认 V2 入口当前会报 `LEGACY_EXPERT_BEHAVIOR_CHANGED`，两项入口集成测试错误保留，未绕过校验。以下入口说明属于原有接口，不表示此 checkpoint 可替代现场基线。main 与 V1.4 冻结源保持不变，不用于自动控制。
 
 ## 两个现场入口
 
