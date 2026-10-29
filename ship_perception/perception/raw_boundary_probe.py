@@ -138,7 +138,7 @@ class SignedRoleResolver:
         paired, faces, evidence = [], [], []
         observed, partial = False, False
         for rho in anchors:
-            anchor_key = (axis, rho, tuple(span), sign, rho in face_anchors)
+            anchor_key = (axis, rho, tuple(span), sign, rho in face_anchors, extended)
             if anchor_key in self._anchor_results:
                 old = self._anchor_results[anchor_key]
                 evidence.append(copy.deepcopy(old["evidence"]))
@@ -150,7 +150,14 @@ class SignedRoleResolver:
             rows, face_rows = [], []
             anchor_observed = False
             for section in spans:
-                section_key = (axis, rho, tuple(section), sign, rho in face_anchors)
+                section_key = (
+                    axis,
+                    rho,
+                    tuple(section),
+                    sign,
+                    rho in face_anchors,
+                    extended,
+                )
                 if section_key in self._section_results:
                     cached = self._section_results[section_key]
                     rows.extend(copy.deepcopy(cached["rows"]))

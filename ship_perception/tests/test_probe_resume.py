@@ -109,6 +109,17 @@ class ProbeResume(unittest.TestCase):
         self.assertEqual(correct["status"], "STRONG_UNIQUE_EDGE")
         self.assertNotEqual(opposite["status"], "STRONG_UNIQUE_EDGE")
 
+    def test_cheap_missing_pair_does_not_hide_extended_raw_measurement(self):
+        resolver = self.resolver()
+        with patch(
+            "ship_perception.r1_static.rectangle_refinement._raw_edge_rho",
+            return_value=(None, 0),
+        ), patch.object(resolver, "raw_nominations", return_value=()):
+            initial = resolver.side(0, 8.0, (3.0, 14.0), 1, [])
+            extended = resolver.side(0, 8.0, (3.0, 14.0), 1, [], extended=True)
+        self.assertNotEqual(initial["status"], "STRONG_UNIQUE_EDGE")
+        self.assertEqual(extended["status"], "STRONG_UNIQUE_EDGE")
+
 
 if __name__ == "__main__":
     unittest.main()
