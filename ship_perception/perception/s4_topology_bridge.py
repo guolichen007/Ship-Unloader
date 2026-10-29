@@ -7,6 +7,7 @@ measurements are inputs. Missing separators remain unknown.
 import hashlib
 import itertools
 import math
+import time
 
 import numpy as np
 from scipy import ndimage
@@ -28,6 +29,10 @@ from .structural_family import merge_intervals
 
 def _ident(prefix, value):
     return prefix + hashlib.sha256(canonical(value).encode()).hexdigest()[:16]
+
+
+class S4ObservationDeferred(RuntimeError):
+    """The existing total budget must still leave time for shared precision."""
 
 
 def topology_relation(first, second, shared_families, continuity, split_evidence):
@@ -99,18 +104,45 @@ def member_cell_assignment(xy, member_masks, region_bounds, nomination_bounds):
 
 
 class S4TopologyBridge:
-    def __init__(self, cache, research):
+    def __init__(self, cache, research, budget=None):
         self.cache = cache
         self.primary = getattr(cache, "primary_cache", cache)
         self.config = cache.config
         self.vessel_id = cache.vessel.vessel_id
+        self.budget = budget
+        self.observation_progress = dict(
+            completed_deck_segments=[], completed_profile_segments=[]
+        )
         # Only immutable active-vessel primary points own topology. Nearby
         # UNKNOWN context is available to precision, never silently promoted.
         self.xyz = self.primary.xyz
         height, auxiliary, nodes = _hierarchy(self.xyz, self.config, research)
-        self.s4 = analyze_scene_s4r1(self.xyz, self.config, research, height)
         self.grid = auxiliary["coarse"]
         self.nodes = {n.node_id: n for n in nodes}
+        self.families, self.vertices, self.relations = [], [], []
+        self.raw_record_count = 0
+        self.observations, self.regions = [], []
+        try:
+            self.s4 = analyze_scene_s4r1(
+                self.xyz,
+                self.config,
+                research,
+                height,
+                checkpoint=self._checkpoint if budget is not None else None,
+            )
+        except S4ObservationDeferred:
+            self.axis = dict(
+                status="DEFERRED_PERFORMANCE", reason="SHARED_PRECISION_TIME_RESERVED"
+            )
+            self.s4 = dict(
+                edges=[],
+                segment_resolutions=self.observation_progress[
+                    "completed_profile_segments"
+                ],
+            )
+            self.observations, _ = _observations(self.s4["segment_resolutions"])
+            self.raw_record_count = len(self.observations)
+            return
         forbidden = {
             s["segment_id"]
             for s in self.s4["segment_resolutions"]
@@ -142,6 +174,20 @@ class S4TopologyBridge:
         self._families()
         self._vertices()
         self._relations()
+
+    def _checkpoint(self, stage, record):
+        """Keep finished evidence; incomplete S4 never authorizes a new merge."""
+        self.observation_progress["last_stage"] = stage
+        if stage == "SEGMENT_DECK":
+            self.observation_progress["completed_deck_segments"].append(record)
+        elif stage == "PROFILE":
+            self.observation_progress["completed_profile_segments"].append(record)
+        if self.budget is None:
+            return
+        reserve = self.budget.LIMITS["FINAL_PRECISION"]
+        if time.perf_counter() >= self.budget.started + self.budget.total_s - reserve:
+            raise S4ObservationDeferred("S4_OBSERVATION_DEFERRED_FOR_SHARED_PRECISION")
+        self.budget.check()
 
     def _families(self):
         observations, _ = _observations(self.s4["segment_resolutions"])
@@ -645,7 +691,11 @@ class S4TopologyBridge:
             status=(
                 "S4_EVIDENCE_COMPILED"
                 if self.axis["status"] == "AXIS_ESTIMATED"
-                else "AXIS_AMBIGUOUS"
+                else (
+                    "S4_EVIDENCE_DEFERRED_PERFORMANCE"
+                    if self.axis["status"] == "DEFERRED_PERFORMANCE"
+                    else "AXIS_AMBIGUOUS"
+                )
             ),
             vessel_id=self.vessel_id,
             raw_record_count=self.raw_record_count,
@@ -664,6 +714,7 @@ class S4TopologyBridge:
             raw_observations=self.observations,
             topology_relations=self.relations,
             structural_axis=self.axis,
+            observation_progress=getattr(self, "observation_progress", {}),
             observation_grid=dict(
                 x0=self.grid.x0, y0=self.grid.y0, cell_m=self.grid.cell_m
             ),

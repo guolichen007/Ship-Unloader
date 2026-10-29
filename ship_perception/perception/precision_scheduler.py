@@ -92,6 +92,7 @@ class PrecisionScheduler:
         )
         return (
             -int(nominal_capacity >= 3),
+            -int(row.get("region_identity_nomination", False)),
             -int(max(coaming, row.get("search_normal_face_side_count", 0)) >= 3),
             -int(coaming >= 3),
             row.get("internal_transverse_face_coverage", 0.0),

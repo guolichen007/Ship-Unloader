@@ -120,6 +120,91 @@ class ProbeResume(unittest.TestCase):
         self.assertNotEqual(initial["status"], "STRONG_UNIQUE_EDGE")
         self.assertEqual(extended["status"], "STRONG_UNIQUE_EDGE")
 
+    def test_explicit_compiler_identity_precedes_an_overlapping_fragment(self):
+        from ship_perception.perception.candidate_union import (
+            CandidateProposal,
+            PhysicalBoundaryQuery,
+        )
+        from ship_perception.perception.opening_regions import (
+            OpeningRegionSeed,
+            associate_region,
+        )
+        from ship_perception.perception.precision_scheduler import PrecisionScheduler
+
+        full = OpeningRegionSeed("FULL", "V", (0.0, 0.0, 40.0, 12.0), (), ())
+        fragment = OpeningRegionSeed("SMALL", "V", (0.0, 0.0, 10.0, 12.0), (), ())
+        proposal = CandidateProposal.from_evidence(
+            "STRUCTURAL_LINE",
+            "V",
+            dict(bounds_axial=full.bounds, opening_region_id="FULL"),
+            0,
+        )
+        query = PhysicalBoundaryQuery("Q", "V", full.bounds, (proposal,), ())
+        row = dict()
+        associate_region(query, row, [fragment, full])
+        self.assertEqual(row["opening_region_id"], "FULL")
+        self.assertEqual(row["opening_region_ids"], ["FULL"])
+        self.assertEqual(set(row["opening_search_region_ids"]), {"FULL", "SMALL"})
+        competing = PhysicalBoundaryQuery("A", "V", fragment.bounds, (), ())
+        scheduler = PrecisionScheduler(
+            [(competing, dict(opening_region_id="FULL")), (query, row)],
+            self.resolver().config,
+        )
+        self.assertEqual(next(iter(scheduler))[0].query_id, "Q")
+
+    def test_foreign_declared_identity_does_not_get_owned_nomination_priority(self):
+        from ship_perception.perception.candidate_union import (
+            CandidateProposal,
+            PhysicalBoundaryQuery,
+        )
+        from ship_perception.perception.opening_regions import (
+            OpeningRegionSeed,
+            associate_region,
+        )
+
+        foreign = OpeningRegionSeed("OTHER", "W", (0.0, 0.0, 40.0, 12.0), (), ())
+        proposal = CandidateProposal.from_evidence(
+            "STRUCTURAL_LINE",
+            "V",
+            dict(bounds_axial=foreign.bounds, opening_region_id="OTHER"),
+            0,
+        )
+        query = PhysicalBoundaryQuery("Q", "V", foreign.bounds, (proposal,), ())
+        row = dict()
+        associate_region(query, row, [foreign])
+        self.assertFalse(row["region_identity_nomination"])
+        self.assertNotEqual(row["opening_region_id"], "OTHER")
+
+    def test_deferred_s4_keeps_finished_evidence_and_existing_identity(self):
+        from ship_perception.perception.s4_topology_bridge import (
+            S4TopologyBridge,
+            S4ObservationDeferred,
+        )
+
+        bridge = S4TopologyBridge.__new__(S4TopologyBridge)
+        bridge.observation_progress = dict(
+            completed_deck_segments=[], completed_profile_segments=[]
+        )
+        bridge.budget = SimpleNamespace(
+            started=0.0,
+            total_s=55.0,
+            LIMITS=dict(FINAL_PRECISION=20.0),
+            check=lambda: None,
+        )
+        record = dict(segment_id="OBSERVED", deck=dict(status="RESOLVED"))
+        with patch(
+            "ship_perception.perception.s4_topology_bridge.time.perf_counter",
+            return_value=36.0,
+        ):
+            with self.assertRaises(S4ObservationDeferred):
+                bridge._checkpoint("SEGMENT_DECK", record)
+        self.assertEqual(
+            bridge.observation_progress["completed_deck_segments"], [record]
+        )
+        bridge.axis = dict(status="DEFERRED_PERFORMANCE")
+        prior = SimpleNamespace(region_id="KEEP")
+        self.assertEqual(bridge.compile_regions([prior]), [prior])
+
 
 if __name__ == "__main__":
     unittest.main()

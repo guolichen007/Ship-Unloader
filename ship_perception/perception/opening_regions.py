@@ -315,9 +315,15 @@ def build_regions(cache, proposals, core_bounds, research=None):
         if research is None:
             import json
             from ship_perception.r1_static.heightmap_batch import RESEARCH_CONFIG
+
             research = json.loads(RESEARCH_CONFIG.read_bytes())
         from .s4_topology_bridge import S4TopologyBridge
-        bridge = S4TopologyBridge(cache, research)
+
+        bridge = S4TopologyBridge(
+            cache,
+            research,
+            budget=getattr(getattr(cache, "v2_measurement", None), "budget", None),
+        )
         formal = bridge.compile_regions(formal)
         cache.s4_topology_bridge = bridge.audit()
     cache.opening_identities = tuple(formal)
@@ -341,6 +347,14 @@ def build_regions(cache, proposals, core_bounds, research=None):
 
 
 def associate_region(query, row, regions):
+    declared = {
+        p.evidence().get("opening_region_id")
+        for p in query.proposals
+        if p.evidence().get("opening_region_id")
+    }
+    owned = [
+        r for r in regions if r.region_id in declared and r.vessel_id == query.vessel_id
+    ]
     overlaps = [
         (
             intersection(query.bounds, r.bounds)
@@ -348,10 +362,11 @@ def associate_region(query, row, regions):
             r,
         )
         for r in regions
-        if isinstance(r, OpeningRegion) or r.status == "REGION_DETECTED"
+        if r.vessel_id == query.vessel_id
+        and (isinstance(r, OpeningRegion) or r.status == "REGION_DETECTED")
     ]
     matched = [(overlap, region) for overlap, region in overlaps if overlap > 0.0]
-    chosen = (
+    chosen = (owned[0] if len(owned) == 1 else None) or (
         max(
             matched,
             key=lambda pair: (pair[0], -area(pair[1].bounds), pair[1].region_id),
@@ -361,12 +376,21 @@ def associate_region(query, row, regions):
             (
                 r
                 for r in regions
-                if not isinstance(r, OpeningRegion) and r.status != "REGION_DETECTED"
+                if r.vessel_id == query.vessel_id
+                and not isinstance(r, OpeningRegion)
+                and r.status != "REGION_DETECTED"
             ),
             None,
         )
     )
-    row["opening_region_ids"] = [region.region_id for overlap, region in matched]
+    row["opening_search_region_ids"] = [region.region_id for overlap, region in matched]
+    row["opening_region_ids"] = (
+        [r.region_id for r in owned] if owned else row["opening_search_region_ids"]
+    )
+    row["region_identity_nomination"] = len(owned) == 1
+    row["opening_region_match_basis"] = (
+        "EXPLICIT_CURRENT_COMPILER_ID" if owned else "SPATIAL_SEARCH_ASSOCIATION_ONLY"
+    )
     row["opening_region_id"] = (
         chosen.region_id
         if chosen is not None

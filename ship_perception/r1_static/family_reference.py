@@ -175,7 +175,7 @@ def resolve_segment_reference(segment_candidate_indexes, family_of, families_by_
                 candidate_index=candidate_index, role=family["role_hypothesis"])
 
 
-def analyze_scene_s4r1(points, config, research, baseline_result):
+def analyze_scene_s4r1(points, config, research, baseline_result, checkpoint=None):
     result, auxiliary, nodes = _hierarchy(points, config, research)
     if (_baseline_signature(result) != _baseline_signature(baseline_result)
             or result["region_count"] != baseline_result["region_count"]):
@@ -191,6 +191,8 @@ def analyze_scene_s4r1(points, config, research, baseline_result):
     for node in nodes:
         for seed in _node_seeds(node, grid, fov):
             for segment in perimeter_segments(seed, fov, config):
+                if checkpoint is not None:
+                    checkpoint("BEFORE_SEGMENT_DECK", None)
                 deck, plane, forensic = estimate_segment_deck(points, segment, config, tree)
                 candidate_dicts = collect_segment_candidates(
                     points, segment, deck, forensic, config, node.node_id, centroid)
@@ -200,9 +202,17 @@ def analyze_scene_s4r1(points, config, research, baseline_result):
                     node_id=node.node_id, seed_id=seed.seed_id, segment=segment,
                     deck=deck, plane=plane, candidate_indexes=list(range(start, len(candidates))),
                 ))
+                if checkpoint is not None:
+                    checkpoint("SEGMENT_DECK", dict(
+                        node_id=node.node_id, segment_id=segment.segment_id,
+                        segment_start_xy=list(segment.rough_start),
+                        segment_end_xy=list(segment.rough_end), deck=deck,
+                    ))
 
     strict_angle = config["frame"]["normal_refine_deg"]
     strict_sep = config["geometry"]["plane_inlier_m"]
+    if checkpoint is not None:
+        checkpoint("BEFORE_REFERENCE_FAMILIES", None)
     families, family_of = deterministic_families(candidates, strict_angle, strict_sep,
                                                  2 * strict_angle, 2 * strict_sep)
     family_records = assign_family_roles(families, candidates, points, node_geometries, config)
@@ -212,6 +222,8 @@ def analyze_scene_s4r1(points, config, research, baseline_result):
 
     segment_resolutions, edges, narrow_strips = [], [], []
     for entry in segment_entries:
+        if checkpoint is not None:
+            checkpoint("BEFORE_PROFILE", None)
         segment = entry["segment"]
         deck = entry["deck"]
         resolution = resolve_segment_reference(entry["candidate_indexes"], candidate_family_id,
@@ -257,6 +269,8 @@ def analyze_scene_s4r1(points, config, research, baseline_result):
             face_positions=[row["face_position"] for row in rows
                             if row["face_position"] is not None],
         ))
+        if checkpoint is not None:
+            checkpoint("PROFILE", segment_resolutions[-1])
     narrow_strips = [dict(family_id=record["family_id"],
                           representative_normal=record["representative_normal"],
                           representative_offset=record["representative_offset"],
