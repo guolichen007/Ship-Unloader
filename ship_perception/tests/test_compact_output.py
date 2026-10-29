@@ -11,6 +11,36 @@ from ship_perception.r1_static.run import _atomic_json
 
 
 class CompactOutput(unittest.TestCase):
+    def test_family_index_preserves_float_boundary_ties_duplicates_and_raw_order(self):
+        from ship_perception.perception.measurement import RawSpatialIndex
+        from ship_perception.perception.structural_family import _family_raw_indexes
+
+        rng = np.random.default_rng(7321)
+        for dtype in [np.float32, np.float64]:
+            for origin in [0.0, 10000.0]:
+                for axis in [0, 1]:
+                    xyz = rng.uniform(-3, 3, (2000, 3)).astype(dtype)
+                    xyz[:, :2] += origin
+                    rho, band, low, high = origin + 0.1, 0.05, origin - 1, origin + 1
+                    edges = np.asarray([rho - band, rho + band], dtype=dtype)
+                    values = np.r_[
+                        edges,
+                        np.nextafter(edges, -np.inf, dtype=dtype),
+                        np.nextafter(edges, np.inf, dtype=dtype),
+                    ]
+                    xyz[: len(values), axis] = values
+                    xyz[: len(values), 1 - axis] = origin
+                    xyz = np.r_[xyz, xyz[: len(values)]]
+                    expected = np.flatnonzero(
+                        (abs(xyz[:, axis] - rho) <= band)
+                        & (xyz[:, 1 - axis] >= low)
+                        & (xyz[:, 1 - axis] <= high)
+                    )
+                    actual = _family_raw_indexes(
+                        xyz, RawSpatialIndex(xyz), axis, rho, low, high, band
+                    )
+                    np.testing.assert_array_equal(actual, expected)
+
     def test_all_values_and_ieee_coordinates_match_pretty_output(self):
         coordinates = [
             0.0,

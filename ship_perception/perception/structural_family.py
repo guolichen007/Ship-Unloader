@@ -13,6 +13,31 @@ from .candidate_union import canonical
 from .region_model import EvidenceSource, TopologySupport
 
 
+def _family_raw_indexes(xyz, spatial, axis, rho, low, high, band):
+    """Select exactly the old raw predicate, without rescanning the vessel.
+
+    Expand only the index lookup by floating roundoff, then apply the original
+    subtraction/comparisons. The guard cannot admit extra geometric support.
+    """
+    box = np.empty(4)
+    box[axis], box[axis + 2] = rho - band, rho + band
+    box[1 - axis], box[3 - axis] = low, high
+    dtype = xyz.dtype if np.issubdtype(xyz.dtype, np.floating) else np.dtype(float)
+    padding = (
+        4
+        * np.finfo(dtype).eps
+        * np.maximum(1.0, np.maximum(abs(box[:2]), abs(box[2:])))
+    )
+    candidates = spatial.query_indexes(np.r_[box[:2] - padding, box[2:] + padding])
+    points = xyz[candidates]
+    keep = (
+        (abs(points[:, axis] - rho) <= band)
+        & (points[:, 1 - axis] >= low)
+        & (points[:, 1 - axis] <= high)
+    )
+    return candidates[keep]
+
+
 def merge_intervals(intervals):
     merged = []
     for start, end in sorted(intervals):
@@ -113,6 +138,15 @@ def visibility_segments(along, cell_m, raw_counts, supported_intervals):
 
 def build_structural_families(cache):
     primary = getattr(cache, "primary_cache", cache)
+    from .measurement import RawSpatialIndex
+
+    measurement = getattr(cache, "v2_measurement", None)
+    if measurement is not None and measurement.raw_uvz is primary.xyz:
+        spatial = measurement.spatial
+    else:
+        if not hasattr(primary, "_structural_family_spatial"):
+            primary._structural_family_spatial = RawSpatialIndex(primary.xyz)
+        spatial = primary._structural_family_spatial
     providers = [
         p
         for p in primary.structural_providers()
@@ -172,15 +206,10 @@ def build_structural_families(cache):
             segments = visibility_segments(
                 along[in_span], grid.cell_m, counts[in_span], intervals
             )
-            xyz = primary.xyz
-            mask = (
-                (abs(xyz[:, axis] - rho) <= band)
-                & (xyz[:, 1 - axis] >= low)
-                & (xyz[:, 1 - axis] <= high)
+            indexes = _family_raw_indexes(
+                primary.xyz, spatial, axis, rho, low, high, band
             )
-            raw_indexes = tuple(
-                int(i) for i in primary.vessel.point_indexes[np.flatnonzero(mask)]
-            )
+            raw_indexes = tuple(int(i) for i in primary.vessel.point_indexes[indexes])
             source = EvidenceSource(
                 frame.frame_id if frame else "UNKNOWN",
                 (
