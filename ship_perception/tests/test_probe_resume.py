@@ -152,6 +152,17 @@ class ProbeResume(unittest.TestCase):
         )
         self.assertEqual(next(iter(scheduler))[0].query_id, "Q")
 
+        observed = dict(
+            opening_region_id="FULL",
+            deck_ring=dict(
+                sides={n: dict(vertical_face_support=True) for n in ["U0", "U1", "V0"]}
+            ),
+        )
+        scheduler = PrecisionScheduler(
+            [(competing, observed), (query, row)], self.resolver().config
+        )
+        self.assertEqual(next(iter(scheduler))[0].query_id, "A")
+
     def test_foreign_declared_identity_does_not_get_owned_nomination_priority(self):
         from ship_perception.perception.candidate_union import (
             CandidateProposal,

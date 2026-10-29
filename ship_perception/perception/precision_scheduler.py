@@ -92,7 +92,6 @@ class PrecisionScheduler:
         )
         return (
             -int(nominal_capacity >= 3),
-            -int(row.get("region_identity_nomination", False)),
             -int(max(coaming, row.get("search_normal_face_side_count", 0)) >= 3),
             -int(coaming >= 3),
             row.get("internal_transverse_face_coverage", 0.0),
@@ -106,6 +105,7 @@ class PrecisionScheduler:
             -int(post.get("support_side_count", 0) >= 3),
             -ring.get("positive_height_side_count", 0),
             -row.get("independent_support_sides", 0),
+            -int(row.get("region_identity_nomination", False)),
             row.get("layout", {}).get("ranking_penalty", 0),
             query.query_id,
         )
