@@ -2,7 +2,7 @@
 
 双激光雷达卸船机船舱识别与船体稳定跟踪系统。
 
-本分支是 **V2.3 拓扑召回纠偏审计版**，运行环境为 Ubuntu 22.04 / ROS2 Humble。默认识别入口保留 `1a0c9d0` 的区域搜索与协作调度；新增冻结拓扑 provider 先独立复算真实历史输入，尚未接入默认识别入口。历史完整开口召回门未通过，不能替代 main 现场基线，也不用于自动控制。V1.4 船体跟踪源码继续冻结保留。
+本分支是 **V2.4 结构区域实验开发版**，运行环境为 Ubuntu 22.04 / ROS2 Humble。共用识别主链增加独立的 OpeningRegion、TopologySupport、BoundaryMeasurement 及船局部结构线族，完整召回仍未通过。当前停在 7-16 Gate 2：存在多个未决区域提名，尚未形成一个完整舱区身份。不能替代 main 现场基线，也不用于自动控制。V1.4 船体跟踪源码继续冻结保留。
 
 ## 两个现场入口
 
@@ -61,6 +61,8 @@ output/YYYYMMDD_HHMMSS_microseconds/
 琥珀实线为最佳复核边界，点线为不确定性覆盖范围。`PARTIAL_HATCH`、`UNRESOLVED_VESSEL_REVIEW` 不能当作已确认船舱；矩形约束和缺测推断不能当作实测钢边。完整原始场景保留在背景中，避免漏检区域被绘图裁掉。
 
 ## 当前技术路线与边界
+
+`geometry_only.opening_regions` 单列当前区域身份、保守边界、搜索范围和逐边测量状态，与最终 `hatches` 分开。缺少三条实测边、精修失败或预算中断不会清空区域注册表；扩大搜索范围本身也不能证明片段已经合成一个完整舱口。结构线族只提供同船搜索证据，不复制最终边 rho，不把缺测段当作负证据。
 
 - V2 主链为一次 B1 → 靠岸船选择 → 原始索引工作区 → Legacy / Height Basin / Structural Line / Local Enclosure / Loaded Hold / Large Sand Hold 候选联合与 post-B2 局部证据 → 名义候选编译 → 统一验证 → 廉价 Raw 探测和逐区域调查 → 一个共享四边精修器。Layout Recovery / Multi Hold 仅搜索和排序，不创造边。
 - Legacy 冻结 B2 候选及原始证据，旧 R2F/R2G/B4/B5 只保留在 `--pipeline v1-diagnostic` 历史诊断路径，不在 V2 中重复执行整套最终精修。历史旧路径的召回效果尚未全部迁入 V2，见验收说明。
