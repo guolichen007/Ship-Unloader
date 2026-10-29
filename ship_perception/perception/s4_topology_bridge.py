@@ -184,7 +184,10 @@ class S4TopologyBridge:
             self.observation_progress["completed_profile_segments"].append(record)
         if self.budget is None:
             return
-        reserve = self.budget.LIMITS["FINAL_PRECISION"]
+        reserve = (
+            self.budget.LIMITS["FINAL_PRECISION"]
+            + self.budget.LIMITS["UNIFIED_PHYSICAL_VALIDATION"]
+        )
         if time.perf_counter() >= self.budget.started + self.budget.total_s - reserve:
             raise S4ObservationDeferred("S4_OBSERVATION_DEFERRED_FOR_SHARED_PRECISION")
         self.budget.check()

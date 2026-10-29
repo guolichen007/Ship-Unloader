@@ -9,7 +9,7 @@ from .local_deck import _anchor_height, _huber_plane, _plane_angle
 from .canonical_points import canonical_indexes
 
 
-def _gravity_hypotheses(raw, config):
+def _gravity_hypotheses(raw, config, checkpoint=None):
     """Grow distinct observed height modes using full, canonical Raw support.
 
     Height bins only initialize hypotheses. Each hypothesis is fitted and
@@ -34,6 +34,8 @@ def _gravity_hypotheses(raw, config):
     ]
     hypotheses = []
     for height in sorted(set(heights)):
+        if checkpoint is not None:
+            checkpoint("BEFORE_GRAVITY_HYPOTHESIS", None)
         plane = (np.array([0.0, 0.0, 1.0]), -height)
         # Full support robust fit is one candidate, not a replacement for the
         # independently grown modes. Existing gravity/inlier gates still apply.
@@ -42,6 +44,8 @@ def _gravity_hypotheses(raw, config):
         for seed in starts:
             mask = abs(raw @ seed[0] + seed[1]) <= threshold
             for _ in range(8):
+                if checkpoint is not None:
+                    checkpoint("BEFORE_GRAVITY_REFINEMENT", None)
                 if int(mask.sum()) < minimum:
                     break
                 refined = _huber_plane(raw[mask], seed, threshold, max_angle)
@@ -58,7 +62,7 @@ def _gravity_hypotheses(raw, config):
     return sorted(hypotheses, key=lambda r: (-r[0], tuple(r[1][0]), r[1][1]))
 
 
-def estimate_segment_deck(points, segment, config, tree=None):
+def estimate_segment_deck(points, segment, config, tree=None, checkpoint=None):
     """Return a side-local plane and exact raw-point ownership for every candidate."""
     result = dict(
         segment_id=segment.segment_id,
@@ -115,7 +119,7 @@ def estimate_segment_deck(points, segment, config, tree=None):
     raw = points[raw_ids].astype(float)
     threshold = config["geometry"]["plane_inlier_m"]
     max_angle = math.radians(config["geometry"]["normal_angle_deg"])
-    hypotheses = _gravity_hypotheses(raw, config)
+    hypotheses = _gravity_hypotheses(raw, config, checkpoint=checkpoint)
     if not hypotheses:
         result["reason"] = "NO_GRAVITY_COMPATIBLE_PLANE"
         return result, None, forensic
@@ -147,6 +151,8 @@ def estimate_segment_deck(points, segment, config, tree=None):
     bin_m = config["roi"]["support_connectivity_m"]
     possible_bins = max(1, int(math.ceil(segment.length_m / bin_m)))
     for sample_count, plane, _ in unique:
+        if checkpoint is not None:
+            checkpoint("BEFORE_DECK_CANDIDATE_REFINEMENT", None)
         mask = np.abs(raw @ plane[0] + plane[1]) <= threshold
         if int(mask.sum()) < minimum:
             continue

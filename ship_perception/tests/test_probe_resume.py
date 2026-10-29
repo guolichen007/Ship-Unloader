@@ -188,7 +188,7 @@ class ProbeResume(unittest.TestCase):
         bridge.budget = SimpleNamespace(
             started=0.0,
             total_s=55.0,
-            LIMITS=dict(FINAL_PRECISION=20.0),
+            LIMITS=dict(FINAL_PRECISION=20.0, UNIFIED_PHYSICAL_VALIDATION=5.0),
             check=lambda: None,
         )
         record = dict(segment_id="OBSERVED", deck=dict(status="RESOLVED"))
@@ -204,6 +204,28 @@ class ProbeResume(unittest.TestCase):
         bridge.axis = dict(status="DEFERRED_PERFORMANCE")
         prior = SimpleNamespace(region_id="KEEP")
         self.assertEqual(bridge.compile_regions([prior]), [prior])
+
+    def test_deck_checkpoints_preserve_complete_physical_hypotheses(self):
+        from ship_perception.r1_static.perimeter_deck import _gravity_hypotheses
+
+        config, _ = resolve_config()
+        rng = np.random.default_rng(831)
+        xy = rng.uniform(-5, 5, (400, 2))
+        raw = np.column_stack(
+            (xy, np.where(np.arange(400) < 260, 0.02 * xy[:, 0], 1.5 + 0.01 * xy[:, 1]))
+        )
+        expected = _gravity_hypotheses(raw, config)
+        visits = []
+        actual = _gravity_hypotheses(
+            raw, config, lambda stage, record: visits.append(stage)
+        )
+        self.assertTrue(visits)
+        self.assertEqual(len(actual), len(expected))
+        for before, after in zip(expected, actual):
+            self.assertEqual(before[0], after[0])
+            np.testing.assert_array_equal(before[1][0], after[1][0])
+            self.assertEqual(before[1][1], after[1][1])
+            np.testing.assert_array_equal(before[2], after[2])
 
 
 if __name__ == "__main__":

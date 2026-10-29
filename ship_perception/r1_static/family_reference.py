@@ -193,7 +193,8 @@ def analyze_scene_s4r1(points, config, research, baseline_result, checkpoint=Non
             for segment in perimeter_segments(seed, fov, config):
                 if checkpoint is not None:
                     checkpoint("BEFORE_SEGMENT_DECK", None)
-                deck, plane, forensic = estimate_segment_deck(points, segment, config, tree)
+                deck, plane, forensic = estimate_segment_deck(
+                    points, segment, config, tree, checkpoint=checkpoint)
                 candidate_dicts = collect_segment_candidates(
                     points, segment, deck, forensic, config, node.node_id, centroid)
                 start = len(candidates)
