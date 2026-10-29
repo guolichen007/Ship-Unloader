@@ -7,6 +7,8 @@
 
 ## 分支、提交、PR 与 main
 
+2026-10-29 追加用户授权明确解除前轮第31/38节停止门，以 `ba8ea81d7cd0b98aead8b5ec58ee322fe78b59d3` 为基准，仅允许稳定 S4 观测→SideFamily→TopologyGraph→现有 OpeningRegion、默认 V2 接线及冻结合同拆分。不修改上一轮 S4 估计器或物理阈值，不新增 Expert/Region 模型，不恢复四线枚举。通过 7-16 后只执行 08-01/8-22 非合并 smoke，随后停止；精度、其他真实专项和性能不扩展。原 56 文件参考和 V1.4 72 文件保持，B2 真正依赖单独保护。main、tag、推送与现场放行均未在本轮执行。
+
 2026-10-29 V2.6 用户任务授权从 `29d43a81ed2b75e45bac1cff07628e011fe8a8cf` 建立 `codex/hatch-v26-s4-causal-fix`，限定 S4 首分叉、逐段 plane、确定性 line 和连续 4θ 聚合修复。保留规范点序、Region-First、既有物理阈值及 V1.4 冻结。两个稳定门通过后，7-16 仍无完整区域身份，按 `STABLE_S4_BUT_REGION_GENERATION_FAILS` 停止；宽矩形枚举候选不算已存在的完整 OpeningRegion，不能据此按历史参考挑框。旧全文件 Legacy 校验产生的入口错误保留，不绕过、不重写冻结清单。只保存明确未通过的实验 checkpoint，不推送、merge、tag 或晋升现场基线。
 
 2026-10-29 V2.4 用户任务授权从 `7ea5c78da9ac5367933d6166e1c17046fc6b5122` 建立 `codex/hatch-v24-structural-region`，并在独立 `Ship-Unloader-Bisect` 工作树作 914f869..51410e3 法证。允许本轮 Region/Boundary 解耦与当前架构内结构线族重建；不直接 revert bad commit，不修改冻结源或物理阈值。7-16 未形成完整区域身份时按 Stop Gate 2 停止并等待审查；失败实现只能保存为明确未通过的开发 checkpoint，不晋升基线。main、tag、分支删除及生产放行均未授权。

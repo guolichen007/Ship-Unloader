@@ -2,7 +2,7 @@
 
 双激光雷达卸船机船舱识别与船体稳定跟踪系统。
 
-本分支是 **V2.6 S4 因果修复实验 checkpoint**，目标环境为 Ubuntu 22.04 / ROS2 Humble。逐段平面、边线与连续结构轴的观测稳定性检查通过，7-16 仍未形成完整 OpeningRegion 身份，真实召回未通过。本轮允许修改的 S4 文件仍在旧 56 文件冻结清单内，默认 V2 入口当前会报 `LEGACY_EXPERT_BEHAVIOR_CHANGED`，两项入口集成测试错误保留，未绕过校验。以下入口说明属于原有接口，不表示此 checkpoint 可替代现场基线。main 与 V1.4 冻结源保持不变，不用于自动控制。
+本分支是 **稳定 S4 证据编译与 V2 接线开发版**，目标环境为 Ubuntu 22.04 / ROS2 Humble。默认 V2 已将选中船的 S4 观测经侧族和拓扑图接入现有 OpeningRegion。7-16 保留一个完整目标区域身份，另有 8 个未关联提名；边界、角点 Z 和钢内沿仍未认证。08-01/8-22 仅通过限定的不误合并 smoke，完整召回没有据此放行。B2 核心冻结与旧链参考已分开，默认入口原冻结冲突已解决。main 与 V1.4 冻结源保持不变，不能替代现场基线或用于自动控制。
 
 ## 两个现场入口
 
@@ -64,6 +64,8 @@ output/YYYYMMDD_HHMMSS_microseconds/
 
 `geometry_only.opening_regions` 单列当前区域身份、保守边界、搜索范围和逐边测量状态，与最终 `hatches` 分开。缺少三条实测边、精修失败或预算中断不会清空区域注册表；扩大搜索范围本身也不能证明片段已经合成一个完整舱口。结构线族只提供同船搜索证据，不复制最终边 rho，不把缺测段当作负证据。
 
+默认区域编译消费稳定 S4 的原始 profile/face 观测，经 SideFamily、实际高度内区连续性和 CONNECT/SPLIT/AMBIGUOUS 关系建立身份，不输入旧 R2F 矩形。相邻或重叠 bbox 不构成合并依据；可信分隔优先保留独立身份，证据不足保留 compound 搜索组。四侧 `side_topology_support` 与 `boundary_measurements` 分开，未观测不表示不存在。`s4_topology_bridge` 保存来源、网格、侧族和全部关系供复核。
+
 - V2 主链为一次 B1 → 靠岸船选择 → 原始索引工作区 → Legacy / Height Basin / Structural Line / Local Enclosure / Loaded Hold / Large Sand Hold 候选联合与 post-B2 局部证据 → 名义候选编译 → 统一验证 → 廉价 Raw 探测和逐区域调查 → 一个共享四边精修器。Layout Recovery / Multi Hold 仅搜索和排序，不创造边。
 - Legacy 冻结 B2 候选及原始证据，旧 R2F/R2G/B4/B5 只保留在 `--pipeline v1-diagnostic` 历史诊断路径，不在 V2 中重复执行整套最终精修。历史旧路径的召回效果尚未全部迁入 V2，见验收说明。
 - `UNKNOWN_CONTEXT` 不作为强船外种子；缺少高度、一边缺测、装载高度不明和布局不一致不作为硬拒绝。只对明确物理矛盾拒绝；证据不足的候选保存为未决记录。
@@ -73,7 +75,7 @@ output/YYYYMMDD_HHMMSS_microseconds/
 
 当前 Normal6 与 V2 单调回归门均未通过。程序退出成功、复核对象数量和较快耗时不能代替完整开口覆盖与水面误检复核。开发回归与正式验收、Windows 与 Ubuntu、Synthetic 与 SITE 分别记录，见 [测试与验收](docs/04_测试与验收说明.md)。旧 C++ V1.5 Quick 的既有失败继续保留。
 
-V2.3 的离线拓扑审计入口如下；它从当前 Raw 重算冻结 `prepare_geometry / review_points`，输出区域及逐边证据，保留空角点的未决区域。虚线图为保守候选区域，四角 Z 缺测保持 `null`。整套历史重放仍有昂贵组合搜索，且 7-16 尚未恢复完整舱区，因此不接入默认主链、不作为提速方案，召回门通过前暂停新的精修性能优化。
+历史离线拓扑审计入口如下；它从当前 Raw 重算 `prepare_geometry / review_points`，输出区域及逐边证据，并报告原完整旧链参考的预期变化。虚线图为保守候选区域，四角 Z 缺测保持 `null`。默认 V2 使用上述侧族/拓扑图编译，不重放这套昂贵组合搜索，也不把它作为提速方案。
 
 ```bash
 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 \
