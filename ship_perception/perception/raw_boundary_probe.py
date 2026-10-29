@@ -17,6 +17,9 @@ class SignedRoleResolver:
     def __init__(self, measurement, refiner):
         self.measurement, self.refiner = measurement, refiner
         self.config = refiner.config
+        self._nomination_progress = {}
+        self._anchor_results = {}
+        self._section_results = {}
 
     def raw_nominations(self, axis, anchor, span, sign):
         """Nominate within the existing structural ROI, then refine normally."""
@@ -30,24 +33,35 @@ class SignedRoleResolver:
         search = config["roi"]["support_search_m"]
         fine = config["roi"]["boundary_search_m"]
         probe = config["boundary"]["side_probe_m"]
-        box = [0.0] * 4
-        box[axis], box[axis + 2] = anchor - search - probe, anchor + search + probe
-        box[1 - axis], box[3 - axis] = span
-        ids = self.measurement.spatial.query_indexes(box)
-        points = self.measurement.raw_uvz[ids]
-        profile = RawSectionProfile(points, axis, tuple(span), config)
-        counters = self.measurement.counters
-        counters["raw_profile_build_count"] += 1
-        context = self.measurement.local.measurement_context
-        owned = (
-            context.sources[0].point_indexes
-            if context is not None
-            else self.measurement.raw_point_indexes
-        )
-        primary = np.isin(self.measurement.raw_point_indexes[ids], owned)
+        state = self._nomination_progress.get(key)
+        if state is None:
+            box = [0.0] * 4
+            box[axis], box[axis + 2] = anchor - search - probe, anchor + search + probe
+            box[1 - axis], box[3 - axis] = span
+            ids = self.measurement.spatial.query_indexes(box)
+            points = self.measurement.raw_uvz[ids]
+            profile = RawSectionProfile(points, axis, tuple(span), config)
+            self.measurement.counters["raw_profile_build_count"] += 1
+            context = self.measurement.local.measurement_context
+            owned = (
+                context.sources[0].point_indexes
+                if context is not None
+                else self.measurement.raw_point_indexes
+            )
+            state = dict(
+                profile=profile,
+                points=points,
+                primary=np.isin(self.measurement.raw_point_indexes[ids], owned),
+                centers=np.arange(anchor - search, anchor + search + fine, 2 * fine),
+                next_center=0,
+                modes=[],
+            )
+            self._nomination_progress[key] = state
+        points, profile, primary = state["points"], state["profile"], state["primary"]
         edges = physical_sections(span, config["geometry"]["refine_voxel_m"], config)
-        modes = []
-        for center in np.arange(anchor - search, anchor + search + fine, 2 * fine):
+        modes = state["modes"]
+        while state["next_center"] < len(state["centers"]):
+            center = state["centers"][state["next_center"]]
             if self.refiner.budget is not None:
                 self.refiner.budget.check()
             for mode in profile.edge_modes(center, sign):
@@ -70,6 +84,8 @@ class SignedRoleResolver:
                 )
                 if count >= config["boundary"]["profile_min_sections"]:
                     modes.append(float(rho))
+            state["next_center"] += 1
+        self._nomination_progress.pop(key, None)
         cache[key] = tuple(modes)
         return cache[key]
 
@@ -122,14 +138,33 @@ class SignedRoleResolver:
         paired, faces, evidence = [], [], []
         observed, partial = False, False
         for rho in anchors:
-            if self.refiner.budget is not None:
-                self.refiner.budget.check()
+            anchor_key = (axis, rho, tuple(span), sign, rho in face_anchors)
+            if anchor_key in self._anchor_results:
+                old = self._anchor_results[anchor_key]
+                evidence.append(copy.deepcopy(old["evidence"]))
+                paired.extend(copy.deepcopy(old["paired"]))
+                faces.extend(copy.deepcopy(old["faces"]))
+                observed |= old["observed"]
+                partial |= old["partial"]
+                continue
             rows, face_rows = [], []
+            anchor_observed = False
             for section in spans:
+                section_key = (axis, rho, tuple(section), sign, rho in face_anchors)
+                if section_key in self._section_results:
+                    cached = self._section_results[section_key]
+                    rows.extend(copy.deepcopy(cached["rows"]))
+                    face_rows.extend(copy.deepcopy(cached["face_rows"]))
+                    anchor_observed |= cached["observed"]
+                    continue
+                if self.refiner.budget is not None:
+                    self.refiner.budget.check()
+                row_start, face_start = len(rows), len(face_rows)
                 profile = self.measurement.side_measurements.profile(axis, rho, section)
-                observed |= (
+                section_observed = (
                     len(profile.points) >= config["boundary"]["profile_min_points"]
                 )
+                anchor_observed |= section_observed
                 width = config["geometry"]["candidate_voxel_m"]
                 raw, count = _raw_edge_rho(
                     profile.window(rho - width, rho + width),
@@ -166,6 +201,13 @@ class SignedRoleResolver:
                             search_anchor_only=True,
                         )
                     )
+                self._section_results[section_key] = dict(
+                    rows=copy.deepcopy(rows[row_start:]),
+                    face_rows=copy.deepcopy(face_rows[face_start:]),
+                    observed=section_observed,
+                )
+            observed |= anchor_observed
+            paired_start, faces_start = len(paired), len(faces)
             partial |= bool(rows or face_rows)
             estimate, fit = SpatialEvidenceConsensus(config).fit(rows, rho)
             face_estimate, face_fit = SpatialEvidenceConsensus(config).fit(
@@ -197,6 +239,13 @@ class SignedRoleResolver:
                         source="RAW_HEIGHT_WITH_EXISTING_STRUCTURAL_FACE",
                     )
                 )
+            self._anchor_results[anchor_key] = dict(
+                evidence=copy.deepcopy(evidence[-1]),
+                paired=copy.deepcopy(paired[paired_start:]),
+                faces=copy.deepcopy(faces[faces_start:]),
+                observed=anchor_observed,
+                partial=bool(rows or face_rows),
+            )
         # A unique paired Raw edge outranks nominal face/height nominations.
         qualified = paired or faces
         join = config["boundary"]["corner_join_m"]
