@@ -21,10 +21,12 @@ class LegacyFreezeContracts(unittest.TestCase):
         names = ("legacy_b2_core_freeze.json", "legacy_proposal_freeze.json")
         paths = set("config/" + n for n in names)
         for name in names:
+            manifest = json.loads(
+                (package / "config" / name).read_text(encoding="utf-8")
+            )
+            paths.update(manifest["files"])
             paths.update(
-                json.loads((package / "config" / name).read_text(encoding="utf-8"))[
-                    "files"
-                ]
+                s.split(":", 1)[0] for s in manifest.get("adapter_symbols", {})
             )
         for rel in paths:
             target = self.root / rel
@@ -35,6 +37,19 @@ class LegacyFreezeContracts(unittest.TestCase):
         self.assertEqual(verify_legacy_b2_core(self.root)["status"], "PASS")
         p = self.root / "r1_static/hatch_proposal.py"
         p.write_bytes(p.read_bytes() + b"\n# changed B2 dependency\n")
+        with self.assertRaisesRegex(ValueError, "LEGACY_EXPERT_BEHAVIOR_CHANGED"):
+            verify_legacy_b2_core(self.root)
+
+    def test_changing_the_real_b2_adapter_dependency_fails(self):
+        p = self.root / "perception/local_evidence.py"
+        text = p.read_text(encoding="utf-8")
+        p.write_text(
+            text.replace(
+                'local["local_axes"] = [[1, 0], [0, 1]]',
+                'local["local_axes"] = [[0, 1], [1, 0]]',
+            ),
+            encoding="utf-8",
+        )
         with self.assertRaisesRegex(ValueError, "LEGACY_EXPERT_BEHAVIOR_CHANGED"):
             verify_legacy_b2_core(self.root)
 

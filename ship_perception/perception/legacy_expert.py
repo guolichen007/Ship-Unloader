@@ -1,6 +1,7 @@
 """Frozen historical B2 proposal expert; no B4/B5 or final precision here."""
 
 from dataclasses import dataclass
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -20,6 +21,33 @@ class LegacyProposalBatch:
         return json.loads(self.raw_output_json)
 
 
+def _b2_symbol_hash(package, specification):
+    """Freeze B2 adapter symbols without freezing unrelated V2 functions."""
+    relative, qualified = specification.split(":", 1)
+    source = (Path(package) / relative).read_text(encoding="utf-8")
+    parent = ast.parse(source)
+    parts = qualified.split(".")
+    fields = parts[-1] == "@fields"
+    for name in parts[:-1] if fields else parts:
+        parent = next(n for n in parent.body if getattr(n, "name", None) == name)
+    nodes = (
+        [
+            *parent.decorator_list,
+            *[n for n in parent.body if isinstance(n, (ast.Assign, ast.AnnAssign))],
+        ]
+        if fields
+        else [parent]
+    )
+    fragments = []
+    lines = source.splitlines()
+    for node in nodes:
+        start = min(
+            [node.lineno] + [d.lineno for d in getattr(node, "decorator_list", ())]
+        )
+        fragments.append("\n".join(lines[start - 1 : node.end_lineno]))
+    return hashlib.sha256("\n".join(fragments).encode("utf-8")).hexdigest()
+
+
 def verify_legacy_b2_core(package=None):
     """Protect the audited B2 dependency closure, using the original hashes."""
     package = (
@@ -32,11 +60,15 @@ def verify_legacy_b2_core(package=None):
         value = (package / relative).read_bytes().replace(b"\r\n", b"\n")
         if hashlib.sha256(value).hexdigest() != expected:
             raise ValueError("LEGACY_EXPERT_BEHAVIOR_CHANGED:" + relative)
+    for specification, expected in manifest.get("adapter_symbols", {}).items():
+        if _b2_symbol_hash(package, specification) != expected:
+            raise ValueError("LEGACY_EXPERT_BEHAVIOR_CHANGED:" + specification)
     return dict(
         status="PASS",
         contract="LEGACY_B2_CORE_FROZEN",
         base_sha=manifest["base_sha"],
         checked_files=len(manifest["files"]),
+        checked_adapter_symbols=len(manifest.get("adapter_symbols", {})),
     )
 
 

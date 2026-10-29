@@ -363,5 +363,18 @@
       "r1_static/heightmap_batch.py:RESEARCH_CONFIG"
     ],
     "note": "Imports from CLI/config entrypoints include S4 definitions; no executed B2 call enters S4 estimators. Full-chain identity remains separately reported by the unchanged original manifest."
+  },
+  "adapter_base_sha": "ba8ea81d7cd0b98aead8b5ec58ee322fe78b59d3",
+  "adapter_symbols": {
+    "perception/legacy_expert.py:LegacyProposalExpert": "8186a8c714895e037580984b35cc93e0c40d2c4e37675aed438beac856f78085",
+    "perception/legacy_expert.py:LegacyProposalBatch": "95b6ab0701e325a9a68c51b5b0e4a499236781d53b63fd77e869de84f0ba6b60",
+    "perception/local_evidence.py:VesselLocalEvidence.@fields": "399c7a74f7c59f33a746689e77f134832b26aeeafefb470303a4deba368d741e",
+    "perception/local_evidence.py:VesselLocalEvidence.build": "72ebc16a4c6c56bdddd9254bcfbc45e8fc4b85c78199b917b2124afceda37bc9",
+    "perception/local_evidence.py:VesselLocalEvidence.grid": "5705ca37e7e10830972e447c398a6143378e1de5ad6429e60c26cc3a8a26e5ad",
+    "perception/local_evidence.py:VesselLocalEvidence.structural_providers": "288a1ed1951da044a1ef88927ea143fe7bb593a564b39fd07a439832744b5243",
+    "perception/context.py:VesselEvidence": "0647299999876ac2178f094983b1d99ebd6db359ab3bb71a37814d534e90f380",
+    "perception/context.py:thaw": "b2ce8deb10cb1350218831970dd28ca140a522ec7131ad8ec39a1cc275eeb5f6",
+    "perception/candidate_union.py:canonical": "534890078139b96ac1f5e9eceb7df2bdeeef8f30d712448398c0c9f354228712",
+    "perception/candidate_union.py:CandidateProposal": "031d3af28a155dd0157245e89836b0bb55301406a11a068cb3a563a4c267a9d8"
   }
 }
