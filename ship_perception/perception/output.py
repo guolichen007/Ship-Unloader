@@ -4,6 +4,7 @@ import copy
 from datetime import datetime
 import hashlib
 import json
+import os
 from pathlib import Path
 import tempfile
 
@@ -14,6 +15,29 @@ from ship_perception.r1_static.intensity_evidence import IntensityEvidence, AUX_
 from ship_perception.r1_static.run import _atomic_json
 from .pipeline import _json_default
 from .review_labels import FIGURE_TEXT, annotate_measurements, chinese_plot_style
+
+
+def _atomic_results_json(path, data):
+    """Write the complete audit with the strict C encoder, without pretty padding.
+
+    Pretty json.dump iterates in Python over millions of diagnostic tokens.
+    This changes whitespace only; values, nonfinite rejection and atomicity
+    are the same. Small coordinate and failure documents remain readable.
+    """
+    path = Path(path)
+    encoded = (
+        json.dumps(
+            data, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+        ).encode("utf-8")
+        + b"\n"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("wb") as stream:
+        stream.write(encoded)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
 
 
 def auxiliary_review(payload, frame, ownership_indexes):
@@ -234,7 +258,7 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
                 Path(__file__).resolve().parents[1] / "config/hatch_once.schema.json"
             )
             Draft202012Validator(json.loads(schema.read_text())).validate(clean)
-            _atomic_json(staged / "03_results.json", clean)
+            _atomic_results_json(staged / "03_results.json", clean)
             from .coordinates import corner_coordinates
 
             _atomic_json(

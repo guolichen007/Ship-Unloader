@@ -116,13 +116,16 @@ class S4TopologyBridge:
         # Only immutable active-vessel primary points own topology. Nearby
         # UNKNOWN context is available to precision, never silently promoted.
         self.xyz = self.primary.xyz
-        height, auxiliary, nodes = _hierarchy(self.xyz, self.config, research)
-        self.grid = auxiliary["coarse"]
-        self.nodes = {n.node_id: n for n in nodes}
+        self.grid = None
+        self.nodes = {}
         self.families, self.vertices, self.relations = [], [], []
         self.raw_record_count = 0
         self.observations, self.regions = [], []
         try:
+            self._checkpoint("BEFORE_HEIGHT_HIERARCHY", None)
+            height, auxiliary, nodes = _hierarchy(self.xyz, self.config, research)
+            self.grid = auxiliary["coarse"]
+            self.nodes = {n.node_id: n for n in nodes}
             self.s4 = analyze_scene_s4r1(
                 self.xyz,
                 self.config,
@@ -131,6 +134,8 @@ class S4TopologyBridge:
                 checkpoint=self._checkpoint if budget is not None else None,
             )
         except S4ObservationDeferred:
+            if self.grid is None:
+                self.grid = self.primary.grid("coarse")
             self.axis = dict(
                 status="DEFERRED_PERFORMANCE", reason="SHARED_PRECISION_TIME_RESERVED"
             )
