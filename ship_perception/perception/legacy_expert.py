@@ -20,16 +20,87 @@ class LegacyProposalBatch:
         return json.loads(self.raw_output_json)
 
 
-def verify_legacy_sources():
-    package = Path(__file__).resolve().parents[1]
+def verify_legacy_b2_core(package=None):
+    """Protect the audited B2 dependency closure, using the original hashes."""
+    package = (
+        Path(package) if package is not None else Path(__file__).resolve().parents[1]
+    )
     manifest = json.loads(
-        (package / "config/legacy_proposal_freeze.json").read_text(encoding="utf-8")
+        (package / "config/legacy_b2_core_freeze.json").read_text(encoding="utf-8")
     )
     for relative, expected in manifest["files"].items():
         value = (package / relative).read_bytes().replace(b"\r\n", b"\n")
         if hashlib.sha256(value).hexdigest() != expected:
             raise ValueError("LEGACY_EXPERT_BEHAVIOR_CHANGED:" + relative)
-    return manifest["base_sha"]
+    return dict(
+        status="PASS",
+        contract="LEGACY_B2_CORE_FROZEN",
+        base_sha=manifest["base_sha"],
+        checked_files=len(manifest["files"]),
+    )
+
+
+def verify_legacy_sources():
+    """Compatibility SHA view of the B2 contract, not full-chain certification."""
+    return verify_legacy_b2_core()["base_sha"]
+
+
+def legacy_full_chain_reference(package=None):
+    """Keep every original full-chain hash; explicitly report authorized drift."""
+    package = (
+        Path(package) if package is not None else Path(__file__).resolve().parents[1]
+    )
+    manifest = json.loads(
+        (package / "config/legacy_proposal_freeze.json").read_text(encoding="utf-8")
+    )
+    authorized = {
+        "r1_static/" + name + ".py"
+        for name in (
+            "perimeter_deck",
+            "boundary_refinement",
+            "boundary_topology",
+            "family_reference",
+            "rectangle_fusion",
+        )
+    }
+    changed = []
+    for relative, expected in manifest["files"].items():
+        current = hashlib.sha256(
+            (package / relative).read_bytes().replace(b"\r\n", b"\n")
+        ).hexdigest()
+        if current != expected:
+            changed.append(
+                dict(
+                    path=relative,
+                    reference_sha256=expected,
+                    current_sha256=current,
+                    authorized_s4=relative in authorized,
+                )
+            )
+    return dict(
+        contract="LEGACY_FULL_CHAIN_REFERENCE",
+        base_sha=manifest["base_sha"],
+        status=(
+            "REFERENCE_UNCHANGED"
+            if not changed
+            else (
+                "REFERENCE_CHANGED_EXPECTED"
+                if all(r["authorized_s4"] for r in changed)
+                else "REFERENCE_CHANGED_UNEXPECTED"
+            )
+        ),
+        classification=(
+            "UNCHANGED"
+            if not changed
+            else (
+                "CHANGED_EXPECTED_S4_ONLY"
+                if all(r["authorized_s4"] for r in changed)
+                else "CHANGED_OUTSIDE_APPROVED_S4"
+            )
+        ),
+        full_chain_frozen_pass=False,
+        changed_files=changed,
+    )
 
 
 class LegacyProposalExpert:

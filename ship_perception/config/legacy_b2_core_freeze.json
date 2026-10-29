@@ -1,0 +1,367 @@
+{
+  "schema": "ship_perception.legacy_b2_core_freeze.1",
+  "base_sha": "51410e3f4f932fcbdcc7fc88b8f9979c60c2b954",
+  "scope": "LEGACY_B2_CORE_FROZEN_PROVIDER_AND_PROPOSAL_DEPENDENCIES",
+  "files": {
+    "config/r1_heightmap_research.json": "401067274a2f5227128e96ff660a11c5ba3cfe8ae5591490ba033f1740596ae8",
+    "config/v15.json": "0fa63068eec989782550526fea0a0886756226d0b463f635dde962107f7fe4bc",
+    "config/v15.schema.json": "84df6da2bc75cfadf1fb8bbd7847ef63ab290377d01b0b5b671db06c7c96c788",
+    "config/v15_model.schema.json": "741b97c4ba521fd749d3248a01232c0e2de56200f4a5e516d140fc2ef58d3bcf",
+    "r1_static/__init__.py": "6c8c96b0e6ee1095e5331c1201132f7c3227bd9091943c6236cea0e4fb62566a",
+    "r1_static/hatch_proposal.py": "7390a2a8bef89b2f324b8caa00b2a9add382d11b30998892057824cfcab8417a",
+    "r1_static/height_grid.py": "9ebd78eef3cafde25f891b18acc1685c97d5b892eb59689b598dc3e0cbff821a",
+    "r1_static/heightmap_batch.py": "07b3d3c9487549898f47ca1410343f8af349e0af9ac03bf8f097d11941d2f221",
+    "r1_static/heightmap_topology.py": "60a22f4b8935867456b270f69f684597dd4b66037940f9506f334e1e545179f4",
+    "r1_static/model.py": "a10beb47532011aaa72734ade5236dad654858af99e943293128291220ba1081",
+    "r1_static/opening_seed.py": "ce1db45105683d3011d806bbd438e6fee39a72504616aca7241e28a62f600dd4",
+    "r1_static/raw_surface_normals.py": "5d5cd43fd9e5f834d46213ef565a6c8c7aa9eb8e5fcc45a375e15c7388f0cf6e",
+    "r1_static/raw_topview_evidence.py": "2f2b02623bf9199dfd4408022f29d288d57e7cc9103a12591fda882607c02160",
+    "r1_static/run.py": "b70152e73782555eac5f1281411d9e4384a163254a3ac19420965990c380241a",
+    "r1_static/scene_vessel.py": "b450861d2623a468846c5d6677cbb07e8903ed6437d96abbf83215943ae436a0"
+  },
+  "dependency_audit": {
+    "runtime_called_modules": [
+      "hatch_proposal.py",
+      "height_grid.py",
+      "heightmap_topology.py",
+      "opening_seed.py",
+      "raw_surface_normals.py",
+      "raw_topview_evidence.py",
+      "scene_vessel.py"
+    ],
+    "static_import_graph": [
+      {
+        "source": "r1_static/hatch_proposal.py",
+        "module": "scipy",
+        "symbols": [
+          "ndimage"
+        ]
+      },
+      {
+        "source": "r1_static/hatch_proposal.py",
+        "module": ".height_grid",
+        "symbols": [
+          "R1HeightGrid"
+        ]
+      },
+      {
+        "source": "r1_static/hatch_proposal.py",
+        "module": ".heightmap_topology",
+        "symbols": [
+          "detect_regions"
+        ]
+      },
+      {
+        "source": "r1_static/hatch_proposal.py",
+        "module": ".raw_topview_evidence",
+        "symbols": [
+          "build_topview",
+          "raster_modes"
+        ]
+      },
+      {
+        "source": "r1_static/hatch_proposal.py",
+        "module": ".scene_vessel",
+        "symbols": [
+          "infer_scene_vessels"
+        ]
+      },
+      {
+        "source": "r1_static/hatch_proposal.py",
+        "module": ".raw_surface_normals",
+        "symbols": [
+          "LocalSurfaceNormals"
+        ]
+      },
+      {
+        "source": "r1_static/hatch_proposal.py",
+        "module": "ship_perception.perception.context",
+        "symbols": [
+          "thaw"
+        ]
+      },
+      {
+        "source": "r1_static/height_grid.py",
+        "module": "dataclasses",
+        "symbols": [
+          "dataclass"
+        ]
+      },
+      {
+        "source": "r1_static/heightmap_batch.py",
+        "module": "pathlib",
+        "symbols": [
+          "Path"
+        ]
+      },
+      {
+        "source": "r1_static/heightmap_batch.py",
+        "module": "ship_perception.tools.v15_config_identity",
+        "symbols": [
+          "config_hash"
+        ]
+      },
+      {
+        "source": "r1_static/heightmap_batch.py",
+        "module": "ship_perception.tools.v15_pcd",
+        "symbols": [
+          "decode"
+        ]
+      },
+      {
+        "source": "r1_static/heightmap_batch.py",
+        "module": ".batch",
+        "symbols": [
+          "NORMAL6"
+        ]
+      },
+      {
+        "source": "r1_static/heightmap_batch.py",
+        "module": ".heightmap_render",
+        "symbols": [
+          "render_regions"
+        ]
+      },
+      {
+        "source": "r1_static/heightmap_batch.py",
+        "module": ".heightmap_topology",
+        "symbols": [
+          "detect_regions"
+        ]
+      },
+      {
+        "source": "r1_static/heightmap_batch.py",
+        "module": ".run",
+        "symbols": [
+          "DEFAULT_CONFIG",
+          "REPO",
+          "_atomic_json",
+          "_git_sha",
+          "resolve_config"
+        ]
+      },
+      {
+        "source": "r1_static/heightmap_topology.py",
+        "module": "dataclasses",
+        "symbols": [
+          "dataclass",
+          "field"
+        ]
+      },
+      {
+        "source": "r1_static/heightmap_topology.py",
+        "module": "scipy",
+        "symbols": [
+          "ndimage"
+        ]
+      },
+      {
+        "source": "r1_static/heightmap_topology.py",
+        "module": ".height_grid",
+        "symbols": [
+          "R1HeightGrid"
+        ]
+      },
+      {
+        "source": "r1_static/heightmap_topology.py",
+        "module": ".model",
+        "symbols": [
+          "SeedComponent"
+        ]
+      },
+      {
+        "source": "r1_static/heightmap_topology.py",
+        "module": ".opening_seed",
+        "symbols": [
+          "_outer_contour"
+        ]
+      },
+      {
+        "source": "r1_static/model.py",
+        "module": "dataclasses",
+        "symbols": [
+          "dataclass"
+        ]
+      },
+      {
+        "source": "r1_static/model.py",
+        "module": "typing",
+        "symbols": [
+          "Tuple"
+        ]
+      },
+      {
+        "source": "r1_static/opening_seed.py",
+        "module": "collections",
+        "symbols": [
+          "defaultdict"
+        ]
+      },
+      {
+        "source": "r1_static/opening_seed.py",
+        "module": "scipy",
+        "symbols": [
+          "ndimage"
+        ]
+      },
+      {
+        "source": "r1_static/opening_seed.py",
+        "module": "scipy.spatial",
+        "symbols": [
+          "cKDTree"
+        ]
+      },
+      {
+        "source": "r1_static/opening_seed.py",
+        "module": ".model",
+        "symbols": [
+          "OpeningSeed",
+          "PerimeterSegment"
+        ]
+      },
+      {
+        "source": "r1_static/raw_surface_normals.py",
+        "module": "scipy.spatial",
+        "symbols": [
+          "cKDTree"
+        ]
+      },
+      {
+        "source": "r1_static/raw_topview_evidence.py",
+        "module": "scipy",
+        "symbols": [
+          "ndimage"
+        ]
+      },
+      {
+        "source": "r1_static/raw_topview_evidence.py",
+        "module": ".height_grid",
+        "symbols": [
+          "R1HeightGrid"
+        ]
+      },
+      {
+        "source": "r1_static/run.py",
+        "module": "pathlib",
+        "symbols": [
+          "Path"
+        ]
+      },
+      {
+        "source": "r1_static/run.py",
+        "module": "jsonschema",
+        "symbols": [
+          "Draft202012Validator"
+        ]
+      },
+      {
+        "source": "r1_static/run.py",
+        "module": "scipy.spatial",
+        "symbols": [
+          "cKDTree"
+        ]
+      },
+      {
+        "source": "r1_static/run.py",
+        "module": "ship_perception.tools.v15_config_identity",
+        "symbols": [
+          "config_hash"
+        ]
+      },
+      {
+        "source": "r1_static/run.py",
+        "module": "ship_perception.tools.v15_pcd",
+        "symbols": [
+          "decode"
+        ]
+      },
+      {
+        "source": "r1_static/run.py",
+        "module": ".hypothesis_solver",
+        "symbols": [
+          "solve"
+        ]
+      },
+      {
+        "source": "r1_static/run.py",
+        "module": ".local_deck",
+        "symbols": [
+          "estimate_local_deck"
+        ]
+      },
+      {
+        "source": "r1_static/run.py",
+        "module": ".opening_seed",
+        "symbols": [
+          "build_opening_seeds",
+          "perimeter_segments"
+        ]
+      },
+      {
+        "source": "r1_static/run.py",
+        "module": ".perimeter_boundary",
+        "symbols": [
+          "refine_perimeter_boundaries"
+        ]
+      },
+      {
+        "source": "r1_static/run.py",
+        "module": ".perimeter_deck",
+        "symbols": [
+          "estimate_segment_deck"
+        ]
+      },
+      {
+        "source": "r1_static/run.py",
+        "module": ".structural_proposal",
+        "symbols": [
+          "propose"
+        ]
+      },
+      {
+        "source": "r1_static/run.py",
+        "module": ".visualization",
+        "symbols": [
+          "write_candidate_debug",
+          "write_debug_clouds",
+          "write_perimeter_artifacts"
+        ]
+      },
+      {
+        "source": "r1_static/scene_vessel.py",
+        "module": "scipy",
+        "symbols": [
+          "ndimage",
+          "signal"
+        ]
+      },
+      {
+        "source": "r1_static/scene_vessel.py",
+        "module": ".height_grid",
+        "symbols": [
+          "R1HeightGrid"
+        ]
+      },
+      {
+        "source": "r1_static/scene_vessel.py",
+        "module": ".heightmap_topology",
+        "symbols": [
+          "_side_height_rises"
+        ]
+      },
+      {
+        "source": "r1_static/scene_vessel.py",
+        "module": ".raw_topview_evidence",
+        "symbols": [
+          "raster_channels"
+        ]
+      }
+    ],
+    "call_trace_and_golden": "12 real-input cases; complete canonical proposal/evidence SHA matches in NumPy1.26.4/SciPy1.13.1, numeric threads=1",
+    "configuration_entrypoints": [
+      "r1_static/run.py:resolve_config",
+      "r1_static/heightmap_batch.py:RESEARCH_CONFIG"
+    ],
+    "note": "Imports from CLI/config entrypoints include S4 definitions; no executed B2 call enters S4 estimators. Full-chain identity remains separately reported by the unchanged original manifest."
+  }
+}

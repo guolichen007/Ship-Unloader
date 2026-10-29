@@ -14,7 +14,7 @@ import numpy as np
 from ship_perception.r1_static.pcd_showcase import prepare_geometry
 from ship_perception.r1_static.corner_topology_review import review_points
 from ship_perception.r1_static.boundary_topology import _observations
-from .legacy_expert import verify_legacy_sources
+from .legacy_expert import verify_legacy_sources, legacy_full_chain_reference
 from .candidate_union import canonical
 from .context import freeze, thaw
 
@@ -126,6 +126,8 @@ class LegacyTopologyBatch:
         return dict(
             schema="ship_perception.frozen_legacy_topology.1",
             source_sha=FROZEN_SOURCE_SHA,
+            source_sha_role="HISTORICAL_FULL_CHAIN_REFERENCE_NOT_CURRENT_FROZEN_PASS",
+            full_chain_reference=legacy_full_chain_reference(),
             usage="HISTORICAL_TOPOLOGY_AUDIT_NOT_STEEL_GOLDEN",
             runtime_admission="PENDING_REAL_SCENE_RECALL_GATE",
             wall_contact_hard_gate=False,
