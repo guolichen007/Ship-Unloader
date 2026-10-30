@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import numpy as np
 
 from ship_perception.perception.region_model import OpeningRegion, TopologySupport
@@ -22,6 +23,24 @@ from ship_perception.r1_static.run import resolve_config
 class ReviewGeometryContracts(unittest.TestCase):
     def setUp(self):
         self.config, _ = resolve_config()
+
+    def test_bounded_keeps_original_pipeline_until_normal6_gate_passes(self):
+        from ship_perception.perception import pipeline_v2
+        with patch.object(pipeline_v2, 'run_pre_v29_bounded', return_value='ORIGINAL') as original, patch(
+            'ship_perception.perception.review_pipeline.run_perception', side_effect=AssertionError('Unaccepted default')
+        ):
+            self.assertEqual(pipeline_v2.run_perception(None), 'ORIGINAL')
+            original.assert_called_once()
+            with self.assertRaisesRegex(ValueError, 'OPERATOR_ROI_REQUIRES'):
+                pipeline_v2.run_perception(None, operator_vessel_roi='scope.json')
+
+    def test_review_first_requires_explicit_mode(self):
+        from ship_perception.perception import pipeline_v2
+        with patch.object(pipeline_v2, 'run_pre_v29_bounded', side_effect=AssertionError('Wrong mode')), patch(
+            'ship_perception.perception.review_pipeline.run_perception', return_value='REVIEW'
+        ) as review:
+            self.assertEqual(pipeline_v2.run_perception(None, mode='review-first'), 'REVIEW')
+            review.assert_called_once()
 
     def region(self):
         r = OpeningRegion(

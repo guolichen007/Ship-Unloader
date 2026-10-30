@@ -178,6 +178,12 @@ def final_support_sides(result, config):
 
 def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=None,
                    mode="bounded", operator_vessel_roi=None, monitor=None):
+    if mode == "bounded":
+        if operator_vessel_roi is not None:
+            raise ValueError("OPERATOR_ROI_REQUIRES_EXPLICIT_REVIEW_FIRST_UNTIL_GATE_PASS")
+        return run_pre_v29_bounded(frame, progress, legacy_evidence, berth_reference)
+    if mode != "review-first":
+        raise ValueError("INVALID_REVIEW_MODE")
     from .review_pipeline import run_perception as run_review
     return run_review(frame, progress, legacy_evidence, berth_reference,
                       mode, operator_vessel_roi, monitor)
