@@ -10,7 +10,7 @@ from .precision_diagnostics import stage as precision_stage, side_completed
 import hashlib
 import numpy as np
 
-from ship_perception.r1_static.corner_topology_review import (
+from .current_separator import (
     _initial_seed_groups,
     _separator_split,
 )

@@ -57,7 +57,7 @@ def chinese_plot_style():
     raise ValueError("CHINESE_PLOT_FONT_NOT_FOUND: install fonts-noto-cjk")
 
 
-def annotate_measurements(ax, hatches):
+def annotate_measurements(ax, hatches, draw_corner_points=True):
     """Label every corner in the original input frame and every review object.
 
     Corner text extends toward its own hatch horizontally. Nearby labels are
@@ -107,7 +107,7 @@ def annotate_measurements(ax, hatches):
             z_text = "{:.3f}".format(z) if z is not None else None
             if z_text == "-0.000":
                 z_text = "0.000"
-            z_label = "Z≈" + z_text + "米" if z_text is not None else "Z=未观测"
+            z_label = (("Z=" if height.get('z_state')=='MEASURED' else "Z≈")+z_text+"米") if z_text is not None else "Z=未观测"
             position = ax.transData.transform(point)
             left = position[0] <= center[0]
             below = position[1] <= center[1]
@@ -140,5 +140,6 @@ def annotate_measurements(ax, hatches):
                     break
             occupied.append(bounds.expanded(1.02, 1.04))
             annotations.append(label)
-        ax.scatter(*polygon.T, s=10, color="#ffbb33", zorder=7)
+        if draw_corner_points:
+            ax.scatter(*polygon.T, s=10, color="#ffbb33", zorder=7)
     return centers, annotations

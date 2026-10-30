@@ -128,7 +128,14 @@ def _render_scene(payload, frame, path, *, fusion=False, grid=None):
     for hatch in result["hatches"]:
         poly = np.asarray(hatch["boundary_xy"])
         coverage = np.asarray(hatch["review_coverage_boundary_xy"])
-        ax.plot(*np.vstack((poly, poly[0])).T, color="#ffbb33", lw=1.6)
+        if payload["schema"] == "ship_perception.hatch_once.3":
+            for index, side_id in enumerate(("V0", "U1", "V1", "U0")):
+                segment=np.array([poly[index],poly[(index+1)%4]])
+                measured=hatch['sides'][side_id]['final_source']=='MEASURED_RAW'
+                ax.plot(*segment.T,color="#ffbb33",lw=1.6 if measured else 1.2,
+                        ls="-" if measured else "--")
+        else:
+            ax.plot(*np.vstack((poly, poly[0])).T, color="#ffbb33", lw=1.6)
         ax.plot(
             *np.vstack((coverage, coverage[0])).T,
             color="#ffbb33",
@@ -155,7 +162,7 @@ def _render_scene(payload, frame, path, *, fusion=False, grid=None):
         bbox=dict(facecolor="white", alpha=0.85),
     )
     figure.tight_layout()
-    annotate_measurements(ax, result["hatches"])
+    annotate_measurements(ax, result["hatches"],draw_corner_points=payload['schema']!='ship_perception.hatch_once.3')
     figure.savefig(path, dpi=150, bbox_inches="tight", pad_inches=0.15)
     plt.close(figure)
 
@@ -244,7 +251,7 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
                 )
                 report["total_elapsed_s"] += elapsed
                 report["total_budget_exceeded"] = (
-                    report["total_elapsed_s"] > report["total_budget_s"]
+                    report["total_budget_s"] is not None and report["total_elapsed_s"] > report["total_budget_s"]
                 )
             payload["stage_elapsed"].update(timing.elapsed)
             if timing.progress is not None:

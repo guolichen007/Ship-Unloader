@@ -44,8 +44,9 @@ def corner_coordinates(payload, source_result_sha256):
     individual count. Z is copied only from local Raw surface measurements;
     unavailable heights remain null and never become an invented coordinate.
     """
-    if payload["schema"] != "ship_perception.hatch_once.2":
+    if payload["schema"] not in ("ship_perception.hatch_once.2","ship_perception.hatch_once.3"):
         raise ValueError("UNSUPPORTED_CORNER_EXPORT_SOURCE_SCHEMA")
+    v3=payload['schema']=='ship_perception.hatch_once.3'
     result = payload["geometry_only"]
     rows = []
     for hatch in result["hatches"]:
@@ -68,7 +69,7 @@ def corner_coordinates(payload, source_result_sha256):
                 raise ValueError("INVALID_CORNER_HEIGHT")
             corners.append(
                 dict(
-                    corner_id="C" + str(index),
+                    corner_id=("P"+str(index+1)) if v3 else "C" + str(index),
                     display_label="P" + str(index + 1),
                     side_intersection=intersection,
                     x_m=float(point[0]),
@@ -87,6 +88,14 @@ def corner_coordinates(payload, source_result_sha256):
                     ),
                 )
             )
+            if v3:
+                corner=corners[-1];xy=evidence[index] if len(evidence)==4 else {}
+                corner.update(x=corner['x_m'],y=corner['y_m'],z=corner['z_m'],legacy_corner_id='C'+str(index),
+                              xy_state=xy.get('xy_state','ESTIMATED'),xy_source=xy.get('xy_source','LINE_INTERSECTION'),
+                              xy_uncertainty_m=xy.get('uncertainty_m'),corner_state=xy.get('corner_state','LINE_INTERSECTION'),
+                              z_state=height.get('z_state','UNOBSERVED'),z_observed=height.get('z_observed'),
+                              z_estimate=height.get('z_estimate'),z_source=height.get('z_source'),
+                              steel_certified=False)
         rows.append(
             dict(
                 hatch_id=hatch["hatch_id"],
@@ -103,8 +112,18 @@ def corner_coordinates(payload, source_result_sha256):
                 corners=corners,
             )
         )
+        if v3:
+            rows[-1].update(opening_identity=hatch['opening_identity'],topology_status=hatch['topology_status'],
+                            geometry_status=hatch['geometry_status'],certification_status=hatch['certification_status'],
+                            sides=copy.deepcopy(hatch['sides']))
     return dict(
-        schema="ship_perception.hatch_corners.2",
+        schema="ship_perception.hatch_corners.3" if v3 else "ship_perception.hatch_corners.2",
+        schema_version=".3" if v3 else ".2",
+        producer_git_sha=payload['software_git_sha'],
+        runtime_source_hash=payload['software_source_identity']['runtime_source_sha256'],
+        config_hash=payload.get('config_hash',payload['config_sha256']),
+        input_sha256=payload.get('input_sha256',payload['input'].get('semantic_sha256')),
+        review_mode=payload.get('review_mode','bounded'),
         source_result_schema=payload["schema"],
         source_result_sha256=source_result_sha256,
         software_git_sha=payload["software_git_sha"],

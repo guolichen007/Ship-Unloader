@@ -32,6 +32,10 @@ def parser(description):
         action="store_true",
         help="Disable independent historical geometry comparison; local recall still runs",
     )
+    command.add_argument("--mode", choices=("review-first", "bounded"), default="bounded",
+                         help="Review first or bounded measurement; default changes only after Normal6 passes")
+    command.add_argument("--operator-vessel-roi", type=Path,
+                         help="Explicit operator vessel index scope; original input is retained")
     return command
 
 
@@ -45,15 +49,19 @@ def execute(frame, args, progress):
     else:
         from .pipeline_v2 import run_perception
 
-        options = dict(berth_reference=getattr(args, "berth_reference", None))
+        options = dict(berth_reference=getattr(args, "berth_reference", None),
+                       mode=getattr(args,"mode","bounded"),
+                       operator_vessel_roi=getattr(args,"operator_vessel_roi",None))
     from .output import save_output
 
-    payload = run_perception(
-        frame, progress, legacy_evidence=not args.no_legacy_evidence, **options
-    )
-    directory = save_output(
-        payload, frame, args.output_dir, args.save_snapshot, Timing(progress)
-    )
+    from .review_runtime import ReviewRunMonitor
+    from .pipeline import source_identity
+    with ReviewRunMonitor(args.output_dir,dict(source_identity=source_identity(),
+                          input_sha256=frame.provenance.get("wire_sha256",frame.sha256))) as monitor:
+        if getattr(args,"pipeline","v2")=="v2":options['monitor']=monitor
+        payload = run_perception(frame, progress, legacy_evidence=not args.no_legacy_evidence, **options)
+        monitor.checkpoint(stage="RENDER_AND_SAVE",review_objects=payload['geometry_only']['hatches'])
+        directory = save_output(payload, frame, args.output_dir, args.save_snapshot, Timing(progress))
     progress.finish(True)
     print(
         "HATCH_REVIEW_COUNT=" + str(payload["geometry_only"]["hatch_count"]), flush=True

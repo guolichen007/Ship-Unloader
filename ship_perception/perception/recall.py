@@ -11,7 +11,7 @@ from ship_perception.r1_static.hatch_proposal import (
     _opening_evidence,
 )
 from ship_perception.r1_static.heightmap_topology import _side_height_rises
-from ship_perception.r1_static.corner_topology_review import _separator_split
+from .current_separator import _separator_split
 from .context import thaw
 from .local_evidence import local_height_recall
 from .validation import deck_ring, vessel_containment, prepare_containment

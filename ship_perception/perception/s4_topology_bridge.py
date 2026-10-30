@@ -202,6 +202,9 @@ class S4TopologyBridge:
             self.observation_progress["completed_deck_segments"].append(record)
         elif stage == "PROFILE":
             self.observation_progress["completed_profile_segments"].append(record)
+        callback = getattr(getattr(self, "cache", None), "review_checkpoint", None)
+        if callback is not None:
+            callback(stage, record)
         if self.budget is None:
             return
         reserve = (

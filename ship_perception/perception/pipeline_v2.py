@@ -176,7 +176,14 @@ def final_support_sides(result, config):
     return supported
 
 
-def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=None):
+def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=None,
+                   mode="bounded", operator_vessel_roi=None, monitor=None):
+    from .review_pipeline import run_perception as run_review
+    return run_review(frame, progress, legacy_evidence, berth_reference,
+                      mode, operator_vessel_roi, monitor)
+
+
+def run_pre_v29_bounded(frame, progress=None, legacy_evidence=True, berth_reference=None):
     timing = Timing(progress)
     # Reserve the documented five seconds for rendering outside this core.
     budget = PerformanceBudget(total_s=55.0)

@@ -91,7 +91,8 @@ class SignedRoleResolver:
 
     @precision_stage("raw_edge_search")
     def side(
-        self, axis, anchor, span, sign, candidates, extended=False, normal_range=None
+        self, axis, anchor, span, sign, candidates, extended=False, normal_range=None,
+        measurement_only=False,
     ):
         config = self.config
         anchors = [anchor]
@@ -138,7 +139,7 @@ class SignedRoleResolver:
         paired, faces, evidence = [], [], []
         observed, partial = False, False
         for rho in anchors:
-            anchor_key = (axis, rho, tuple(span), sign, rho in face_anchors, extended)
+            anchor_key = (axis, rho, tuple(span), sign, rho in face_anchors, extended, measurement_only)
             if anchor_key in self._anchor_results:
                 old = self._anchor_results[anchor_key]
                 evidence.append(copy.deepcopy(old["evidence"]))
@@ -157,6 +158,7 @@ class SignedRoleResolver:
                     sign,
                     rho in face_anchors,
                     extended,
+                    measurement_only,
                 )
                 if section_key in self._section_results:
                     cached = self._section_results[section_key]
@@ -190,7 +192,7 @@ class SignedRoleResolver:
                             searched["continuous"][0],
                             searched["continuous"][2],
                         )
-                if raw is not None and profile.height(raw, sign)["transition"]:
+                if raw is not None and (measurement_only or profile.height(raw, sign)["transition"]):
                     rows.append(
                         dict(
                             along=sum(section) / 2,

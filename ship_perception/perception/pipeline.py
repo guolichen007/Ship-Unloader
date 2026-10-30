@@ -14,11 +14,7 @@ import numpy as np
 
 from ship_perception.r1_static.run import DEFAULT_CONFIG, resolve_config
 from ship_perception.r1_static.heightmap_batch import RESEARCH_CONFIG
-from ship_perception.r1_static.pcd_showcase import prepare_geometry
-from ship_perception.r1_static.corner_topology_review import (
-    review_points,
-    _separator_split,
-)
+from .current_separator import _separator_split
 from ship_perception.r1_static.height_grid import R1HeightGrid
 from .context import SceneEvidenceContext, thaw
 from .local_evidence import VesselLocalEvidence
@@ -184,6 +180,8 @@ class Timing:
 
 def _legacy_proposals(frame, context, config, research, timing, local_caches=None):
     """Independent compatibility evidence; local recall does not consume its gate."""
+    from ship_perception.r1_static.pcd_showcase import prepare_geometry
+    from ship_perception.r1_static.corner_topology_review import review_points
     measured = {}
     structural_cache = (
         {ident: cache.export_structural() for ident, cache in local_caches.items()}

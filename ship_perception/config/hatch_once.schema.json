@@ -26,7 +26,10 @@
   ],
   "properties": {
     "schema": {
-      "const": "ship_perception.hatch_once.2"
+      "enum": [
+        "ship_perception.hatch_once.2",
+        "ship_perception.hatch_once.3"
+      ]
     },
     "input": {
       "type": "object",
@@ -70,12 +73,8 @@
         "minimum": 0
       }
     },
-    "geometry_only": {
-      "$ref": "#/$defs/result"
-    },
-    "intensity_fusion": {
-      "$ref": "#/$defs/result"
-    },
+    "geometry_only": {},
+    "intensity_fusion": {},
     "per_hatch_status": {
       "type": "object"
     },
@@ -242,6 +241,169 @@
           "type": "boolean"
         }
       }
+    },
+    "review_hatch": {
+      "type": "object",
+      "required": [
+        "hatch_id",
+        "opening_identity",
+        "topology_status",
+        "geometry_status",
+        "certification_status",
+        "review_polygon_xy",
+        "review_coverage_polygon_xy",
+        "sides",
+        "corners",
+        "corner_heights",
+        "boundary_xy",
+        "undercoverage_risk"
+      ],
+      "properties": {
+        "geometry_status": {
+          "const": "COMPLETE_REVIEW_GEOMETRY"
+        },
+        "steel_edge_certified": {
+          "const": false
+        },
+        "corners": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "corner_heights": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "required": [
+              "z_m",
+              "z_state",
+              "z_observed",
+              "z_estimate",
+              "z_source",
+              "source_point_indexes",
+              "source_segment_ids"
+            ],
+            "properties": {
+              "z_state": {
+                "enum": [
+                  "MEASURED",
+                  "ESTIMATED",
+                  "UNOBSERVED"
+                ]
+              },
+              "z_m": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "sides": {
+          "type": "object",
+          "required": [
+            "U0",
+            "U1",
+            "V0",
+            "V1"
+          ],
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "final_rho",
+              "final_state",
+              "final_source",
+              "rho_before",
+              "rho_after",
+              "movement_m",
+              "candidate_modes",
+              "selected_mode_id",
+              "rejected_mode_ids",
+              "movement_reason",
+              "guard_result",
+              "raw_support_ids",
+              "s4_family_ids",
+              "topology_support_ids",
+              "height_support_ids",
+              "uncertainty_m"
+            ]
+          }
+        }
+      }
+    },
+    "review_result": {
+      "type": "object",
+      "required": [
+        "hatch_count",
+        "hatches",
+        "intensity_used"
+      ],
+      "properties": {
+        "hatch_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hatches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/review_hatch"
+          }
+        },
+        "intensity_used": {
+          "type": "boolean"
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema": {
+            "const": "ship_perception.hatch_once.2"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "geometry_only": {
+            "$ref": "#/$defs/result"
+          },
+          "intensity_fusion": {
+            "$ref": "#/$defs/result"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema": {
+            "const": "ship_perception.hatch_once.3"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "geometry_only": {
+            "$ref": "#/$defs/review_result"
+          },
+          "intensity_fusion": {
+            "$ref": "#/$defs/review_result"
+          }
+        },
+        "required": [
+          "schema_version",
+          "producer_git_sha",
+          "runtime_source_hash",
+          "config_hash",
+          "input_sha256",
+          "review_mode"
+        ]
+      }
+    }
+  ]
 }
