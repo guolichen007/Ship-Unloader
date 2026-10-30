@@ -358,6 +358,29 @@ class ReviewGeometryAssembler:
         check = geometry_consistency(sides, self.config)
         self.assembly_operation_count += 12
         failed_checks = []
+        if (not check['valid'] and check.get('polygon_uv') is not None
+                and set(check.get('failures',[]))=={'ILL_CONDITIONED_CORNER'}):
+            # A local measured line can constrain review direction/position
+            # without observing its intersections with the other sides. Keep
+            # the complete, convex enclosure as conservative review geometry;
+            # do not call an unobserved extension a measured full side/corner.
+            failed_checks.append(copy.deepcopy(check))
+            polygon=np.asarray(check['polygon_uv'])
+            for name,side in sides.items():
+                normal=np.asarray(side['normal_uv']);direction=np.array([-normal[1],normal[0]])
+                incident=[i for i,pair in enumerate(INTERSECTIONS) if name in pair]
+                coordinates=polygon[incident]@direction;lo,hi=sorted(side['support_span'])
+                missing=float(max(0.,lo-coordinates.min(),coordinates.max()-hi))
+                if missing>self.config['boundary']['corner_join_m']+2*side['uncertainty_m']:
+                    side['review_extension']=dict(state='UNOBSERVED_CONSERVATIVE',
+                        observed_support_span=[lo,hi],extrapolation_distance_m=missing,
+                        measurement_uncertainty_m=side['uncertainty_m'],
+                        uncertainty_kind='CONSERVATIVE_UNOBSERVED_EXTENSION_RADIUS_NOT_FIT_PRECISION',
+                        measurement_source=side['final_source'],measurement_rho=side['final_rho'])
+                    side.update(final_source='TOPOLOGY_SUPPORTED',final_state='GEOMETRY_CONSTRAINED',
+                        independent_geometry_support=False,uncertainty_m=max(side['uncertainty_m'],missing),
+                        guard_result='ILL_CONDITIONED_CORNER',movement_reason='KEEP_COMPLETE_ENCLOSURE_WITH_UNOBSERVED_EXTENSIONS')
+            check=geometry_consistency(sides,self.config)
         if not check["valid"]:
             failed_checks.append(copy.deepcopy(check))
             # Evidence remains available even when its heterogeneous line
@@ -425,7 +448,7 @@ class ReviewGeometryAssembler:
                     else "ESTIMATED"
                 ),
                 xy_source="LINE_INTERSECTION",
-                corner_state="LINE_INTERSECTION",
+                corner_state="UNOBSERVED_CONSERVATIVE_INTERSECTION" if any(sides[n].get('review_extension') for n in pair) else "LINE_INTERSECTION",
                 uncertainty_m=max(sides[n]["uncertainty_m"] for n in pair),
                 observed=all(sides[n]["independent_geometry_support"] for n in pair),
                 steel_certified=False,
