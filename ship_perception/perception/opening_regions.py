@@ -323,6 +323,7 @@ def build_regions(cache, proposals, core_bounds, research=None):
             cache,
             research,
             budget=getattr(getattr(cache, "v2_measurement", None), "budget", None),
+            nominations=proposals,
         )
         formal = bridge.compile_regions(formal)
         cache.s4_topology_bridge = bridge.audit()

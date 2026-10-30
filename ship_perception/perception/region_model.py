@@ -87,6 +87,8 @@ class OpeningRegion:
     precision_attempts: list = field(default_factory=list)
     relationship: str = "INDEPENDENT_OPENING_CANDIDATE"
     side_topology_support: dict = field(default_factory=dict)
+    identity_role: str = "UNASSOCIATED_NOMINATION"
+    identity_evidence: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if self.status not in REGION_STATES:
@@ -219,5 +221,7 @@ class OpeningRegion:
             component_bounds=[list(b) for b in self.component_bounds],
             geometry_role="CONSERVATIVE_REGION_NOT_MEASURED_STEEL",
             relationship=self.relationship,
+            identity_role=self.identity_role,
+            identity_evidence=dict(self.identity_evidence),
             precision_attempts=list(self.precision_attempts),
         )

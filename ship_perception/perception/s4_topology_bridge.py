@@ -104,12 +104,16 @@ def member_cell_assignment(xy, member_masks, region_bounds, nomination_bounds):
 
 
 class S4TopologyBridge:
-    def __init__(self, cache, research, budget=None):
+    def __init__(self, cache, research, budget=None, nominations=()):
         self.cache = cache
         self.primary = getattr(cache, "primary_cache", cache)
         self.config = cache.config
         self.vessel_id = cache.vessel.vessel_id
         self.budget = budget
+        self.legacy_nominations = [
+            p.evidence() for p in nominations if p.expert == "LEGACY"
+        ]
+        self.node_partition_audit = []
         self.observation_progress = dict(
             completed_deck_segments=[], completed_profile_segments=[]
         )
@@ -177,8 +181,19 @@ class S4TopologyBridge:
         self.xy = np.stack((u, v), axis=-1)
         self.projected = self.xy @ np.asarray(self.axes).T
         self._families()
+        self._partition_nodes()
         self._vertices()
         self._relations()
+
+    def _partition_nodes(self):
+        nominations = getattr(self, "legacy_nominations", ())
+        if not nominations:
+            return
+        from .region_partition import partition_current_nodes
+
+        self.nodes, self.node_partition_audit = partition_current_nodes(
+            self.nodes, self.xy, self.families, self.primary, nominations
+        )
 
     def _checkpoint(self, stage, record):
         """Keep finished evidence; incomplete S4 never authorizes a new merge."""
@@ -356,6 +371,7 @@ class S4TopologyBridge:
                 f["family_id"]
                 for f in self.families
                 if self._family_touch(node.mask, f)
+                or self._terminal_search_support(node.mask, f)
             ]
             xy = self.xy[node.mask]
             self.vertices.append(
@@ -369,6 +385,97 @@ class S4TopologyBridge:
                     height_level_m=float(node.level_m),
                 )
             )
+        original = {v["node_id"]: list(v["side_family_ids"]) for v in self.vertices}
+        for vertex in self.vertices:
+            node = self.nodes[vertex["node_id"]]
+            if self._opposite_terminals(original[vertex["node_id"]], node.mask):
+                continue
+            owners = []
+            for parent in self.vertices:
+                ancestor = self.nodes[parent["node_id"]]
+                if ancestor.level_m <= node.level_m:
+                    continue
+                if getattr(ancestor, "opening_domain", None) != getattr(
+                    node, "opening_domain", None
+                ):
+                    continue
+                overlap = int(np.count_nonzero(ancestor.mask & node.mask))
+                if (
+                    overlap
+                    < node.mask.sum() * self.config["roi"]["min_enclosure_ratio"]
+                ):
+                    continue
+                terminals = self._opposite_terminals(
+                    original[parent["node_id"]], ancestor.mask
+                )
+                if terminals:
+                    owners.append(
+                        dict(
+                            node_id=parent["node_id"],
+                            observed_member_overlap=overlap,
+                            terminal_family_ids=terminals,
+                        )
+                    )
+            if owners:
+                # Ownership follows measured member cells, not bbox overlap.
+                # This attaches existing end-wall search evidence; it does not
+                # fabricate Raw support along unobserved parts of those walls.
+                vertex["side_family_ids"] = sorted(
+                    set(vertex["side_family_ids"])
+                    | {f for owner in owners for f in owner["terminal_family_ids"]}
+                )
+                vertex["terminal_topology_assignment"] = owners
+
+    def _terminal_search_support(self, mask, family):
+        """Associate an observed end wall with a receding interior height lobe.
+
+        This is a topology search association, not measured support at a gap.
+        The existing structural search radius bounds it. A lone longitudinal
+        cargo contour cannot supply the second end or connect two openings.
+        """
+        if family["axis_role"] != "TRANSVERSE" or not set(
+            family["evidence_types"]
+        ).intersection(("OBSERVED_3D_FACE", "OBSERVED_PROFILE_BREAK")):
+            return False
+        points = self.projected[mask]
+        low, high = points.min(0), points.max(0)
+        distance = min(abs(family["rho"] - low[0]), abs(family["rho"] - high[0]))
+        overlap = sum(
+            max(0.0, min(hi, high[1]) - max(lo, low[1]))
+            for lo, hi in family["observed_intervals"]
+        )
+        return bool(
+            distance <= self.config["roi"]["support_search_m"]
+            and overlap
+            >= (high[1] - low[1]) * self.config["roi"]["min_enclosure_ratio"]
+        )
+
+    def _opposite_terminals(self, family_ids, mask):
+        """Two current observed terminal walls, never a four-line product."""
+        if not mask.any():
+            return []
+        points = self.projected[mask]
+        center = float(np.mean(points[:, 0]))
+        eligible = [
+            f
+            for f in self.families
+            if f["family_id"] in family_ids
+            and f["axis_role"] == "TRANSVERSE"
+            and set(f["evidence_types"]).intersection(
+                ("OBSERVED_3D_FACE", "OBSERVED_PROFILE_BREAK")
+            )
+        ]
+        left = [f for f in eligible if f["rho"] < center]
+        right = [f for f in eligible if f["rho"] > center]
+        if not left or not right:
+            return []
+        # Extent is constrained by observed terminals. Candidate modes remain
+        # separate; selecting a review rho is not this compiler's job.
+        if max(f["rho"] for f in right) - min(f["rho"] for f in left) < (
+            self.config["roi"]["min_deck_span_m"]
+        ):
+            return []
+        return sorted(f["family_id"] for f in left + right)
 
     def _split_evidence(self, first, second):
         a, b = np.asarray(first["centroid"]), np.asarray(second["centroid"])
@@ -475,7 +582,7 @@ class S4TopologyBridge:
             shared = sorted(
                 set(first["side_family_ids"]) & set(second["side_family_ids"])
             )
-            shared = [
+            shared_longitudinal = [
                 i
                 for i in shared
                 if next(f for f in self.families if f["family_id"] == i)["axis_role"]
@@ -487,19 +594,45 @@ class S4TopologyBridge:
             common_components = set(np.unique(labels[a])) & set(
                 np.unique(labels[b])
             ) - {0}
+            shared_terminals = self._opposite_terminals(shared, a | b)
+            positive_shared = sorted(set(shared_longitudinal + shared_terminals))
+            first_domain = getattr(self.nodes[first["node_id"]], "opening_domain", None)
+            second_domain = getattr(
+                self.nodes[second["node_id"]], "opening_domain", None
+            )
+            domains_compatible = first_domain == second_domain
+            if (first_domain or second_domain) and not domains_compatible:
+                positive_shared = []
             continuity = dict(
-                observed_continuity=bool(common_components and shared),
+                observed_continuity=bool(common_components and positive_shared),
                 overlapping_interior_cells=int(overlap.sum()),
                 observed_connected_components=sorted(int(i) for i in common_components),
                 geometry_source="ACTUAL_HEIGHT_MASK_CELLS_NOT_BBOX_OVERLAP",
+                shared_longitudinal_family_ids=shared_longitudinal,
+                shared_opposite_terminal_family_ids=shared_terminals,
+                partition_ownership_compatible=domains_compatible,
             )
+            split = self._split_evidence(first, second)
+            if (
+                first_domain
+                and second_domain
+                and first_domain["domain_id"] == second_domain["domain_id"]
+                and first_domain["side"] != second_domain["side"]
+            ):
+                split.append(
+                    dict(
+                        kind="CURRENT_RAW3D_BEV_TWO_FACE_SEPARATOR",
+                        qualified=True,
+                        separator_faces=first_domain["separator_faces"],
+                    )
+                )
             self.relations.append(
                 topology_relation(
                     first,
                     second,
-                    shared,
+                    positive_shared,
                     continuity,
-                    self._split_evidence(first, second),
+                    split,
                 )
             )
 
@@ -532,6 +665,12 @@ class S4TopologyBridge:
                 frozenset((x, y)) in split_pairs for x in left for y in right
             ):
                 continue
+            # Unassigned height nominations cannot consume an independently
+            # attributed opening through an AMBIGUOUS relation.
+            if any(
+                getattr(self.nodes[n], "opening_domain", None) for n in left | right
+            ):
+                continue
             left.update(right)
             groups.remove(right)
             ambiguous_members.update(left)
@@ -540,19 +679,29 @@ class S4TopologyBridge:
             attached = sorted({i for n in members for i in by_id[n]["side_family_ids"]})
             families = [f for f in self.families if f["family_id"] in attached]
             longitudinal = [f for f in families if f["axis_role"] == "LONGITUDINAL"]
-            if not longitudinal:
+            observed = np.logical_or.reduce(
+                [self.nodes[n].mask for n in sorted(members)]
+            )
+            terminals = self._opposite_terminals(attached, observed)
+            if not longitudinal and not terminals:
                 continue
             # Geometry is measured interior cells after a positive graph
             # decision. Bounds never decide whether two vertices connect.
             masks = [self.nodes[n].mask for n in sorted(members)]
             observed = np.logical_or.reduce(masks)
             common = np.logical_and.reduce(masks)
-            low = min(f["rho"] - f["rho_uncertainty"] for f in longitudinal)
-            high = max(f["rho"] + f["rho_uncertainty"] for f in longitudinal)
-            corridor = (self.projected[:, :, 1] >= low - self.grid.cell_m) & (
-                self.projected[:, :, 1] <= high + self.grid.cell_m
-            )
-            interior = (observed if compound else common) & corridor
+            if terminals:
+                # Opposite current end-wall evidence owns the widthwise lobes.
+                # Their observed union is not the empty intersection of top
+                # and bottom cargo-height slices. No unobserved cells are added.
+                interior = observed
+            else:
+                low = min(f["rho"] - f["rho_uncertainty"] for f in longitudinal)
+                high = max(f["rho"] + f["rho_uncertainty"] for f in longitudinal)
+                corridor = (self.projected[:, :, 1] >= low - self.grid.cell_m) & (
+                    self.projected[:, :, 1] <= high + self.grid.cell_m
+                )
+                interior = (observed if compound else common) & corridor
             if not interior.any():
                 continue
             xy = self.xy[interior]
@@ -593,6 +742,7 @@ class S4TopologyBridge:
                 orientation_budget=angular,
                 interior_cells_rc=np.argwhere(interior).tolist(),
                 bounds_source="OBSERVED_INTERIOR_AFTER_TOPOLOGY_CONNECT",
+                opposite_terminal_family_ids=terminals,
                 search_envelope_source="MEMBER_MASKS_S4_FAMILIES_AND_UNCERTAINTY",
             )
             if compound:
@@ -621,6 +771,51 @@ class S4TopologyBridge:
                 "COMPOUND_OPENING_GROUP"
                 if compound
                 else "INDEPENDENT_OPENING_CANDIDATE"
+            )
+            region.identity_role = (
+                "COMPOUND_SEARCH_GROUP"
+                if compound
+                else (
+                    "CONFIRMED_CONNECTED_OPENING"
+                    if len(members) > 1
+                    else "CONFIRMED_INDEPENDENT_OPENING"
+                )
+            )
+            independent_scope = any(
+                int(
+                    np.count_nonzero(
+                        observed
+                        & np.all(
+                            (self.xy >= row["bounds_axial"][:2])
+                            & (self.xy <= row["bounds_axial"][2:]),
+                            axis=-1,
+                        )
+                    )
+                )
+                >= max(
+                    self.config["roi"]["min_opening_cells"],
+                    observed.sum() * self.config["roi"]["min_enclosure_ratio"],
+                )
+                for row in getattr(self, "legacy_nominations", ())
+                if row.get("bounds_axial")
+                and row.get("measured_strong_side_count", 0) >= 3
+                and row.get("opening_evidence", {}).get("status") == "OPENING_LOWER"
+                and not row.get("role_conflicts")
+            )
+            if not compound and not terminals and not independent_scope:
+                region.identity_role = "WEAK_UNASSIGNED_REGION"
+            region.identity_evidence = dict(
+                source="CURRENT_S4_TOPOLOGY",
+                member_height_nodes=sorted(members),
+                opposite_terminal_family_ids=terminals,
+                member_support_cells_rc=np.argwhere(interior).tolist(),
+                member_support_grid=dict(
+                    x0=self.grid.x0, y0=self.grid.y0, cell_m=self.grid.cell_m
+                ),
+                support_snapshot_sha256=hashlib.sha256(
+                    np.argwhere(interior).astype("<i8").tobytes()
+                ).hexdigest(),
+                current_independent_enclosure_scope=independent_scope,
             )
             # Associate a recall nomination only through its observed interior
             # cells in this proven component. No nomination bbox expands it.
@@ -723,6 +918,7 @@ class S4TopologyBridge:
             topology_relations=self.relations,
             structural_axis=self.axis,
             observation_progress=getattr(self, "observation_progress", {}),
+            node_partition_audit=getattr(self, "node_partition_audit", []),
             observation_grid=dict(
                 x0=self.grid.x0, y0=self.grid.y0, cell_m=self.grid.cell_m
             ),

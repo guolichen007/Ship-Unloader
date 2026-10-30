@@ -22,7 +22,7 @@ class S4TopologyContracts(unittest.TestCase):
         bridge.config, bridge.vessel_id = config, "V"
         bridge.axes = list(np.eye(2))
         bridge.axis = dict(status="AXIS_ESTIMATED", axis_uncertainty_deg=1.0)
-        bridge.grid = SimpleNamespace(cell_m=1.0)
+        bridge.grid = SimpleNamespace(cell_m=1.0, x0=-0.5, y0=-0.5)
         bridge.xy = np.stack((x, y), axis=-1)
         bridge.projected = bridge.xy
         bridge.cache = SimpleNamespace(vessel=SimpleNamespace(axes=np.eye(2)))
