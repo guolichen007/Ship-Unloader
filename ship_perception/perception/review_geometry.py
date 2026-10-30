@@ -254,6 +254,9 @@ class ReviewGeometryAssembler:
             independent_geometry_support=priority == 0,
             raw_support_ids=list(mode.get("raw_support_ids", [])),
             s4_family_ids=list(mode.get("s4_family_ids", [])),
+            topology_support_ids=list(mode.get("topology_support_ids", [])),
+            height_support_ids=list(mode.get("height_support_ids", [])),
+            source_point_indexes=list(mode.get("source_point_indexes", [])),
         )
 
     def assemble(self, region, axes, bridge=None, topology_sides=None):
@@ -350,6 +353,10 @@ class ReviewGeometryAssembler:
                     "normal_uv",
                     "support_span",
                     "uncertainty_m",
+                    "raw_support_ids",
+                    "s4_family_ids",
+                    "topology_support_ids",
+                    "height_support_ids",
                 ]
             }
             side["comparison_points_uv"] = line_points(side).tolist()

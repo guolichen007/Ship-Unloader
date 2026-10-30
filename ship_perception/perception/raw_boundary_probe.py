@@ -9,6 +9,7 @@ import numpy as np
 from .line_geometry import SIDE_SPECS
 from .sections import physical_sections
 from .consensus import SpatialEvidenceConsensus
+from .raw_mode_consensus import resolve_section_modes, supported
 
 
 class SignedRoleResolver:
@@ -91,7 +92,14 @@ class SignedRoleResolver:
 
     @precision_stage("raw_edge_search")
     def side(
-        self, axis, anchor, span, sign, candidates, extended=False, normal_range=None,
+        self,
+        axis,
+        anchor,
+        span,
+        sign,
+        candidates,
+        extended=False,
+        normal_range=None,
         measurement_only=False,
     ):
         config = self.config
@@ -139,7 +147,15 @@ class SignedRoleResolver:
         paired, faces, evidence = [], [], []
         observed, partial = False, False
         for rho in anchors:
-            anchor_key = (axis, rho, tuple(span), sign, rho in face_anchors, extended, measurement_only)
+            anchor_key = (
+                axis,
+                rho,
+                tuple(span),
+                sign,
+                rho in face_anchors,
+                extended,
+                measurement_only,
+            )
             if anchor_key in self._anchor_results:
                 old = self._anchor_results[anchor_key]
                 evidence.append(copy.deepcopy(old["evidence"]))
@@ -148,7 +164,7 @@ class SignedRoleResolver:
                 observed |= old["observed"]
                 partial |= old["partial"]
                 continue
-            rows, face_rows = [], []
+            rows, face_rows, raw_records = [], [], []
             anchor_observed = False
             for section in spans:
                 section_key = (
@@ -160,7 +176,7 @@ class SignedRoleResolver:
                     extended,
                     measurement_only,
                 )
-                if section_key in self._section_results:
+                if section_key in self._section_results and not measurement_only:
                     cached = self._section_results[section_key]
                     rows.extend(copy.deepcopy(cached["rows"]))
                     face_rows.extend(copy.deepcopy(cached["face_rows"]))
@@ -192,7 +208,17 @@ class SignedRoleResolver:
                             searched["continuous"][0],
                             searched["continuous"][2],
                         )
-                if raw is not None and (measurement_only or profile.height(raw, sign)["transition"]):
+                if measurement_only:
+                    # Decoupling from the Height provider must not bypass the
+                    # Raw primitive's own signed surface-pair qualification.
+                    # Preserve its alternatives for the existing finite,
+                    # cross-section resolver rather than silently discarding
+                    # ambiguous but independently recoverable sections.
+                    record = self.refiner._raw_section(
+                        self.measurement.raw_uvz, axis, rho, section, sign
+                    )
+                    raw_records.append(record)
+                if raw is not None and profile.height(raw, sign)["transition"]:
                     rows.append(
                         dict(
                             along=sum(section) / 2,
@@ -215,6 +241,22 @@ class SignedRoleResolver:
                     face_rows=copy.deepcopy(face_rows[face_start:]),
                     observed=section_observed,
                 )
+            if measurement_only:
+                resolved = resolve_section_modes(
+                    raw_records, spans, config, self.refiner.budget
+                )
+                rows = [
+                    dict(
+                        along=sum(section) / 2,
+                        rho=float(record["continuous"][0]),
+                        measurement_source="RAW_PAIRED_PROFILE",
+                        raw_point_count=int(record["continuous"][2]),
+                        raw_self_qualification="SIGNED_SURFACE_PAIR",
+                        section_record=record,
+                    )
+                    for section, record in zip(spans, resolved)
+                    if supported(record)
+                ]
             observed |= anchor_observed
             paired_start, faces_start = len(paired), len(faces)
             partial |= bool(rows or face_rows)
@@ -228,6 +270,7 @@ class SignedRoleResolver:
                     supported_sections=len(rows),
                     structural_height_sections=len(face_rows),
                     fit=fit,
+                    raw_section_alternatives=raw_records,
                 )
             )
             if fit["status"] == "CONSENSUS":
@@ -258,7 +301,18 @@ class SignedRoleResolver:
         # A unique paired Raw edge outranks nominal face/height nominations.
         qualified = paired or faces
         join = config["boundary"]["corner_join_m"]
-        if qualified and np.ptp([r["rho"] for r in qualified]) <= join:
+        # Fits may have different reference stations and slopes. Compare
+        # physical positions at the same endpoints, never their bare rhos.
+        positions = [
+            [
+                r["rho"]
+                + r["fit"].get("slope", 0.0)
+                * (along - r["fit"].get("reference_along_m", sum(span) / 2))
+                for along in span
+            ]
+            for r in qualified
+        ]
+        if qualified and np.max(np.ptp(positions, axis=0)) <= join:
             best = max(qualified, key=lambda r: len(r["sections"]))
             return dict(
                 status="STRONG_UNIQUE_EDGE",
