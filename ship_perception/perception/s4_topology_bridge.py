@@ -25,6 +25,7 @@ from ship_perception.r1_static.height_structure_forensics import _hierarchy
 from .candidate_union import canonical
 from .region_model import OpeningRegion, TopologySupport, EvidenceSource
 from .structural_family import merge_intervals
+from .review_frame import ReviewFrame
 
 
 def _ident(prefix, value):
@@ -167,9 +168,23 @@ class S4TopologyBridge:
         self.raw_record_count = 0
         self.observations = []
         self.regions = []
-        if self.axis["status"] != "AXIS_ESTIMATED":
-            return
-        axes = [np.asarray(self.axis[k]) for k in ("axis_a", "axis_b")]
+        # A global consensus can be unresolved while local profiles and faces
+        # are valid. B1 anchors review coordinates; S4 remains an observation.
+        self.review_frame = ReviewFrame(
+            self.vessel_id,
+            getattr(getattr(cache, "input_frame", None), "frame_id", "UNKNOWN"),
+            tuple(tuple(row) for row in cache.vessel.axes),
+        )
+        axes = (
+            [np.asarray(self.axis[k]) for k in ("axis_a", "axis_b")]
+            if self.axis["status"] == "AXIS_ESTIMATED"
+            else list(np.eye(2))
+        )
+        self.projection_axis_source = (
+            "S4_RESIDUAL_OBSERVATION_IN_B1"
+            if self.axis["status"] == "AXIS_ESTIMATED"
+            else "B1_ANCHOR_GLOBAL_S4_UNRESOLVED"
+        )
         # B1 labels the already estimated orthogonal pair; it never changes it.
         longitudinal = int(np.argmax([abs(a[0]) for a in axes]))
         self.axes = [axes[longitudinal], axes[1 - longitudinal]]
@@ -177,6 +192,24 @@ class S4TopologyBridge:
             self.axes[0] = -self.axes[0]
         if self.axes[1][1] < 0:
             self.axes[1] = -self.axes[1]
+        residual = math.degrees(math.atan2(self.axes[0][1], self.axes[0][0]))
+        lever = float(np.linalg.norm(np.ptp(self.xyz[:, :2], axis=0)) / 2)
+        uncertainty = float(self.axis.get("axis_uncertainty_deg") or 0.0)
+        lateral = lever * math.sin(math.radians(min(90.0, abs(residual) + uncertainty)))
+        available = (
+            self.config["roi"]["support_search_m"]
+            - self.config["boundary"]["profile_half_width_m"]
+        )
+        self.axis_projection_risk = dict(
+            effective_lever_arm_m=lever,
+            residual_deg=residual,
+            axis_uncertainty_deg=uncertainty,
+            predicted_lateral_error_m=lateral,
+            available_search_margin_m=available,
+        )
+        if self.axis["status"] == "AXIS_ESTIMATED" and lateral > available:
+            self.axes = list(np.eye(2))
+            self.projection_axis_source = "B1_KEEP_UNSAFE_S4_RESIDUAL"
         u, v = self.grid.centers()
         self.xy = np.stack((u, v), axis=-1)
         self.projected = self.xy @ np.asarray(self.axes).T
@@ -323,7 +356,13 @@ class S4TopologyBridge:
                         ),
                         vessel_id=self.vessel_id,
                         axis_role="LONGITUDINAL" if axis == 0 else "TRANSVERSE",
-                        coordinate_frame="SELECTED_VESSEL_S4_AXES",
+                        coordinate_frame="VESSEL_REVIEW_UV",
+                        parameter_basis="S4_RESIDUAL_NORMAL_AND_DIRECTION_EXPRESSED_IN_B1",
+                        axis_source=getattr(
+                            self,
+                            "projection_axis_source",
+                            "S4_RESIDUAL_OBSERVATION_IN_B1",
+                        ),
                         direction_uv=self.axes[axis].tolist(),
                         normal_uv=self.axes[1 - axis].tolist(),
                         direction_axis=axis,
@@ -641,7 +680,7 @@ class S4TopologyBridge:
 
     def compile_regions(self, existing):
         """Called by the V2 compiler; preserve old nominations and all provenance."""
-        if self.axis["status"] != "AXIS_ESTIMATED":
+        if not hasattr(self, "axes"):
             self.regions = list(existing)
             return self.regions
         by_id = {v["node_id"]: v for v in self.vertices}
@@ -900,7 +939,7 @@ class S4TopologyBridge:
                 else (
                     "S4_EVIDENCE_DEFERRED_PERFORMANCE"
                     if self.axis["status"] == "DEFERRED_PERFORMANCE"
-                    else "AXIS_AMBIGUOUS"
+                    else "S4_LOCAL_OBSERVATIONS_IN_B1_GLOBAL_AXIS_AMBIGUOUS"
                 )
             ),
             vessel_id=self.vessel_id,
@@ -920,6 +959,14 @@ class S4TopologyBridge:
             raw_observations=self.observations,
             topology_relations=self.relations,
             structural_axis=self.axis,
+            review_axis_status=(
+                "AXIS_ESTIMATED" if hasattr(self, "axes") else "UNRESOLVED"
+            ),
+            review_frame=(
+                self.review_frame.audit() if hasattr(self, "review_frame") else None
+            ),
+            projection_axis_source=getattr(self, "projection_axis_source", None),
+            axis_projection_risk=getattr(self, "axis_projection_risk", None),
             observation_progress=getattr(self, "observation_progress", {}),
             node_partition_audit=getattr(self, "node_partition_audit", []),
             observation_grid=dict(

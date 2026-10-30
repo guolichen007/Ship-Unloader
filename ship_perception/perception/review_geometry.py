@@ -10,6 +10,7 @@ import math
 import numpy as np
 
 from .candidate_union import canonical
+from .review_frame import line_points, line_displacements, line_coordinate_at
 
 SIDES = (("U0", 0, 0, -1), ("U1", 0, 2, 1), ("V0", 1, 1, -1), ("V1", 1, 3, 1))
 INTERSECTIONS = (("U0", "V0"), ("U1", "V0"), ("U1", "V1"), ("U0", "V1"))
@@ -158,6 +159,11 @@ class ReviewGeometryAssembler:
             axis=axis,
             position=pos,
             outward_sign=sign,
+            comparison_points_uv=(
+                normal * box[pos] + np.asarray(sorted(endpoints))[:, None] * direction
+            ).tolist(),
+            coordinate_frame="VESSEL_REVIEW_UV",
+            rho_contract="dot(point_review,normal_uv)=final_rho",
         )
 
     def _apply_mode(self, side, mode):
@@ -170,7 +176,8 @@ class ReviewGeometryAssembler:
             return
         same = [m for m in side["candidate_modes"] if m["source"] == mode["source"]]
         if len(same) > 1 and any(
-            abs(m["rho"] - mode["rho"]) > self.config["boundary"]["corner_join_m"]
+            np.max(np.abs(line_displacements(m, mode, side["comparison_points_uv"])))
+            > self.config["boundary"]["corner_join_m"]
             for m in same
         ):
             if priority == 0:
@@ -192,8 +199,15 @@ class ReviewGeometryAssembler:
                 side["movement_reason"] = "EQUAL_PRIORITY_RAW_MODE_CONFLICT"
                 side["guard_result"] = "KEEP_CONSERVATIVE_PREVIOUS_BOUNDARY"
             return
-        move = mode["rho"] - side["rho_before"]
-        inward = -side["outward_sign"] * move
+        prior = side.get(
+            "conservative_review_line",
+            dict(
+                normal_uv=np.eye(2)[side["axis"]].tolist(), final_rho=side["rho_before"]
+            ),
+        )
+        displacements = line_displacements(prior, mode, side["comparison_points_uv"])
+        move = float(displacements[np.argmax(abs(displacements))])
+        inward = float(max(0.0, np.max(-side["outward_sign"] * displacements)))
         gain = mode.get("independent_raw_sections", 0) >= self.config["boundary"][
             "profile_min_sections"
         ] and mode.get("physical_role_improved", False)
@@ -212,6 +226,8 @@ class ReviewGeometryAssembler:
             final_source=mode["source"],
             rho_after=float(mode["rho"]),
             movement_m=float(move),
+            endpoint_displacements_m=displacements.tolist(),
+            movement_definition="DISPLACEMENT_ALONG_PREVIOUS_NORMAL_AT_FIXED_SUPPORT_STATIONS",
             uncertainty_m=float(mode["uncertainty_m"]),
             selected_mode_id=mode["mode_id"],
             movement_reason=(
@@ -228,7 +244,11 @@ class ReviewGeometryAssembler:
     def assemble(self, region, axes, bridge=None, topology_sides=None):
         bridge = bridge or {}
         eligibility = ReviewGeometryEligibility.assess(
-            region, bridge.get("structural_axis", {}).get("status", "AXIS_ESTIMATED")
+            region,
+            bridge.get(
+                "review_axis_status",
+                bridge.get("structural_axis", {}).get("status", "AXIS_ESTIMATED"),
+            ),
         )
         if not eligibility["eligible"]:
             return None, eligibility
@@ -284,7 +304,16 @@ class ReviewGeometryAssembler:
             side["candidate_modes"] = []
             if (
                 modes
-                and np.ptp([m["rho"] for m in modes])
+                and np.ptp(
+                    [
+                        line_coordinate_at(
+                            m,
+                            np.mean(side["comparison_points_uv"], axis=0),
+                            side["axis"],
+                        )
+                        for m in modes
+                    ]
+                )
                 <= self.config["boundary"]["corner_join_m"]
             ):
                 self._apply_mode(side, modes[0])
@@ -308,6 +337,7 @@ class ReviewGeometryAssembler:
                     "uncertainty_m",
                 ]
             }
+            side["comparison_points_uv"] = line_points(side).tolist()
         result["conservative_review_sides"] = copy.deepcopy(result["sides"])
         return result, eligibility
 
