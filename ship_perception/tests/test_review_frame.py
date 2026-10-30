@@ -8,7 +8,11 @@ from unittest.mock import patch
 
 import numpy as np
 
-from ship_perception.perception.review_frame import ReviewFrame, line_displacements
+from ship_perception.perception.review_frame import (
+    ReviewFrame,
+    line_displacements,
+    line_points,
+)
 from ship_perception.perception.review_geometry import ReviewGeometryAssembler
 from ship_perception.perception.region_model import OpeningRegion, TopologySupport
 from ship_perception.r1_static.run import resolve_config
@@ -90,6 +94,85 @@ class ReviewFrameContracts(unittest.TestCase):
         self.assertEqual(states, ["MEASURED_WEAK"] * 3)
         for polygon in polygons[1:]:
             np.testing.assert_allclose(polygon, polygons[0], atol=1e-9)
+
+    def test_normal_sign_flip_preserves_physical_support_endpoints(self):
+        line = dict(normal_uv=[0.6, 0.8], rho=3.0, support_span=[-4.0, 7.0])
+        flipped = dict(normal_uv=[-0.6, -0.8], rho=-3.0, support_span=[-7.0, 4.0])
+        np.testing.assert_allclose(
+            line_points(line), line_points(flipped)[::-1], atol=1e-12
+        )
+
+    def test_s4_interval_parameterization_is_converted_before_geometry_join(self):
+        config, _ = resolve_config()
+        r = OpeningRegion(
+            "R",
+            "V",
+            (0.0, 0.0, 20.0, 8.0),
+            (-4.0, -4.0, 24.0, 12.0),
+            (TopologySupport("S4_OPENING_TOPOLOGY", "SUPPORTING"),),
+            component_bounds=((0.0, 0.0, 20.0, 8.0),),
+        )
+        r.identity_role = "CONFIRMED_CONNECTED_OPENING"
+        r.side_topology_support["V1"] = TopologySupport(
+            "STRUCTURAL_LINE_FAMILY", "SUPPORTING"
+        )
+        outputs = []
+        for direction, span in [([1.0, 0.0], [0.0, 20.0]), ([-1.0, 0.0], [-20.0, 0.0])]:
+            family = dict(
+                family_id="F",
+                direction_axis=0,
+                normal_uv=[0.0, 1.0],
+                direction_uv=direction,
+                rho=8.0,
+                support_span=span,
+                rho_uncertainty=0.1,
+            )
+            result, _ = ReviewGeometryAssembler(config).assemble(
+                r, np.eye(2), dict(side_families=[family])
+            )
+            outputs.append(result["sides"]["V1"]["support_span"])
+        np.testing.assert_allclose(outputs[0], outputs[1])
+
+    def test_scene_rotation_translation_preserves_review_line_conflict(self):
+        line = dict(normal_uv=[1.0, 0.0], rho=2.0)
+        other = dict(normal_uv=[math.cos(0.02), math.sin(0.02)], rho=2.1)
+        stations = np.array([[2.0, 0.0], [2.0, 8.0]])
+        expected = line_displacements(line, other, stations)
+        for angle, translation in [
+            (0.0, [123.0, -451.0]),
+            (0.7, [0.0, 0.0]),
+            (-1.2, [900.0, -800.0]),
+        ]:
+            rot = np.array(
+                [
+                    [math.cos(angle), -math.sin(angle)],
+                    [math.sin(angle), math.cos(angle)],
+                ]
+            )
+            translation = np.asarray(translation)
+            world = []
+            for row in (line, other):
+                normal = rot @ row["normal_uv"]
+                world.append(
+                    dict(
+                        normal_uv=normal.tolist(), rho=row["rho"] + normal @ translation
+                    )
+                )
+            frame = ReviewFrame("V", "map", tuple(map(tuple, rot.T)))
+            recovered = []
+            for row in world:
+                n = frame.to_review(np.asarray(row["normal_uv"]))
+                recovered.append(
+                    dict(
+                        normal_uv=n.tolist(),
+                        rho=row["rho"] - np.asarray(row["normal_uv"]) @ translation,
+                    )
+                )
+            actual = line_displacements(
+                *recovered,
+                frame.to_review(stations @ rot.T + translation - translation),
+            )
+            np.testing.assert_allclose(actual, expected, atol=1e-10)
 
     def test_global_axis_ambiguity_cannot_skip_valid_local_observation_compilation(
         self,

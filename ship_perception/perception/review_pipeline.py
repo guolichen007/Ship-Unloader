@@ -35,6 +35,7 @@ from .review_height import ReviewCornerHeight
 from .review_runtime import MeasurementTasks
 from .review_measurement import raw_face_measurements
 from .review_topology_sides import current_side_constraints
+from .local_enclosure_replay import replay_review_constraints
 from .raw_boundary_probe import SignedRoleResolver
 from .final_boundary import FinalBoundaryRefiner
 from .budget import PerformanceBudget, PerformanceBudgetExceeded
@@ -212,6 +213,7 @@ def run_perception(
                 proposals,
                 tuple(np.r_[primary.xyz[:, :2].min(0), primary.xyz[:, :2].max(0)]),
                 research,
+                local_evidence_before_identity=True,
             )
         bridge = getattr(cache, "s4_topology_bridge", {})
         canonical = []
@@ -219,9 +221,14 @@ def run_perception(
         with stage("REVIEW_GEOMETRY_ASSEMBLY"):
             for region in cache.opening_identities:
                 topology_sides = (
-                    current_side_constraints(cache, measurement, region, config)
-                    if region.identity_role.startswith("CONFIRMED")
-                    else None
+                    replay_review_constraints(region, config)
+                    if region.identity_evidence.get("source")
+                    == "CURRENT_BOUNDED_LOCAL_EVIDENCE_VECTOR"
+                    else (
+                        current_side_constraints(cache, measurement, region, config)
+                        if region.identity_role.startswith("CONFIRMED")
+                        else None
+                    )
                 )
                 result, decision = assembler.assemble(
                     region, vessel.axes, bridge, topology_sides

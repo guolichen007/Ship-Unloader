@@ -210,8 +210,25 @@ class OpeningRegionCompiler:
         )
 
 
-def build_regions(cache, proposals, core_bounds, research=None):
+def build_regions(
+    cache,
+    proposals,
+    core_bounds,
+    research=None,
+    *,
+    local_evidence_before_identity=False,
+):
     from .validation import deck_ring
+    from .local_enclosure_replay import compile_local_evidence, resolve_local_identities
+
+    local_evidence = []
+    if (
+        local_evidence_before_identity
+        and hasattr(cache, "xyz")
+        and research is not None
+    ):
+        local_evidence = compile_local_evidence(cache, research)
+        cache.local_enclosure_evidence = local_evidence
 
     compiler = OpeningRegionCompiler(cache.config)
     regions = list(
@@ -327,6 +344,8 @@ def build_regions(cache, proposals, core_bounds, research=None):
         )
         formal = bridge.compile_regions(formal)
         cache.s4_topology_bridge = bridge.audit()
+    if local_evidence:
+        formal = resolve_local_identities(formal, local_evidence, cache, source)
     cache.opening_identities = tuple(formal)
     from .structural_family import build_structural_families, attach_family_search
 
@@ -340,6 +359,7 @@ def build_regions(cache, proposals, core_bounds, research=None):
         compiler.audit(),
         opening_region_count=len(formal),
         stable_s4_consumed=hasattr(cache, "s4_topology_bridge"),
+        local_evidence_compilation=local_evidence,
         structural_fallback_count=sum(r.status != "REGION_DETECTED" for r in regions),
         visible_basin_search_area_m2=visible_area,
         core_search_area_m2=area(core_bounds),

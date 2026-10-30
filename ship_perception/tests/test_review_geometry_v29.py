@@ -26,20 +26,30 @@ class ReviewGeometryContracts(unittest.TestCase):
 
     def test_bounded_keeps_original_pipeline_until_normal6_gate_passes(self):
         from ship_perception.perception import pipeline_v2
-        with patch.object(pipeline_v2, 'run_pre_v29_bounded', return_value='ORIGINAL') as original, patch(
-            'ship_perception.perception.review_pipeline.run_perception', side_effect=AssertionError('Unaccepted default')
+
+        with patch.object(
+            pipeline_v2, "run_pre_v29_bounded", return_value="ORIGINAL"
+        ) as original, patch(
+            "ship_perception.perception.review_pipeline.run_perception",
+            side_effect=AssertionError("Unaccepted default"),
         ):
-            self.assertEqual(pipeline_v2.run_perception(None), 'ORIGINAL')
+            self.assertEqual(pipeline_v2.run_perception(None), "ORIGINAL")
             original.assert_called_once()
-            with self.assertRaisesRegex(ValueError, 'OPERATOR_ROI_REQUIRES'):
-                pipeline_v2.run_perception(None, operator_vessel_roi='scope.json')
+            with self.assertRaisesRegex(ValueError, "OPERATOR_ROI_REQUIRES"):
+                pipeline_v2.run_perception(None, operator_vessel_roi="scope.json")
 
     def test_review_first_requires_explicit_mode(self):
         from ship_perception.perception import pipeline_v2
-        with patch.object(pipeline_v2, 'run_pre_v29_bounded', side_effect=AssertionError('Wrong mode')), patch(
-            'ship_perception.perception.review_pipeline.run_perception', return_value='REVIEW'
+
+        with patch.object(
+            pipeline_v2, "run_pre_v29_bounded", side_effect=AssertionError("Wrong mode")
+        ), patch(
+            "ship_perception.perception.review_pipeline.run_perception",
+            return_value="REVIEW",
         ) as review:
-            self.assertEqual(pipeline_v2.run_perception(None, mode='review-first'), 'REVIEW')
+            self.assertEqual(
+                pipeline_v2.run_perception(None, mode="review-first"), "REVIEW"
+            )
             review.assert_called_once()
 
     def region(self):
@@ -144,6 +154,33 @@ class ReviewGeometryContracts(unittest.TestCase):
         self.assertEqual(
             q["boundary_measurements"]["U0"]["final_source"], "MEASURED_RAW"
         )
+
+    def test_local_raw_line_alone_cannot_truncate_complete_review(self):
+        r = self.region()
+        a = ReviewGeometryAssembler(self.config)
+        prior, _ = a.assemble(r, np.eye(2))
+        mode = self.mode(2.0, gain=True)
+        result = a.update(r, prior, {"U0": [mode]}, np.eye(2))
+        self.assertEqual(result["sides"]["U0"]["final_rho"], 0.0)
+        candidates = result["sides"]["U0"]["candidate_modes"]
+        self.assertEqual(candidates[0]["source"], "MEASURED_RAW")
+        self.assertEqual(candidates[0]["rho"], 2.0)
+        self.assertEqual(
+            candidates[0]["review_move_qualification"],
+            "LOCAL_MEASUREMENT_WITHOUT_INDEPENDENT_OPENING_ROLE_GAIN",
+        )
+
+    def test_raw_measurement_survives_missing_height(self):
+        r = self.region()
+        a = ReviewGeometryAssembler(self.config)
+        prior, _ = a.assemble(r, np.eye(2))
+        mode = self.mode(-0.1)
+        mode["height_support_ids"] = []
+        result = a.update(r, prior, {"U0": [mode]}, np.eye(2))
+        self.assertEqual(
+            result["boundary_measurements"]["U0"]["final_source"], "MEASURED_RAW"
+        )
+        self.assertFalse(result["steel_edge_certified"])
 
     def test_inferred_corner_not_claimed_measured(self):
         result = infer_fourth_corner({0: [0.0, 0.0], 1: [20.0, 0.0], 2: [20.0, 8.0]})
