@@ -28,6 +28,23 @@ SOURCE_PRIORITY = {
 }
 
 
+def unobserved_intervals(observed, extent):
+    """Complement of actual measured intervals on a single line tangent."""
+    low, high = sorted(extent)
+    cursor = low
+    missing = []
+    for start, end in sorted(sorted(interval) for interval in observed):
+        start, end = max(low, start), min(high, end)
+        if end <= low or start >= high:
+            continue
+        if start > cursor:
+            missing.append([cursor, start])
+        cursor = max(cursor, end)
+    if cursor < high:
+        missing.append([cursor, high])
+    return missing
+
+
 def infer_fourth_corner(corners_uv):
     """Infer only the missing corner of three independently supported corners."""
     if len(corners_uv) != 3 or not set(corners_uv).issubset(range(4)):
@@ -149,6 +166,7 @@ class ReviewGeometryAssembler:
             movement_reason="CURRENT_REGION_CONSERVATIVE_BOUND",
             guard_result="KEEP_CONSERVATIVE_PREVIOUS_BOUNDARY",
             raw_support_ids=[],
+            measured_intervals=[],
             s4_family_ids=[],
             topology_support_ids=list(region.source_proposal_ids),
             height_support_ids=list(
@@ -194,6 +212,15 @@ class ReviewGeometryAssembler:
                 side["uncertainty_m"] = prior.get(
                     "uncertainty_m", side["uncertainty_m"]
                 )
+                for key in (
+                    "raw_support_ids",
+                    "s4_family_ids",
+                    "topology_support_ids",
+                    "height_support_ids",
+                    "source_point_indexes",
+                    "measured_intervals",
+                ):
+                    side[key] = copy.deepcopy(prior.get(key, []))
                 side["independent_geometry_support"] = False
                 side["selected_mode_id"] = None
                 side["movement_reason"] = "EQUAL_PRIORITY_RAW_MODE_CONFLICT"
@@ -257,6 +284,12 @@ class ReviewGeometryAssembler:
             topology_support_ids=list(mode.get("topology_support_ids", [])),
             height_support_ids=list(mode.get("height_support_ids", [])),
             source_point_indexes=list(mode.get("source_point_indexes", [])),
+            measured_intervals=copy.deepcopy(
+                mode.get(
+                    "measured_intervals",
+                    [mode["support_span"]] if priority == 0 else [],
+                )
+            ),
         )
 
     def assemble(self, region, axes, bridge=None, topology_sides=None):
@@ -357,6 +390,7 @@ class ReviewGeometryAssembler:
                     "s4_family_ids",
                     "topology_support_ids",
                     "height_support_ids",
+                    "measured_intervals",
                 ]
             }
             side["comparison_points_uv"] = line_points(side).tolist()
@@ -465,6 +499,15 @@ class ReviewGeometryAssembler:
         check["rejected_geometry_checks"] = failed_checks
         polygon = np.asarray(check["polygon_uv"])
         xy = polygon @ np.asarray(axes)
+        for name, side in sides.items():
+            direction = np.array([-side["normal_uv"][1], side["normal_uv"][0]])
+            incident = [i for i, pair in enumerate(INTERSECTIONS) if name in pair]
+            extent = sorted((polygon[incident] @ direction).tolist())
+            observed = side.get("measured_intervals", [])
+            side["measured_interval"] = copy.deepcopy(observed)
+            side["conservative_extension_interval"] = unobserved_intervals(
+                observed, extent
+            )
         coverage = copy.deepcopy(sides)
         for name, _, _, sign in SIDES:
             coverage[name]["final_rho"] += sign * sides[name]["uncertainty_m"]

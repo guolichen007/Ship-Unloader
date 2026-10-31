@@ -252,6 +252,7 @@ class SignedRoleResolver:
                         measurement_source="RAW_PAIRED_PROFILE",
                         raw_point_count=int(record["continuous"][2]),
                         raw_self_qualification="SIGNED_SURFACE_PAIR",
+                        section_span_m=list(section),
                         section_record=record,
                     )
                     for section, record in zip(spans, resolved)

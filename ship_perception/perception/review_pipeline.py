@@ -33,9 +33,14 @@ from .opening_regions import build_regions
 from .review_geometry import ReviewGeometryAssembler, SIDES
 from .review_height import ReviewCornerHeight
 from .review_runtime import MeasurementTasks
-from .review_measurement import raw_face_measurements
+from .review_measurement import (
+    raw_face_measurements,
+    qualified_raw_pair_gain,
+    raw_profile_line,
+)
 from .review_topology_sides import current_side_constraints
 from .local_enclosure_replay import replay_review_constraints
+from .review_side_capability import compile_constraints
 from .raw_boundary_probe import SignedRoleResolver
 from .final_boundary import FinalBoundaryRefiner
 from .budget import PerformanceBudget, PerformanceBudgetExceeded
@@ -219,17 +224,21 @@ def run_perception(
         canonical = []
         eligibility = []
         with stage("REVIEW_GEOMETRY_ASSEMBLY"):
-            for region in cache.opening_identities:
-                topology_sides = (
-                    replay_review_constraints(region, config)
-                    if region.identity_evidence.get("source")
+            initial_constraints = {
+                r.region_id: (
+                    replay_review_constraints(r, config)
+                    if r.identity_evidence.get("source")
                     == "CURRENT_BOUNDED_LOCAL_EVIDENCE_VECTOR"
-                    else (
-                        current_side_constraints(cache, measurement, region, config)
-                        if region.identity_role.startswith("CONFIRMED")
-                        else None
-                    )
+                    else current_side_constraints(cache, measurement, r, config)
                 )
+                for r in cache.opening_identities
+                if r.identity_role.startswith("CONFIRMED")
+            }
+            compiled_constraints = compile_constraints(
+                cache, cache.opening_identities, config, initial_constraints
+            )
+            for region in cache.opening_identities:
+                topology_sides = compiled_constraints.get(region.region_id)
                 result, decision = assembler.assemble(
                     region, vessel.axes, bridge, topology_sides
                 )
@@ -290,41 +299,13 @@ def run_perception(
                                     == "RAW_PAIRED_PROFILE"
                                 ):
                                     fit = row["fit"]
-                                    slope = fit.get("slope", 0.0)
-                                    reference = fit.get(
-                                        "reference_along_m", sum(span) / 2
-                                    )
-                                    normal = (
-                                        np.array([1.0, -slope])
-                                        if axis == 0
-                                        else np.array([-slope, 1.0])
-                                    )
-                                    norm = np.linalg.norm(normal)
-                                    normal /= norm
-                                    rho = (row["rho"] - slope * reference) / norm
-                                    direction = np.array([-normal[1], normal[0]])
-                                    points = np.array(
-                                        [
-                                            [
-                                                row["rho"] if axis == 0 else span[0],
-                                                span[0] if axis == 0 else row["rho"],
-                                            ],
-                                            [
-                                                row["rho"] if axis == 0 else span[1],
-                                                span[1] if axis == 0 else row["rho"],
-                                            ],
-                                        ]
-                                    )
+                                    line = raw_profile_line(row, axis, span)
                                     modes[name].append(
                                         dict(
                                             mode_id=task,
                                             source="MEASURED_RAW",
                                             state="MEASURED_WEAK",
-                                            rho=float(rho),
-                                            normal_uv=normal.tolist(),
-                                            support_span=sorted(
-                                                (points @ direction).tolist()
-                                            ),
+                                            **line,
                                             uncertainty_m=max(
                                                 config["geometry"]["plane_inlier_m"],
                                                 fit.get("residual_mad_m", 0.0),
@@ -333,6 +314,10 @@ def run_perception(
                                                 row["sections"]
                                             ),
                                             physical_role_improved=True,
+                                            independent_opening_role_gain=qualified_raw_pair_gain(
+                                                row, config
+                                            ),
+                                            physical_role_gain_basis="SELF_QUALIFIED_SIGNED_RAW_PAIRS_WITH_FINITE_CROSS_SECTION_CONSENSUS",
                                             raw_support_ids=[
                                                 task + ":section:" + str(k)
                                                 for k in range(len(row["sections"]))
