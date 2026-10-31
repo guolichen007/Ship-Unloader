@@ -31,6 +31,7 @@ from .legacy_expert import (
 from .experts import HeightBasinExpert
 from .opening_regions import build_regions
 from .review_geometry import ReviewGeometryAssembler, SIDES
+from .constrained_rectangle import constrain_review_geometry
 from .review_height import ReviewCornerHeight
 from .review_runtime import MeasurementTasks
 from .review_measurement import (
@@ -93,6 +94,11 @@ def run_perception(
         physical_config_sha256=physical_hash,
         mode=mode,
         review_corner_angles_deg=[85.0, 95.0],
+        final_review_model="FIVE_DOF_ORTHOGONAL_RECTANGLE",
+        rectangle_source_rank_weights=[1.0, 0.5, 0.25, 0.125, 0.0625],
+        rectangle_numerical_orthogonality_abs_dot=1e-10,
+        rectangle_numerical_parallel_error_rad=1e-10,
+        rectangle_numerical_scaled_length_tolerance=1e-8,
         soft_runtime_limit_s=120.0,
         hard_process_watchdog_s=300.0,
     )
@@ -357,6 +363,12 @@ def run_perception(
                         region, result, modes, vessel.axes
                     )
                     checkpoint("BOUNDARY_MEASUREMENT", review_objects=hatches)
+        with stage("CONSTRAINED_REVIEW_RECTANGLE"):
+            for index, region in enumerate(canonical):
+                hatches[index] = constrain_review_geometry(
+                    region, hatches[index], config, bridge
+                )
+            checkpoint("RECTANGLE_REVIEW_READY", review_objects=hatches)
         with stage("CORNER_HEIGHT_OUTPUT"):
             for result in hatches:
                 result["corner_heights"] = ReviewCornerHeight(

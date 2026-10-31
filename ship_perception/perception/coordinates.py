@@ -116,6 +116,11 @@ def corner_coordinates(payload, source_result_sha256):
             rows[-1].update(opening_identity=hatch['opening_identity'],topology_status=hatch['topology_status'],
                             geometry_status=hatch['geometry_status'],certification_status=hatch['certification_status'],
                             sides=copy.deepcopy(hatch['sides']))
+            for key in ('raw_evidence_geometry','constrained_review_rectangle',
+                        'boundary_measurement_status','rectangle_constraint_conflict_count',
+                        'position_review_status','calibration_scope'):
+                if key in hatch:
+                    rows[-1][key]=copy.deepcopy(hatch[key])
     return dict(
         schema="ship_perception.hatch_corners.3" if v3 else "ship_perception.hatch_corners.2",
         schema_version=".3" if v3 else ".2",
