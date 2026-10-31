@@ -93,6 +93,44 @@ class ReviewRimHeightContracts(unittest.TestCase):
         self.assertTrue(all(h["z"] is None for h in heights))
         self.assertEqual(estimator.audit["rim_candidate_count"], 0)
 
+    def test_thin_rim_surface_is_not_suppressed_by_more_numerous_floor_returns(self):
+        _, result = self.fixture()
+        along = np.linspace(0, 8, 161)
+
+        def patch(xs, offset):
+            x, y = np.meshgrid(xs, along)
+            return np.column_stack(
+                (x.ravel(), y.ravel(), (3 + 0.01 * x + 0.02 * y + offset).ravel())
+            )
+
+        points = np.vstack(
+            (
+                patch(np.linspace(-0.2, 0, 8), 0),
+                patch(np.linspace(-0.4, -0.21, 32), -2),
+                patch(np.linspace(0.03, 0.5, 12), -2),
+                patch(np.linspace(-0.9, -0.45, 12), -0.6),
+            )
+        )
+        estimator = ReviewCornerHeight(self.measurement(points), self.config)
+        heights = estimator.measure(result)
+        self.assertAlmostEqual(heights[0]["z"], 3.0, places=7)
+        self.assertAlmostEqual(heights[3]["z"], 3.16, places=7)
+        self.assertEqual(heights[0]["z_state"], "MEASURED")
+
+    def test_horizontal_slices_of_vertical_walls_are_not_top_surfaces(self):
+        along, height = np.meshgrid(np.linspace(0, 3, 121), np.linspace(-2, 2, 161))
+        points = np.vstack(
+            [
+                np.column_stack((np.full(along.size, x), along.ravel(), height.ravel()))
+                for x in (-0.3, -0.05)
+            ]
+        )
+        measurement = self.measurement(points)
+        sources = ReviewCornerHeight(measurement, self.config)._plane_candidates(
+            points, np.arange(len(points)), "WALLS", "UNCLASSIFIED_SURFACE"
+        )
+        self.assertEqual(sources, [])
+
     def test_context_halo_height_cannot_supply_rim_z(self):
         measurement, result = self.fixture(halo=True)
         heights = ReviewCornerHeight(measurement, self.config).measure(result)

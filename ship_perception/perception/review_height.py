@@ -5,6 +5,7 @@ import numpy as np
 
 from ship_perception.r1_static.perimeter_deck import _gravity_hypotheses
 from .rim_top_height import RimTopHeightEstimator
+from .measurement import BudgetedLocalSurfaceNormals
 
 SEMANTIC = "HATCH_INNER_RIM_TOP_ELEVATION"
 TIERS = (
@@ -83,7 +84,40 @@ class ReviewCornerHeight:
         self.audit = {}
         self._eligibility_cache = {}
 
+    def _horizontal_points(self, points, indexes):
+        """Full 3D neighbourhoods reject horizontal slices of vertical walls."""
+        primary = getattr(
+            self.measurement.local, "primary_cache", self.measurement.local
+        )
+        normals = getattr(self.measurement, "review_primary_normals", None)
+        if normals is None:
+            normals = BudgetedLocalSurfaceNormals(
+                primary.xyz,
+                self.config,
+                getattr(self.measurement, "budget", None),
+                self.measurement.counters,
+            )
+            self.measurement.review_primary_normals = normals
+        if not hasattr(normals, "input_to_canonical"):
+            normals.input_to_canonical = np.empty(len(primary.xyz), dtype=np.int64)
+            normals.input_to_canonical[normals.input_point_indexes] = np.arange(
+                len(primary.xyz)
+            )
+        original = np.asarray(indexes, dtype=np.int64)
+        source = np.asarray(primary.vessel.point_indexes)
+        positions = np.searchsorted(source, original)
+        owned = positions < len(source)
+        owned[owned] &= source[positions[owned]] == original[owned]
+        rows = np.flatnonzero(owned)
+        canonical = normals.input_to_canonical[positions[rows]]
+        normals._estimate(canonical)
+        cosine = math.cos(math.radians(self.config["geometry"]["normal_angle_deg"]))
+        live = normals.valid[canonical] & (abs(normals.normals[canonical, 2]) >= cosine)
+        keep = rows[live]
+        return np.asarray(points)[keep], original[keep]
+
     def _plane_candidates(self, points, indexes, segment_id, role):
+        points, indexes = self._horizontal_points(points, indexes)
         if len(points) < self.config["geometry"]["min_plane_points"]:
             return []
         hypotheses = _gravity_hypotheses(points, self.config)
@@ -93,8 +127,9 @@ class ReviewCornerHeight:
         anchor = points[:, :2].mean(0)
         unique, output = [], []
         for count, (normal, offset), mask in hypotheses:
-            if count < hypotheses[0][0] * self.config["roi"]["min_enclosure_ratio"]:
-                continue
+            # A thin rim need not be the most populous surface in a strip.
+            # Density ranks hypotheses; only the existing minimum point,
+            # gravity/inlier and subsequent physical-role gates qualify them.
             height = -(normal[:2] @ anchor + offset) / normal[2]
             if any(
                 np.count_nonzero(mask & old_mask)
@@ -138,8 +173,9 @@ class ReviewCornerHeight:
                 )
             )
             unique.append((height, normal, mask))
-            if len(output) >= self.config["geometry"]["max_plane_hypotheses"]:
-                break
+            # Do not truncate to the first floor modes before role testing.
+            # This finite set comes from current observed gravity hypotheses;
+            # later role/extrapolation checks retain ambiguity when needed.
         return output
 
     def _plane(self, points, indexes, segment_id, role):
