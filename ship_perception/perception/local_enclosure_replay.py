@@ -13,6 +13,7 @@ from .candidate_union import canonical
 from .local_evidence import local_height_recall
 from .region_model import OpeningRegion, TopologySupport
 from .validation import vessel_containment
+from .opening_identity_eligibility import compile_opening_roles, owned_enclosure_bounds
 
 SIDES = (("U0", 0, 0, -1), ("U1", 0, 2, 1), ("V0", 1, 1, -1), ("V1", 1, 3, 1))
 
@@ -208,7 +209,7 @@ def compile_local_evidence(cache, research):
                     reason="ORIGINAL_NOMINATION_MEMBER_SUPPORT_NOT_RECOVERED",
                 )
         output.append(entry)
-    return output
+    return compile_opening_roles(cache, output)
 
 
 def _overlap(a, b):
@@ -222,6 +223,16 @@ def resolve_local_identities(regions, evidence, cache, source):
     config = cache.config
     limit = config["roi"]["min_enclosure_ratio"]
     result = list(regions)
+    for region in result:
+        b = region.conservative_bounds
+        if (
+            region.identity_role.startswith("CONFIRMED")
+            and min(b[2] - b[0], b[3] - b[1]) < config["roi"]["min_deck_span_m"]
+        ):
+            region.identity_role = "WEAK_UNASSIGNED_REGION"
+            region.identity_evidence["independent_extent_gate"] = (
+                "NARROW_STRUCTURE_WITHOUT_COMPLETE_OPENING_EXTENT"
+            )
     opening_owners = [r for r in regions if r.identity_role.startswith("CONFIRMED")]
     for region in result:
         if not region.identity_role.startswith("CONFIRMED"):
@@ -321,9 +332,17 @@ def resolve_local_identities(regions, evidence, cache, source):
         envelope = tuple(
             np.r_[np.asarray(box[:2]) - margin, np.asarray(box[2:]) + margin]
         )
-        enclosure_box = [
-            e["sides"][n]["conservative_rho"] for n in ("U0", "V0", "U1", "V1")
-        ]
+        enclosure_box = owned_enclosure_bounds(e)
+        if (
+            min(
+                enclosure_box[2] - enclosure_box[0], enclosure_box[3] - enclosure_box[1]
+            )
+            < config["roi"]["min_deck_span_m"]
+        ):
+            e["identity_reason"] = (
+                "NO_INDEPENDENT_EXTENT_AFTER_CURRENT_PARTITION_OWNERSHIP"
+            )
+            continue
         r = OpeningRegion(
             ident,
             cache.vessel.vessel_id,
@@ -374,6 +393,7 @@ def replay_review_constraints(region, config):
     evidence = region.identity_evidence
     for name, axis, pos, sign in SIDES:
         side = evidence["sides"][name]
+        ownership = evidence.get("side_ownership_constraints", {}).get(name)
         values = side["selected_band_rhos"]
         intervals = side["observed_intervals"]
         low = min(i[0] for i in intervals)
@@ -381,10 +401,22 @@ def replay_review_constraints(region, config):
         span = [low, high] if axis == 0 else [-high, -low]
         output[name] = [
             dict(
-                mode_id=region.region_id + ":" + name + ":CONSERVATIVE_WITNESS_BAND",
+                mode_id=region.region_id
+                + ":"
+                + name
+                + ":CONSERVATIVE_WITNESS_BAND"
+                + (
+                    ":OWNED:" + ownership["raw_point_index_sha256"][:12]
+                    if ownership
+                    else ""
+                ),
                 source="TOPOLOGY_SUPPORTED",
                 state="CONSERVATIVE_PRIOR",
-                rho=side["conservative_rho"],
+                rho=(
+                    region.conservative_bounds[pos]
+                    if ownership
+                    else side["conservative_rho"]
+                ),
                 normal_uv=np.eye(2)[axis].tolist(),
                 support_span=span,
                 uncertainty_m=max(
@@ -396,6 +428,8 @@ def replay_review_constraints(region, config):
                 topology_support_ids=side["provider_ids"],
                 raw_support_ids=[],
                 candidate_band_rhos=values,
+                unconstrained_witness_rho=side["conservative_rho"],
+                side_ownership_constraint=ownership,
                 uncertainty_kind="CONSERVATIVE_STRUCTURAL_ALIAS_BAND_NOT_RAW_FIT_PRECISION",
             )
         ]

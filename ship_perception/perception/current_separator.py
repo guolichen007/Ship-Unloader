@@ -6,7 +6,10 @@ No final rectangle, old output, scene name, or independent annotation is read.
 
 import numpy as np
 from scipy import ndimage
-from ship_perception.r1_static.r2h_b5_corner_forensics import _observations, _side_modes
+from .side_evidence import (
+    project_provider_observations as _observations,
+    bounded_side_modes as _side_modes,
+)
 
 
 def _initial_seed_groups(proposals, config):

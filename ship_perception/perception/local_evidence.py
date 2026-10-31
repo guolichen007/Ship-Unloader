@@ -121,7 +121,7 @@ class VesselLocalEvidence:
         return self.providers
 
     def side_candidates(self, box):
-        from ship_perception.r1_static.r2h_b5_corner_forensics import _side_modes
+        from .side_evidence import bounded_side_modes as _side_modes
 
         if not hasattr(self, "_v21_side_lines"):
             lines = [

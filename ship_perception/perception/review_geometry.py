@@ -45,6 +45,20 @@ def unobserved_intervals(observed, extent):
     return missing
 
 
+def violates_opening_ownership(side, coordinates_u):
+    constraint = side.get("side_ownership_constraint") or {}
+    if not constraint:
+        return False
+    values = np.asarray(coordinates_u, dtype=float)
+    tolerance = 64 * np.finfo(float).eps * max(1.0, float(np.max(abs(values))))
+    return bool(
+        ("lower_u" in constraint and values.min() < constraint["lower_u"] - tolerance)
+        or (
+            "upper_u" in constraint and values.max() > constraint["upper_u"] + tolerance
+        )
+    )
+
+
 def infer_fourth_corner(corners_uv):
     """Infer only the missing corner of three independently supported corners."""
     if len(corners_uv) != 3 or not set(corners_uv).issubset(range(4)):
@@ -182,17 +196,34 @@ class ReviewGeometryAssembler:
             ).tolist(),
             coordinate_frame="VESSEL_REVIEW_UV",
             rho_contract="dot(point_review,normal_uv)=final_rho",
+            side_ownership_constraint=copy.deepcopy(
+                region.identity_evidence.get("side_ownership_constraints", {}).get(name)
+            ),
         )
 
     def _apply_mode(self, side, mode):
         self.assembly_operation_count += 1
         side["candidate_modes"].append(copy.deepcopy(mode))
+        if side.get("side_ownership_constraint"):
+            coordinates = [
+                line_coordinate_at(mode, p, 0) for p in side["comparison_points_uv"]
+            ]
+            if violates_opening_ownership(side, coordinates):
+                side["candidate_modes"][-1]["ownership_rejected"] = True
+                side["rejected_mode_ids"].append(mode["mode_id"])
+                side["guard_result"] = "CURRENT_SEPARATOR_OPENING_OWNERSHIP_CONFLICT"
+                side["movement_reason"] = "KEEP_OWNED_COMPLETE_REVIEW_BOUNDARY"
+                return
         priority = SOURCE_PRIORITY[mode["source"]]
         old_priority = SOURCE_PRIORITY[side["final_source"]]
         if priority > old_priority:
             side["rejected_mode_ids"].append(mode["mode_id"])
             return
-        same = [m for m in side["candidate_modes"] if m["source"] == mode["source"]]
+        same = [
+            m
+            for m in side["candidate_modes"]
+            if m["source"] == mode["source"] and not m.get("ownership_rejected")
+        ]
         if len(same) > 1 and any(
             np.max(np.abs(line_displacements(m, mode, side["comparison_points_uv"])))
             > self.config["boundary"]["corner_join_m"]
@@ -414,6 +445,32 @@ class ReviewGeometryAssembler:
         check = geometry_consistency(sides, self.config)
         self.assembly_operation_count += 12
         failed_checks = []
+        if check.get("polygon_uv") is not None:
+            polygon = np.asarray(check["polygon_uv"])
+            for name, axis, pos, sign in SIDES:
+                side = sides[name]
+                incident = [i for i, pair in enumerate(INTERSECTIONS) if name in pair]
+                if not violates_opening_ownership(side, polygon[incident, 0]):
+                    continue
+                # A valid local Raw line does not observe an extrapolated
+                # corner in a different opening. Preserve every measurement
+                # and the other measured sides; only this review side falls
+                # back to its independently attributed owned region extent.
+                failed_checks.append(
+                    dict(
+                        reason="CURRENT_SEPARATOR_CORNER_OWNERSHIP_CONFLICT", side=name
+                    )
+                )
+                fallback = self._prior(region, name, axis, pos, sign)
+                fallback.update(
+                    candidate_modes=side["candidate_modes"],
+                    rejected_mode_ids=side["rejected_mode_ids"],
+                    guard_result="CURRENT_SEPARATOR_CORNER_OWNERSHIP_CONFLICT",
+                    movement_reason="UNOBSERVED_EXTENSION_PRESERVES_OPENING_OWNERSHIP",
+                )
+                sides[name] = fallback
+            if failed_checks:
+                check = geometry_consistency(sides, self.config)
         if (
             not check["valid"]
             and check.get("polygon_uv") is not None
