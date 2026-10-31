@@ -315,11 +315,24 @@ class SignedRoleResolver:
         ]
         if qualified and np.max(np.ptp(positions, axis=0)) <= join:
             best = max(qualified, key=lambda r: len(r["sections"]))
+            sections = best["sections"]
+            if measurement_only:
+                from .rim_top_height import absolute_surface_evidence
+
+                sections = copy.deepcopy(sections)
+                for section in sections:
+                    interval = section.get("section_span_m", span)
+                    elevation = absolute_surface_evidence(
+                        self.measurement, axis, section["rho"], interval, sign, config
+                    )
+                    section.update(elevation)
+                    if "section_record" in section:
+                        section["section_record"]["absolute_z_evidence"] = elevation
             return dict(
                 status="STRONG_UNIQUE_EDGE",
                 rho=best["rho"],
                 fit=best["fit"],
-                sections=best["sections"],
+                sections=sections,
                 anchor_evidence=evidence,
                 measurement_source=best["source"],
                 final_coordinate=False,

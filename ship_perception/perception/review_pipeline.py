@@ -371,9 +371,9 @@ def run_perception(
             checkpoint("RECTANGLE_REVIEW_READY", review_objects=hatches)
         with stage("CORNER_HEIGHT_OUTPUT"):
             for result in hatches:
-                result["corner_heights"] = ReviewCornerHeight(
-                    measurement, config
-                ).measure(result)
+                height_estimator = ReviewCornerHeight(measurement, config)
+                result["corner_heights"] = height_estimator.measure(result)
+                result["z_measurement_audit"] = height_estimator.audit
                 result.update(
                     input_frame=frame.frame_id,
                     transform_provenance="SELECTED_VESSEL_UV_TO_ORIGINAL_XYZ",

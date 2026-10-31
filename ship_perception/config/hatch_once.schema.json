@@ -290,6 +290,7 @@
                 "enum": [
                   "MEASURED",
                   "ESTIMATED",
+                  "AMBIGUOUS",
                   "UNOBSERVED"
                 ]
               },
