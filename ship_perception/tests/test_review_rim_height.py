@@ -140,6 +140,102 @@ class ReviewRimHeightContracts(unittest.TestCase):
             all(h["z"] is None and h["deck_reference_z"] is None for h in heights)
         )
 
+    def test_plane_bbox_cannot_hide_missing_actual_corner_support(self):
+        for size, tier in [(3.0, "LOCAL_RIM_PLANE"), (11.0, "SAME_SIDE_RIM_PLANE")]:
+            x, y = np.meshgrid(np.linspace(0, 0.2, 8), np.linspace(0, 0.2, 8))
+            patch = np.c_[x.ravel(), y.ravel(), np.full(x.size, 3.0)]
+            points = np.vstack((patch, patch + [size - 0.2, size - 0.2, 0]))
+            source = dict(
+                segment_id="OBSERVED_PATCHES",
+                vessel_id="V",
+                plane_role="RIM_TOP",
+                role_confirmed=True,
+                source_roles=["RIM_TOP"],
+                normal_uvz=[0, 0, 1],
+                offset_m=-3.0,
+                fit_residual=0.0,
+                fit_extent=[[0, 0], [size, size]],
+                source_point_indexes=list(range(len(points))),
+                tier=tier,
+            )
+            result = dict(
+                opening_identity="R",
+                boundary_uv=[[0, 0], [size, 0], [size, size], [0, size]],
+                corners=[{}] * 4,
+            )
+            heights = ReviewCornerHeight(self.measurement(points), self.config).measure(
+                result, [source]
+            )
+            self.assertEqual(heights[0]["z"], 3.0)
+            self.assertEqual(heights[2]["z"], 3.0)
+            self.assertIsNone(heights[1]["z"])
+            self.assertIsNone(heights[3]["z"])
+            self.assertEqual(
+                heights[0]["extrapolation_distance_semantic"],
+                "NEAREST_ORIGINAL_RAW_SUPPORT_XY",
+            )
+
+    def test_context_plane_fit_is_unclassified_and_cannot_claim_ownership(self):
+        x, y = np.meshgrid(np.linspace(0, 3, 31), np.linspace(0, 3, 31))
+        points = np.c_[x.ravel(), y.ravel(), np.full(x.size, 3.0)]
+        measurement = self.measurement(points, owned_count=0)
+        measurement.local.primary_cache = SimpleNamespace(
+            xyz=points[:0], vessel=measurement.local.vessel
+        )
+        estimator = ReviewCornerHeight(measurement, self.config)
+        callback = lambda ids, normal: estimator._normal_support(
+            ids, normal, context=True
+        )
+        planes = estimator._plane_candidates(
+            points, np.arange(len(points)), "CONTEXT", "UNCLASSIFIED_SURFACE", callback
+        )
+        self.assertTrue(planes)
+        self.assertTrue(
+            all(p["vessel_id"] is None and not p["role_confirmed"] for p in planes)
+        )
+        for plane in planes:
+            forged = dict(
+                plane,
+                vessel_id="V",
+                plane_role="RIM_TOP",
+                role_confirmed=True,
+                source_roles=["RIM_TOP"],
+            )
+            self.assertFalse(
+                estimator._eligible(forged, np.array([], dtype=int), {"RIM_TOP"})
+            )
+        with self.assertRaisesRegex(ValueError, "UNCLASSIFIED_ROLE"):
+            estimator._plane_candidates(
+                points, np.arange(len(points)), "CONTEXT", "RIM_TOP", callback
+            )
+
+    def test_same_side_plane_does_not_extrapolate_across_the_opening(self):
+        x, y = np.meshgrid(np.linspace(0, 10, 101), np.linspace(0, 0.3, 8))
+        points = np.c_[x.ravel(), y.ravel(), np.full(x.size, 3.0)]
+        source = dict(
+            segment_id="SIDE",
+            vessel_id="V",
+            plane_role="RIM_TOP",
+            role_confirmed=True,
+            source_roles=["RIM_TOP"],
+            normal_uvz=[0, 0, 1],
+            offset_m=-3.0,
+            fit_residual=0.0,
+            fit_extent=[[0, 0], [10, 0.3]],
+            source_point_indexes=list(range(len(points))),
+            tier="SAME_SIDE_RIM_PLANE",
+            rim_side_normal_uv=[0, 1],
+        )
+        result = dict(
+            opening_identity="R",
+            boundary_uv=[[0, 2], [10, 2], [10, 3], [0, 3]],
+            corners=[{}] * 4,
+        )
+        heights = ReviewCornerHeight(self.measurement(points), self.config).measure(
+            result, [source]
+        )
+        self.assertTrue(all(z["z"] is None for z in heights))
+
     def test_thin_rim_surface_is_not_suppressed_by_more_numerous_floor_returns(self):
         _, result = self.fixture()
         along = np.linspace(0, 8, 161)

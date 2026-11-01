@@ -83,28 +83,39 @@ class ReviewCornerHeight:
         self.measurement, self.config = measurement, config
         self.audit = {}
         self._eligibility_cache = {}
+        self._associated_rim_sources = {}
 
-    def _normal_support(self, indexes, plane_normal):
-        """Normal observations qualify a Raw plane; unavailable normals do not erase Raw."""
+    def _normal_cache(self, context=False):
         primary = getattr(
             self.measurement.local, "primary_cache", self.measurement.local
         )
-        normals = getattr(self.measurement, "review_primary_normals", None)
+        points = self.measurement.raw_uvz if context else primary.xyz
+        source = (
+            self.measurement.raw_point_indexes
+            if context
+            else primary.vessel.point_indexes
+        )
+        name = "review_context_normals" if context else "review_primary_normals"
+        normals = getattr(self.measurement, name, None)
         if normals is None:
             normals = BudgetedLocalSurfaceNormals(
-                primary.xyz,
+                points,
                 self.config,
                 getattr(self.measurement, "budget", None),
                 self.measurement.counters,
             )
-            self.measurement.review_primary_normals = normals
+            setattr(self.measurement, name, normals)
         if not hasattr(normals, "input_to_canonical"):
-            normals.input_to_canonical = np.empty(len(primary.xyz), dtype=np.int64)
+            normals.input_to_canonical = np.empty(len(points), dtype=np.int64)
             normals.input_to_canonical[normals.input_point_indexes] = np.arange(
-                len(primary.xyz)
+                len(points)
             )
+        return normals, np.asarray(source)
+
+    def _normal_support(self, indexes, plane_normal, context=False):
+        """Observed normals qualify a plane; context fitting proves no ownership."""
+        normals, source = self._normal_cache(context)
         original = np.asarray(indexes, dtype=np.int64)
-        source = np.asarray(primary.vessel.point_indexes)
         positions = np.searchsorted(source, original)
         owned = positions < len(source)
         owned[owned] &= source[positions[owned]] == original[owned]
@@ -124,7 +135,20 @@ class ReviewCornerHeight:
             estimator="ISOTROPIC_FULL_3D_NEIGHBOURHOOD",
         )
 
-    def _plane_candidates(self, points, indexes, segment_id, role):
+    def _context_nonvertical(self, local_indexes):
+        normals, _ = self._normal_cache(context=True)
+        indexes = normals.input_to_canonical[np.asarray(local_indexes, dtype=np.int64)]
+        normals._estimate(indexes)
+        return normals.valid[indexes] & (
+            abs(normals.normals[indexes, 2])
+            > math.sin(math.radians(self.config["geometry"]["normal_angle_deg"]))
+        )
+
+    def _plane_candidates(
+        self, points, indexes, segment_id, role, normal_provider=None
+    ):
+        if normal_provider is not None and role != "UNCLASSIFIED_SURFACE":
+            raise ValueError("CONTEXT_PLANE_REQUIRES_UNCLASSIFIED_ROLE")
         if len(points) < self.config["geometry"]["min_plane_points"]:
             return []
         hypotheses = _gravity_hypotheses(points, self.config)
@@ -151,7 +175,9 @@ class ReviewCornerHeight:
             ):
                 continue
             selected = points[mask]
-            normal_support = self._normal_support(np.asarray(indexes)[mask], normal)
+            normal_support = (normal_provider or self._normal_support)(
+                np.asarray(indexes)[mask], normal
+            )
             if (
                 normal_support["consistent_normal_point_count"]
                 < self.config["geometry"]["normal_min_points"]
@@ -170,7 +196,11 @@ class ReviewCornerHeight:
             output.append(
                 dict(
                     segment_id=segment_id,
-                    vessel_id=self.measurement.local.vessel.vessel_id,
+                    vessel_id=(
+                        self.measurement.local.vessel.vessel_id
+                        if normal_provider is None
+                        else None
+                    ),
                     plane_role=role,
                     role_confirmed=role in RIM_ROLES | DECK_ROLES,
                     source_roles=[role],
@@ -199,17 +229,23 @@ class ReviewCornerHeight:
         return candidates[0] if len(candidates) == 1 else None
 
     def _eligible(self, source, owned, roles):
+        indexes = source.get("source_point_indexes", [])
+        approved = self._associated_rim_sources.get(id(source))
+        if approved is not None and tuple(indexes) != approved:
+            return False
         key = (id(source), tuple(sorted(roles)))
         if key in self._eligibility_cache:
             return self._eligibility_cache[key]
-        indexes = source.get("source_point_indexes", [])
         valid = bool(
             source.get("vessel_id") == self.measurement.local.vessel.vessel_id
             and source.get("plane_role") in roles
             and source.get("role_confirmed", False)
             and not set(source.get("source_roles", [])).intersection(FORBIDDEN)
             and indexes
-            and np.isin(indexes, owned).all()
+            and (
+                np.isin(indexes, owned).all()
+                or (approved is not None and source.get("plane_role") in RIM_ROLES)
+            )
         )
         if valid:
             points = self._support_points(source)
@@ -268,6 +304,8 @@ class ReviewCornerHeight:
         )
 
     def measure(self, result, plane_sources=()):
+        self._eligibility_cache.clear()
+        self._associated_rim_sources = {}
         probe = RimTopHeightEstimator(
             self.measurement, self.config, self._plane_candidates
         )
@@ -277,6 +315,30 @@ class ReviewCornerHeight:
             z_logic_dead_path_removed=True,
             xy_certification_flag_used_for_z=False,
         )
+        if getattr(self.measurement.local, "opening_identities", None):
+            from .opening_rim_source import OpeningRimSource
+
+            def context_fitter(points, indexes, segment, role):
+                return self._plane_candidates(
+                    points,
+                    indexes,
+                    segment,
+                    role,
+                    normal_provider=lambda ids, n: self._normal_support(
+                        ids, n, context=True
+                    ),
+                )
+
+            associated = OpeningRimSource(
+                self.measurement, self.config, context_fitter, self._context_nonvertical
+            )
+            additional = associated.collect(result)
+            self._associated_rim_sources = {
+                id(source): tuple(source["source_point_indexes"])
+                for source in additional
+            }
+            sources.extend(additional)
+            self.audit["opening_rim_association"] = associated.audit
         self.audit["role_qualified_sources"] = sources
         primary = getattr(
             self.measurement.local, "primary_cache", self.measurement.local
@@ -288,14 +350,22 @@ class ReviewCornerHeight:
             for source in sources:
                 if not self._eligible(source, owned, RIM_ROLES):
                     continue
-                extent = np.asarray(source["fit_extent"])
-                extra = float(
-                    np.linalg.norm(
-                        np.maximum(
-                            0, np.maximum(extent[0] - corner, corner - extent[1])
+                points = self._support_points(source)
+                extra = float(np.min(np.linalg.norm(points[:, :2] - corner, axis=1)))
+                side_normal = source.get("rim_side_normal_uv")
+                if side_normal is not None:
+                    normal = np.asarray(side_normal, dtype=float)
+                    normal = normal / np.linalg.norm(normal)
+                    support = points[:, :2] @ normal
+                    across = float(
+                        max(
+                            0.0,
+                            support.min() - corner @ normal,
+                            corner @ normal - support.max(),
                         )
                     )
-                )
+                    if across > self.config["boundary"]["corner_join_m"]:
+                        continue
                 if extra > self.config["roi"]["support_search_m"]:
                     continue
                 points = self._support_points(source)
@@ -308,6 +378,7 @@ class ReviewCornerHeight:
                 tier = (
                     "DIRECT_RIM_TOP"
                     if near >= self.config["boundary"]["line_min_points"]
+                    and not source.get("z_source_requires_estimation", False)
                     else source.get("tier", "LOCAL_RIM_PLANE")
                 )
                 if (
@@ -411,6 +482,7 @@ class ReviewCornerHeight:
                     plane_role=chosen["plane_role"],
                     segment_vote_count=chosen.get("segment_vote_count", 1),
                     extrapolation_distance_m=chosen["current_corner_extrapolation_m"],
+                    extrapolation_distance_semantic="NEAREST_ORIGINAL_RAW_SUPPORT_XY",
                     fit_uncertainty_m=fit_sigma,
                     extrapolation_uncertainty_m=extra_sigma,
                     final_uncertainty_m=z_sigma,
@@ -422,7 +494,15 @@ class ReviewCornerHeight:
                     local_plane_uvz=dict(
                         normal=normal.tolist(), offset_m=chosen["offset_m"]
                     ),
-                    reason="CURRENT_OWNED_ROLE_QUALIFIED_RIM_TOP_INDEPENDENT_OF_XY_CERTIFICATION",
+                    source_ownership_state=chosen.get(
+                        "source_ownership_state", "CURRENT_PRIMARY_OWNED_RAW"
+                    ),
+                    source_ownership_evidence=chosen.get("source_ownership_evidence"),
+                    reason=(
+                        "CURRENT_RAW_RIM_ASSOCIATED_WITH_FROZEN_OPENING_SUPPORT"
+                        if chosen.get("z_source_requires_estimation")
+                        else "CURRENT_OWNED_ROLE_QUALIFIED_RIM_TOP_INDEPENDENT_OF_XY_CERTIFICATION"
+                    ),
                 )
             deck = [s for s in sources if self._eligible(s, owned, DECK_ROLES)]
             deck_source = cross_segment_consensus(
@@ -430,14 +510,8 @@ class ReviewCornerHeight:
             )
             if deck_source:
                 n = np.asarray(deck_source["normal_uvz"])
-                extent = np.asarray(deck_source["fit_extent"])
-                extra = float(
-                    np.linalg.norm(
-                        np.maximum(
-                            0, np.maximum(extent[0] - corner, corner - extent[1])
-                        )
-                    )
-                )
+                support = self._support_points(deck_source)
+                extra = float(np.min(np.linalg.norm(support[:, :2] - corner, axis=1)))
                 if extra <= self.config["roi"]["support_search_m"]:
                     row.update(
                         deck_reference_z=float(
