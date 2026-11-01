@@ -152,6 +152,134 @@ class ReviewSideCapabilityContracts(unittest.TestCase):
         self.assertEqual(far["rho"], 0.0)
         self.assertEqual(far["state"], "CONSERVATIVE_PRIOR")
 
+    def rim_fixture(self, cargo=False, halo=False):
+        from ship_perception.tests.test_review_rim_height import (
+            ReviewRimHeightContracts,
+        )
+
+        fixture = ReviewRimHeightContracts()
+        fixture.setUp()
+        measurement, _ = fixture.fixture(cargo=cargo, halo=halo)
+        cache = SimpleNamespace(v2_measurement=measurement)
+        region = SimpleNamespace(region_id="CURRENT_OPENING")
+        return cache, region
+
+    def test_current_owned_rim_sections_can_corroborate_existing_contour(self):
+        cache, region = self.rim_fixture()
+        rim = cap.current_rim_corroboration(
+            cache,
+            region,
+            "U0",
+            np.array([1.0, 0.0]),
+            0.0,
+            np.array([[0.0, 0.0], [0.0, 8.0]]),
+            self.config,
+        )
+        self.assertTrue(rim["supported"])
+        self.assertGreaterEqual(
+            rim["independent_segment_count"],
+            self.config["boundary"]["profile_min_sections"],
+        )
+        self.assertTrue(rim["source_point_indexes"])
+        self.assertFalse(rim["steel_certified"])
+
+    def test_contour_alone_or_single_local_rim_does_not_authorize_inward_move(self):
+        cache, region = self.rim_fixture()
+        rim = cap.current_rim_corroboration(
+            cache,
+            region,
+            "U0",
+            np.array([1.0, 0.0]),
+            0.0,
+            np.array([[0.0, 0.0], [0.0, 2.0]]),
+            self.config,
+        )
+        self.assertFalse(rim["supported"])
+        self.assertLess(
+            rim["independent_segment_count"],
+            self.config["boundary"]["profile_min_sections"],
+        )
+
+    def test_higher_cargo_is_not_current_rim_corroboration(self):
+        cache, region = self.rim_fixture(cargo=True)
+        rim = cap.current_rim_corroboration(
+            cache,
+            region,
+            "U0",
+            np.array([1.0, 0.0]),
+            0.0,
+            np.array([[0.0, 0.0], [0.0, 8.0]]),
+            self.config,
+        )
+        self.assertFalse(rim["supported"])
+        self.assertEqual(rim["source_point_indexes"], [])
+
+    def test_local_rim_evidence_does_not_authorize_unobserved_whole_side(self):
+        cache, region = self.rim_fixture()
+        region.conservative_bounds = [0.0, -10.0, 20.0, 18.0]
+        rim = cap.current_rim_corroboration(
+            cache,
+            region,
+            "U0",
+            np.array([1.0, 0.0]),
+            0.0,
+            np.array([[0.0, 0.0], [0.0, 8.0]]),
+            self.config,
+            0.05,
+        )
+        self.assertTrue(rim["local_role_supported"])
+        self.assertFalse(rim["supported"])
+        self.assertGreater(
+            rim["maximum_unobserved_extension_m"], rim["allowed_corner_extension_m"]
+        )
+        self.assertTrue(rim["z_plane_sources"])
+        self.assertFalse(hasattr(cache, "review_rim_plane_sources"))
+
+    def test_unknown_halo_cannot_supply_corroborating_rim(self):
+        cache, region = self.rim_fixture(halo=True)
+        rim = cap.current_rim_corroboration(
+            cache,
+            region,
+            "U0",
+            np.array([1.0, 0.0]),
+            0.0,
+            np.array([[0.0, 0.0], [0.0, 8.0]]),
+            self.config,
+        )
+        owned = cache.v2_measurement.local.vessel.point_indexes
+        self.assertTrue(rim["supported"])
+        self.assertTrue(np.isin(rim["source_point_indexes"], owned).all())
+        self.assertTrue(
+            all(abs(source["offset_m"]) < 4 for source in rim["role_qualified_sources"])
+        )
+
+    def test_other_opening_rim_query_cannot_supply_height_across_separator(self):
+        cache, region = self.rim_fixture()
+        region.identity_evidence = dict(member_height_nodes=["RIGHT_CHILD"])
+        cache.s4_topology_bridge = dict(
+            node_partition_audit=[
+                dict(
+                    children=[
+                        dict(node_id="LEFT_CHILD", side=0),
+                        dict(node_id="RIGHT_CHILD", side=1),
+                    ],
+                    separator_faces=[0.5, 1.0],
+                )
+            ]
+        )
+        rim = cap.current_rim_corroboration(
+            cache,
+            region,
+            "U0",
+            np.array([1.0, 0.0]),
+            0.0,
+            np.array([[0.0, 0.0], [0.0, 8.0]]),
+            self.config,
+        )
+        self.assertFalse(rim["supported"])
+        self.assertEqual(rim["reason"], "CURRENT_SEPARATOR_PRESERVED")
+        self.assertEqual(rim["z_plane_sources"], [])
+
     def test_measured_intervals_follow_fitted_tangent_and_exclude_missing_sections(
         self,
     ):

@@ -415,6 +415,147 @@ def _enrich_side(
     return sorted(result, key=lambda row: tuple(row["evidence_rank"]), reverse=True)
 
 
+def _crosses_current_separator(region, name, normal, rho, span, partitions):
+    if not name.startswith("U"):
+        return False
+    membership = set(
+        getattr(region, "identity_evidence", {}).get("member_height_nodes", [])
+    )
+    points = np.zeros((2, 2))
+    points[:, 1] = span
+    points[:, 0] = (rho - normal[1] * points[:, 1]) / normal[0]
+    for part in partitions:
+        labels = {c["side"] for c in part["children"] if c["node_id"] in membership}
+        if len(labels) != 1:
+            continue
+        which = next(iter(labels))
+        if (
+            which == 0
+            and name == "U1"
+            and points[:, 0].max() > part["separator_faces"][0]
+        ) or (
+            which == 1
+            and name == "U0"
+            and points[:, 0].min() < part["separator_faces"][1]
+        ):
+            return True
+    return False
+
+
+def current_rim_corroboration(
+    cache, region, name, normal, rho, points, config, side_uncertainty_m=0.0
+):
+    """Qualify an existing contour against owned Raw rim surfaces, not far cargo.
+
+    This only investigates a nominated side. Neither a height-grid contrast nor
+    the fitted contour itself counts as rim support. Independent, role-qualified
+    local Raw planes must supply the existing minimum number of sections.
+    """
+    measurement = getattr(cache, "v2_measurement", None)
+    if measurement is None:
+        return dict(supported=False, reason="NO_CURRENT_RAW_MEASUREMENT_CONTEXT")
+    from .review_height import ReviewCornerHeight
+    from .rim_top_height import RimTopHeightEstimator
+
+    tangent = np.array([-normal[1], normal[0]])
+    along = points @ tangent
+    required_along = along
+    if hasattr(region, "conservative_bounds"):
+        axis = 0 if name.startswith("U") else 1
+        extent = np.asarray(region.conservative_bounds)[[1 - axis, 3 - axis]]
+        endpoints = np.zeros((2, 2))
+        endpoints[:, 1 - axis] = extent
+        endpoints[:, axis] = (rho - normal[1 - axis] * extent) / normal[axis]
+        required_along = endpoints @ tangent
+    reference = dict(
+        normal_uv=normal.tolist(),
+        rho=float(rho),
+        support_span=[float(along.min()), float(along.max())],
+    )
+    if name.startswith("U") and _crosses_current_separator(
+        region,
+        name,
+        normal,
+        rho,
+        [float(points[:, 1].min()), float(points[:, 1].max())],
+        getattr(cache, "s4_topology_bridge", {}).get("node_partition_audit", []),
+    ):
+        return dict(
+            supported=False, reason="CURRENT_SEPARATOR_PRESERVED", z_plane_sources=[]
+        )
+    probe = RimTopHeightEstimator(
+        measurement, config, ReviewCornerHeight(measurement, config)._plane_candidates
+    )
+    sources = probe.collect(
+        dict(
+            opening_identity=region.region_id,
+            raw_evidence_geometry=dict(sides={name: reference}),
+        )
+    )
+    local = [
+        source
+        for source in sources
+        if source["plane_role"] == "RIM_TOP" and source["tier"] == "LOCAL_RIM_PLANE"
+    ]
+    # Different plane modes of the same section do not create extra votes.
+    segments = {}
+    for source in local:
+        segments.setdefault(source["segment_id"], set()).update(
+            source["source_point_indexes"]
+        )
+    independent, seen = [], set()
+    for ident, indexes in sorted(segments.items()):
+        signature = tuple(sorted(indexes))
+        if signature and signature not in seen:
+            independent.append(ident)
+            seen.add(signature)
+    persistent = [
+        s
+        for s in sources
+        if s["plane_role"] == "RIM_TOP" and s["tier"] == "SAME_SIDE_RIM_PLANE"
+    ]
+    local_supported = bool(persistent)
+    extensions = []
+    for source in persistent:
+        ids = np.asarray(source["source_point_indexes"], dtype=np.int64)
+        order = np.argsort(measurement.raw_point_indexes)
+        indexes = order[np.searchsorted(measurement.raw_point_indexes[order], ids)]
+        observed = measurement.raw_uvz[indexes, :2] @ tangent
+        extensions.append(
+            max(
+                0.0,
+                float(observed.min() - required_along.min()),
+                float(required_along.max() - observed.max()),
+            )
+        )
+    allowed_extension = config["boundary"]["corner_join_m"] + 2 * side_uncertainty_m
+    supported = local_supported and min(extensions) <= allowed_extension
+    return dict(
+        supported=supported,
+        local_role_supported=local_supported,
+        maximum_unobserved_extension_m=min(extensions) if extensions else None,
+        allowed_corner_extension_m=allowed_extension,
+        reason=(
+            "CURRENT_OWNED_RIM_TOP_AND_ADJACENT_LOWER_RAW_IN_INDEPENDENT_SECTIONS"
+            if supported
+            else (
+                "LOCAL_RIM_DOES_NOT_AUTHORIZE_MOVING_UNOBSERVED_SIDE_EXTENSION"
+                if local_supported
+                else "INSUFFICIENT_INDEPENDENT_ROLE_QUALIFIED_RIM_SECTIONS"
+            )
+        ),
+        independent_segment_count=len(independent),
+        source_segment_ids=independent,
+        source_point_indexes=sorted(
+            {i for s in local for i in s["source_point_indexes"]}
+        ),
+        role_qualified_sources=local,
+        z_plane_sources=sources,
+        reference_line=reference,
+        steel_certified=False,
+    )
+
+
 def compile_constraints(cache, regions, config, previous):
     """Finite existing-side work; source priorities are applied by the assembler.
 
@@ -632,6 +773,16 @@ def compile_constraints(cache, regions, config, previous):
                     ),
                 )
             )
+            if (
+                detail is not None
+                and inward > config["boundary"]["corner_join_m"]
+                and not role_gain
+            ):
+                rim = current_rim_corroboration(
+                    cache, region, name, normal, rho, points, config, sigma
+                )
+                item["current_raw_rim_corroboration"] = rim
+                role_gain = rim["supported"]
             if inward > config["boundary"]["corner_join_m"] and not role_gain:
                 # Retain direction evidence without applying the rejected
                 # inward position. The conservative line encloses both ends
@@ -682,6 +833,15 @@ def compile_constraints(cache, regions, config, previous):
             if separator_reject:
                 item["geometry_guard"] = "CURRENT_SEPARATOR_PRESERVED"
                 continue
+            # A rejected cross-opening query cannot lend height to this
+            # identity. Keep local Z evidence only after ownership guarding.
+            rim = item.get("current_raw_rim_corroboration")
+            if rim:
+                if not hasattr(cache, "review_rim_plane_sources"):
+                    cache.review_rim_plane_sources = {}
+                cache.review_rim_plane_sources.setdefault(region.region_id, []).extend(
+                    rim.get("z_plane_sources", ())
+                )
             result[name] = [
                 dict(
                     mode_id="LOCAL_ROLE:" + identity,
@@ -702,7 +862,7 @@ def compile_constraints(cache, regions, config, previous):
                         {pid for r in role for pid in r["provider_ids"]}
                     ),
                     height_support_ids=["CURRENT_RAW_GRID:" + identity],
-                    raw_support_ids=[],
+                    raw_support_ids=rim.get("source_segment_ids", []) if rim else [],
                     boundary_role_evidence=item,
                     movement_basis=reason,
                     review_direction_basis="CURRENT_UPPER_CONTOUR_CONSERVATIVE_INFERENCE_NOT_S4_ESTIMATE",

@@ -372,7 +372,12 @@ def run_perception(
         with stage("CORNER_HEIGHT_OUTPUT"):
             for result in hatches:
                 height_estimator = ReviewCornerHeight(measurement, config)
-                result["corner_heights"] = height_estimator.measure(result)
+                result["corner_heights"] = height_estimator.measure(
+                    result,
+                    getattr(cache, "review_rim_plane_sources", {}).get(
+                        result["opening_identity"], ()
+                    ),
+                )
                 result["z_measurement_audit"] = height_estimator.audit
                 result.update(
                     input_frame=frame.frame_id,
