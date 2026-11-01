@@ -129,6 +129,14 @@ def evidence_group(name, side, config):
         rank, source = 3, "HEIGHT_TOPOLOGY_SUPPORTED"
     else:
         rank, source = 4, "CONSERVATIVE_REGION_BOUND"
+    nominated_source = source
+    coverage_only = measured is None and (
+        side.get("final_state") in ("CONSERVATIVE_PRIOR", "MULTIMODE")
+        or selected.get("state") == "CONSERVATIVE_PRIOR"
+        or source == "CONSERVATIVE_REGION_BOUND"
+    )
+    if coverage_only:
+        rank, source = 4, "CONSERVATIVE_REGION_BOUND"
     sigma = max(
         config["geometry"]["plane_inlier_m"],
         float(line.get("uncertainty_m") or config["geometry"]["coarse_voxel_m"] / 2),
@@ -139,8 +147,15 @@ def evidence_group(name, side, config):
         points=line_points(line),
         sigma_m=sigma,
         source=source,
+        nominated_source=nominated_source,
         source_rank=rank,
-        source_weight=2.0**-rank,
+        source_weight=0.0 if coverage_only else 2.0**-rank,
+        position_residual_enabled=not coverage_only,
+        uncertainty_semantic=(
+            "COVERAGE_BOUND_NOT_POSITION_MEASUREMENT"
+            if coverage_only
+            else "CURRENT_LINE_RESIDUAL_SCALE_NOT_CALIBRATED_COORDINATE_SIGMA"
+        ),
         independent_opening_role_gain=bool(
             selected.get("independent_opening_role_gain")
         ),
@@ -184,6 +199,113 @@ def separator_constraints(region, bridge):
                 )
             )
     return result
+
+
+def orientation_update_qualification(region, sides, groups, config):
+    """A lone end wall cannot recalibrate unmeasured long-side directions.
+
+    Retain the existing parallel review direction until the current opening
+    supplies a persistent Raw long side or independently qualified opposed
+    end walls. This holds a review inference, not the measured line or its
+    uncertainty, and never supplies a shared angle to different hatches.
+    """
+    minimum = config["boundary"]["profile_min_sections"]
+    qualified = {}
+    for (name, axis, _), group in zip(SIDE_LAYOUT, groups):
+        measured = group["measured"]
+        prior = sides[name].get("conservative_review_line", sides[name])
+        normal = np.asarray(group["line"]["normal_uv"], dtype=float)
+        tangent = np.array([-normal[1], normal[0]]) / np.linalg.norm(normal)
+        span = float(np.ptp(line_points(prior) @ tangent))
+        intervals = (measured or {}).get("measured_intervals", [])
+        merged = []
+        for lo, hi in sorted((min(i), max(i)) for i in intervals):
+            if merged and lo <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], hi)
+            else:
+                merged.append([lo, hi])
+        observed_length = sum(hi - lo for lo, hi in merged)
+        qualified[name] = bool(
+            measured
+            and group["independent_opening_role_gain"]
+            and measured.get("independent_raw_sections", 0) >= minimum
+            and span > 0
+            and observed_length >= span * config["roi"]["min_enclosure_ratio"]
+        )
+    observed = (
+        qualified["V0"] or qualified["V1"] or (qualified["U0"] and qualified["U1"])
+    )
+    normals = []
+    for name in ("V0", "V1"):
+        side = sides[name]
+        prior = side.get("conservative_review_line", side)
+        normal = np.asarray(prior["normal_uv"], dtype=float)
+        normals.append(normal / np.linalg.norm(normal))
+    # This is the existing rectangle's floating-point parallelism tolerance,
+    # not a new physical direction/measurement acceptance threshold.
+    parallel = abs(float(np.cross(*normals))) <= 1e-10
+    angle = (
+        float(
+            np.angle(
+                sum(
+                    np.exp(2j * (math.atan2(n[1], n[0]) - math.pi / 2)) for n in normals
+                )
+            )
+            / 2
+        )
+        if parallel
+        else None
+    )
+    end_compatibility = []
+    if parallel and not observed:
+        candidate = np.array([math.cos(angle), math.sin(angle)])
+        for group in groups[:2]:
+            if not qualified[group["side"]]:
+                continue
+            normal = np.asarray(group["line"]["normal_uv"], dtype=float)
+            denominator = abs(float(candidate @ normal))
+            centered = group["points"] - np.mean(group["points"], axis=0)
+            deviation = (
+                float(np.max(abs(centered @ candidate)) / denominator)
+                if denominator > np.finfo(float).eps
+                else None
+            )
+            end_compatibility.append(
+                dict(
+                    side=group["side"],
+                    max_normal_deviation_m=deviation,
+                    current_line_residual_scale_m=group["sigma_m"],
+                    compatible=deviation is not None and deviation <= group["sigma_m"],
+                )
+            )
+    held = bool(
+        not observed and parallel and all(r["compatible"] for r in end_compatibility)
+    )
+    return dict(
+        opening_identity=region.region_id,
+        orientation_held=held,
+        held_theta_rad=angle if held else None,
+        raw_end_direction_compatibility=end_compatibility,
+        qualified_raw_sides=[name for name, valid in qualified.items() if valid],
+        reason=(
+            "CONSERVATIVE_LONGITUDINAL_DIRECTION_RETAINED_NO_INDEPENDENT_RAW_AXIS"
+            if held
+            else (
+                "INDEPENDENT_CURRENT_RAW_ORIENTATION_AVAILABLE"
+                if observed
+                else (
+                    "CURRENT_RAW_END_CONTRADICTS_CONSERVATIVE_DIRECTION_JOINT_REVIEW_REQUIRED"
+                    if parallel
+                    else "NO_COMMON_CONSERVATIVE_LONGITUDINAL_DIRECTION"
+                )
+            )
+        ),
+        orientation_state="CONSERVATIVE_INFERENCE" if held else "JOINT_MODEL_ESTIMATE",
+        orientation_uncertainty_deg=None,
+        uncertainty_status="NOT_CALIBRATED_DO_NOT_INTERPRET_HELD_ANGLE_AS_ZERO_VARIANCE",
+        measured_lines_unchanged=True,
+        shared_hatch_angle_imposed=False,
+    )
 
 
 class ConstrainedRectangleSolver:
@@ -233,6 +355,11 @@ class ConstrainedRectangleSolver:
                 )
                 / 2
             )
+        orientation = orientation_update_qualification(
+            region, sides, groups, self.config
+        )
+        if orientation["orientation_held"]:
+            theta = orientation["held_theta_rad"]
         eu = np.array([math.cos(theta), math.sin(theta)])
         ev = np.array([-eu[1], eu[0]])
         coordinates = [
@@ -393,7 +520,11 @@ class ConstrainedRectangleSolver:
             jac=True,
             method="SLSQP",
             bounds=[
-                (theta - math.pi / 2, theta + math.pi / 2),
+                (
+                    (theta, theta)
+                    if orientation["orientation_held"]
+                    else (theta - math.pi / 2, theta + math.pi / 2)
+                ),
                 (None, None),
                 (None, None),
                 (-30, 30),
@@ -438,6 +569,8 @@ class ConstrainedRectangleSolver:
             if conflict:
                 conflicts.append(name)
             measured_line = copy.deepcopy(group["measured"])
+            lever_reference = np.mean(group["points"], axis=0)
+            lever = float(np.max(np.linalg.norm(polygon - lever_reference, axis=1)))
             output_sides[name] = dict(
                 normal_uv=normal.tolist(),
                 final_rho=rhos[i],
@@ -461,6 +594,11 @@ class ConstrainedRectangleSolver:
                 constraint_shift_m=shift,
                 constraint_endpoint_shifts_m=shifts.tolist(),
                 constraint_angle_delta_deg=angle_delta,
+                effective_lever_arm_m=lever,
+                lever_reference_uv=lever_reference.tolist(),
+                lever_reference_semantic="SELECTED_LINE_SUPPORT_MIDPOINT_NOT_NEW_RAW_POINT",
+                orientation_induced_lateral_error_m=lever
+                * abs(math.sin(math.radians(angle_delta))),
                 rectangle_constraint_status=(
                     "RECTANGLE_CONSTRAINT_CONFLICT"
                     if conflict
@@ -471,6 +609,9 @@ class ConstrainedRectangleSolver:
                     )
                 ),
                 input_evidence_source=group["source"],
+                nominated_input_source=group["nominated_source"],
+                position_residual_enabled=group["position_residual_enabled"],
+                input_uncertainty_semantic=group["uncertainty_semantic"],
                 input_source_rank=group["source_rank"],
                 evidence_uncertainty_m=group["sigma_m"],
             )
@@ -502,6 +643,7 @@ class ConstrainedRectangleSolver:
                 objective=float(result.fun),
                 loss="SOFT_L1_CURRENT_UNCERTAINTY_NORMALIZED",
                 source_rank_weights=[1, 0.5, 0.25, 0.125, 0.0625],
+                conservative_bounds_as_position_measurements=False,
                 operation_count=int(result.nfev)
                 * sum(len(g["points"]) for g in groups),
                 four_line_cartesian_enumeration_count=0,
@@ -509,6 +651,7 @@ class ConstrainedRectangleSolver:
                 origin_uv=origin.tolist(),
             ),
             separator_constraints=ownership,
+            orientation_update=orientation,
             minimum_guard_margin_m=float(np.min(inequalities(result.x))),
         )
 

@@ -96,6 +96,8 @@ def run_perception(
         review_corner_angles_deg=[85.0, 95.0],
         final_review_model="FIVE_DOF_ORTHOGONAL_RECTANGLE",
         rectangle_source_rank_weights=[1.0, 0.5, 0.25, 0.125, 0.0625],
+        rectangle_orientation_update_policy="PERSISTENT_RAW_LONG_SIDE_OR_OPPOSED_RAW_ENDS_ELSE_RETAIN_RAW_COMPATIBLE_CONSERVATIVE_DIRECTION",
+        rectangle_conservative_bounds_role="ONE_SIDED_COVERAGE_ONLY",
         rectangle_numerical_orthogonality_abs_dot=1e-10,
         rectangle_numerical_parallel_error_rad=1e-10,
         rectangle_numerical_scaled_length_tolerance=1e-8,

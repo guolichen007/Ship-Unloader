@@ -10,6 +10,8 @@ from ship_perception.perception.constrained_rectangle import (
     ConstrainedRectangleSolver,
     constrain_review_geometry,
     rectangle_audit,
+    evidence_group,
+    orientation_update_qualification,
 )
 from ship_perception.perception.review_geometry import ReviewGeometryAssembler
 from ship_perception.r1_static.run import resolve_config
@@ -94,6 +96,146 @@ class ConstrainedRectangleContracts(unittest.TestCase):
                 "rectangularity_gate_pass"
             ]
         )
+
+    def orientation_fixture(self, raw_sides):
+        region, sides = self.fixture((0.0, 0.0, 0.0, 0.0))
+        for name, side in sides.items():
+            if name not in raw_sides:
+                side.update(
+                    final_source="CONSERVATIVE_REGION_BOUND",
+                    final_state="CONSERVATIVE_PRIOR",
+                    candidate_modes=[],
+                    selected_mode_id=None,
+                )
+                continue
+            mode = side["candidate_modes"][0]
+            mode["independent_raw_sections"] = self.config["boundary"][
+                "profile_min_sections"
+            ]
+            mode["measured_intervals"] = [copy.deepcopy(mode["support_span"])]
+            # A local wall can differ from the established review direction.
+            n = np.asarray(mode["normal_uv"])
+            t = np.array([-n[1], n[0]])
+            center = mode["rho"] * n + np.mean(mode["support_span"]) * t
+            angle = math.atan2(n[1], n[0]) + 0.01
+            mode["normal_uv"] = [math.cos(angle), math.sin(angle)]
+            mode["rho"] = float(center @ mode["normal_uv"])
+        return region, sides
+
+    def test_single_end_wall_cannot_rotate_unmeasured_long_sides(self):
+        region, sides = self.orientation_fixture({"U1"})
+        before = copy.deepcopy(sides)
+        result = ConstrainedRectangleSolver(self.config).solve(region, sides)
+        self.assertTrue(result["orientation_update"]["orientation_held"])
+        self.assertAlmostEqual(result["theta_rad"], 0.2, places=10)
+        self.assertEqual(sides, before)
+        self.assertEqual(
+            result["sides"]["U1"]["measured_line"], sides["U1"]["candidate_modes"][0]
+        )
+        self.assertIsNone(result["orientation_update"]["orientation_uncertainty_deg"])
+        self.assertFalse(result["steel_certified"])
+
+    def test_independent_opposed_raw_ends_can_estimate_orientation(self):
+        region, sides = self.orientation_fixture({"U0", "U1"})
+        result = ConstrainedRectangleSolver(self.config).solve(region, sides)
+        self.assertFalse(result["orientation_update"]["orientation_held"])
+        self.assertEqual(
+            result["orientation_update"]["qualified_raw_sides"], ["U0", "U1"]
+        )
+        self.assertGreater(abs(result["theta_rad"] - 0.2), 1e-4)
+
+    def test_conservative_orientation_hold_commutes_with_rigid_transforms(self):
+        region, sides = self.orientation_fixture({"U1"})
+        first = ConstrainedRectangleSolver(self.config).solve(region, sides)
+        for angle, offset in [
+            (0.4, np.array([100.0, -40.0])),
+            (-0.7, np.array([-60.0, 70.0])),
+        ]:
+            changed_region, changed_sides, rotation = self.transform(
+                region, sides, angle, offset
+            )
+            for side in changed_sides.values():
+                for mode in side["candidate_modes"]:
+                    mode["measured_intervals"] = [copy.deepcopy(mode["support_span"])]
+            after = ConstrainedRectangleSolver(self.config).solve(
+                changed_region, changed_sides
+            )
+            restored = (np.asarray(after["polygon_uv"]) - offset) @ rotation
+            np.testing.assert_allclose(restored, first["polygon_uv"], atol=2e-6, rtol=0)
+            self.assertTrue(after["orientation_update"]["orientation_held"])
+            self.assertEqual(after["orientation_update"]["qualified_raw_sides"], ["U1"])
+
+    def test_persistent_raw_long_side_allows_independent_orientation(self):
+        region, sides = self.orientation_fixture({"V0"})
+        groups = [
+            evidence_group(n, sides[n], self.config) for n in ["U0", "U1", "V0", "V1"]
+        ]
+        decision = orientation_update_qualification(region, sides, groups, self.config)
+        self.assertFalse(decision["orientation_held"])
+        self.assertEqual(decision["qualified_raw_sides"], ["V0"])
+
+    def test_strong_end_direction_can_contradict_conservative_axis(self):
+        region, sides = self.orientation_fixture({"U1"})
+        mode = sides["U1"]["candidate_modes"][0]
+        n = np.asarray(mode["normal_uv"])
+        center = mode["rho"] * n + np.mean(mode["support_span"]) * np.array(
+            [-n[1], n[0]]
+        )
+        mode["normal_uv"] = [math.cos(0.28), math.sin(0.28)]
+        mode["rho"] = float(center @ mode["normal_uv"])
+        groups = [
+            evidence_group(n, sides[n], self.config) for n in ["U0", "U1", "V0", "V1"]
+        ]
+        decision = orientation_update_qualification(region, sides, groups, self.config)
+        self.assertFalse(decision["orientation_held"])
+        self.assertFalse(decision["raw_end_direction_compatibility"][0]["compatible"])
+        self.assertIn("RAW_END_CONTRADICTS", decision["reason"])
+
+    def test_unqualified_role_or_short_fragment_cannot_reorient_whole_opening(self):
+        for role, fraction in [(False, 1.0), (True, 0.1)]:
+            region, sides = self.orientation_fixture({"V0"})
+            mode = sides["V0"]["candidate_modes"][0]
+            mode["independent_opening_role_gain"] = role
+            lo, hi = mode["support_span"]
+            mode["measured_intervals"] = [[lo, lo + fraction * (hi - lo)]]
+            groups = [
+                evidence_group(n, sides[n], self.config)
+                for n in ["U0", "U1", "V0", "V1"]
+            ]
+            decision = orientation_update_qualification(
+                region, sides, groups, self.config
+            )
+            self.assertTrue(decision["orientation_held"])
+            self.assertEqual(decision["qualified_raw_sides"], [])
+
+    def test_conservative_direction_evidence_is_not_a_position_measurement(self):
+        region, sides = self.orientation_fixture({"U1"})
+        side = sides["V0"]
+        mode = dict(
+            mode_id="DIRECTION_ONLY",
+            source="TOPOLOGY_SUPPORTED",
+            state="CONSERVATIVE_PRIOR",
+            rho=side["final_rho"],
+            normal_uv=side["normal_uv"],
+            support_span=side["support_span"],
+            uncertainty_m=0.05,
+            boundary_role_evidence={"selected": {"samples": []}},
+        )
+        side.update(candidate_modes=[mode], selected_mode_id=mode["mode_id"])
+        group = evidence_group("V0", side, self.config)
+        self.assertEqual(group["nominated_source"], "BEV_RASTER_SUPPORTED")
+        self.assertEqual(group["source"], "CONSERVATIVE_REGION_BOUND")
+        self.assertFalse(group["position_residual_enabled"])
+        self.assertEqual(group["source_weight"], 0.0)
+
+    def test_multimode_prior_cannot_reenter_as_s4_position_measurement(self):
+        _, sides = self.orientation_fixture({"U1"})
+        side = sides["V0"]
+        side.update(final_state="MULTIMODE", s4_family_ids=["F0", "F1"])
+        group = evidence_group("V0", side, self.config)
+        self.assertEqual(group["nominated_source"], "S4_SUPPORTED")
+        self.assertFalse(group["position_residual_enabled"])
+        self.assertEqual(group["source_weight"], 0.0)
 
     def test_current_raw_conflict_is_preserved_and_not_certified(self):
         region, sides = self.fixture((0.08, -0.08, 0.03, -0.03))
