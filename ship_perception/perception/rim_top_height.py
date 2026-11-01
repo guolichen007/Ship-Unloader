@@ -154,7 +154,7 @@ class RimTopHeightEstimator:
                 self.config["geometry"]["refine_voxel_m"],
                 self.config,
             )
-            if len(edges) <= votes:
+            if len(edges) < 2:
                 continue
             self.audit["probed_side_count"] += 1
             candidates = []
@@ -200,7 +200,12 @@ class RimTopHeightEstimator:
                         and np.quantile(below[inside], 0.25) >= drop
                     )
                     edge_top = (
-                        near & (abs(distance) <= tolerance) & (abs(below) <= tolerance)
+                        near
+                        & (
+                            abs(distance)
+                            <= self.config["boundary"]["side_inner_gap_max_m"]
+                        )
+                        & (abs(below) <= tolerance)
                     )
                     direct_edge = (
                         int(edge_top.sum())
@@ -258,6 +263,10 @@ class RimTopHeightEstimator:
                             lip_above_deck=lip_above_deck,
                             current_opening_face_connection=wall_connection,
                             continuous_deck=continuous_deck,
+                            xy_side_adjacency_m=self.config["boundary"][
+                                "side_inner_gap_max_m"
+                            ],
+                            plane_residual_tolerance_m=tolerance,
                             source="CURRENT_OWNED_SIDE_STRIP_WITH_INSIDE_OUTSIDE_ROLE",
                         ),
                     )
@@ -265,16 +274,23 @@ class RimTopHeightEstimator:
             for role in ("RIM_TOP", "TRUE_DECK"):
                 eligible = [p for p in candidates if p["plane_role"] == role]
                 segments = {p["segment_id"] for p in eligible}
-                if len(segments) < votes:
+                # A local, role-qualified rim plane can directly observe one
+                # corner while the rest of the side is missing. Four distinct
+                # supports are required for a deck reference or same-side
+                # extrapolation, not for a directly observed rim surface.
+                if role == "TRUE_DECK" and len(segments) < votes:
                     continue
                 for plane in eligible:
                     plane.update(
                         tier="LOCAL_RIM_PLANE" if role == "RIM_TOP" else "DECK_PLANE",
-                        source_segment_ids=sorted(segments),
-                        segment_vote_count=len(segments),
-                        longitudinal_persistence="CURRENT_INDEPENDENT_SIDE_SECTIONS",
+                        source_segment_ids=[plane["segment_id"]],
+                        segment_vote_count=1,
+                        side_role_section_count=len(segments),
+                        longitudinal_persistence="CURRENT_LOCAL_OBSERVED_SECTION",
                     )
                     sources.append(plane)
+                if len(segments) < votes:
+                    continue
                 # Fit the same-role union using the existing plane capability.
                 # Only actual accepted Raw indexes are reused; no synthetic
                 # support is created between independently observed sections.

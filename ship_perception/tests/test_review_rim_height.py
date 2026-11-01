@@ -5,7 +5,10 @@ from types import SimpleNamespace
 import unittest
 import numpy as np
 
-from ship_perception.perception.measurement import VesselMeasurementContext
+from ship_perception.perception.measurement import (
+    VesselMeasurementContext,
+    BudgetedLocalSurfaceNormals,
+)
 from ship_perception.perception.review_height import (
     ReviewCornerHeight,
     cross_segment_consensus,
@@ -93,6 +96,50 @@ class ReviewRimHeightContracts(unittest.TestCase):
         self.assertTrue(all(h["z"] is None for h in heights))
         self.assertEqual(estimator.audit["rim_candidate_count"], 0)
 
+    def test_direct_corner_rim_survives_missing_remote_side_sections(self):
+        measurement, result = self.fixture()
+        points = measurement.raw_uvz
+        # Only the first end of this rim is visible; floor and deck remain.
+        rim = (points[:, 0] >= -0.35) & (points[:, 0] <= 0)
+        visible = points[~rim | (points[:, 1] <= 1.8)]
+        before = copy.deepcopy(result)
+        estimator = ReviewCornerHeight(self.measurement(visible), self.config)
+        heights = estimator.measure(result)
+        self.assertEqual(result, before)
+        self.assertIsNotNone(heights[0]["z"])
+        self.assertAlmostEqual(heights[0]["z"], 3.0, places=7)
+        self.assertEqual(heights[0]["segment_vote_count"], 1)
+        self.assertEqual(len(heights[0]["source_segment_ids"]), 1)
+        self.assertIsNone(heights[3]["z"])
+
+    def test_deck_reference_still_requires_independent_remote_segments(self):
+        x, y = np.meshgrid(np.linspace(0, 3, 16), np.linspace(0, 3, 16))
+        points = np.column_stack((x.ravel(), y.ravel(), np.full(x.size, 2.0)))
+        source = dict(
+            segment_id="SINGLE",
+            vessel_id="V",
+            plane_role="TRUE_DECK",
+            role_confirmed=True,
+            source_roles=["TRUE_DECK"],
+            normal_uvz=[0, 0, 1],
+            offset_m=-2.0,
+            fit_residual=0.0,
+            fit_extent=[[0, 0], [3, 3]],
+            source_point_indexes=list(range(len(points))),
+            tier="DECK_PLANE",
+        )
+        result = dict(
+            opening_identity="R",
+            boundary_uv=[[0, 0], [3, 0], [3, 3], [0, 3]],
+            corners=[{}] * 4,
+        )
+        heights = ReviewCornerHeight(self.measurement(points), self.config).measure(
+            result, [source]
+        )
+        self.assertTrue(
+            all(h["z"] is None and h["deck_reference_z"] is None for h in heights)
+        )
+
     def test_thin_rim_surface_is_not_suppressed_by_more_numerous_floor_returns(self):
         _, result = self.fixture()
         along = np.linspace(0, 8, 161)
@@ -130,6 +177,53 @@ class ReviewRimHeightContracts(unittest.TestCase):
             points, np.arange(len(points)), "WALLS", "UNCLASSIFIED_SURFACE"
         )
         self.assertEqual(sources, [])
+
+    def test_plane_raw_support_and_observed_normal_support_are_separate(self):
+        x, y = np.meshgrid(np.linspace(0, 2, 16), np.linspace(0, 2, 16))
+        points = np.column_stack((x.ravel(), y.ravel(), np.full(x.size, 3.0)))
+        measurement = self.measurement(points)
+        normals = BudgetedLocalSurfaceNormals(
+            points, self.config, None, measurement.counters
+        )
+        normals._estimate(np.arange(len(points)))
+        observed = np.flatnonzero(normals.valid)[::16]
+        normals.valid[:] = False
+        normals.valid[observed] = True
+        measurement.review_primary_normals = normals
+        self.assertGreaterEqual(
+            len(observed), self.config["geometry"]["normal_min_points"]
+        )
+        self.assertLess(len(observed), self.config["geometry"]["min_plane_points"])
+        sources = ReviewCornerHeight(measurement, self.config)._plane_candidates(
+            points, np.arange(len(points)), "PARTIAL_NORMALS", "UNCLASSIFIED_SURFACE"
+        )
+        self.assertTrue(sources)
+        self.assertEqual(len(sources[0]["source_point_indexes"]), len(points))
+
+    def test_rim_adjacency_uses_side_gap_not_vertical_plane_residual(self):
+        _, result = self.fixture()
+        along = np.linspace(0, 8, 161)
+
+        def patch(xs, offset):
+            x, y = np.meshgrid(xs, along)
+            return np.column_stack(
+                (x.ravel(), y.ravel(), (3 + 0.01 * x + 0.02 * y + offset).ravel())
+            )
+
+        for gap, expected in [(0.10, True), (0.25, False)]:
+            points = np.vstack(
+                (
+                    patch(np.linspace(-0.35, -gap, 8), 0),
+                    patch(np.linspace(0.03, 0.5, 12), -2),
+                    patch(np.linspace(-0.9, -0.45, 12), 0),
+                )
+            )
+            heights = ReviewCornerHeight(self.measurement(points), self.config).measure(
+                result
+            )
+            self.assertEqual(heights[0]["z"] is not None, expected)
+            if expected:
+                self.assertAlmostEqual(heights[0]["z"], 3.0, places=7)
 
     def test_context_halo_height_cannot_supply_rim_z(self):
         measurement, result = self.fixture(halo=True)

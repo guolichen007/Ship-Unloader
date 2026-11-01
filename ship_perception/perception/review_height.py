@@ -84,8 +84,8 @@ class ReviewCornerHeight:
         self.audit = {}
         self._eligibility_cache = {}
 
-    def _horizontal_points(self, points, indexes):
-        """Full 3D neighbourhoods reject horizontal slices of vertical walls."""
+    def _normal_support(self, indexes, plane_normal):
+        """Normal observations qualify a Raw plane; unavailable normals do not erase Raw."""
         primary = getattr(
             self.measurement.local, "primary_cache", self.measurement.local
         )
@@ -112,12 +112,19 @@ class ReviewCornerHeight:
         canonical = normals.input_to_canonical[positions[rows]]
         normals._estimate(canonical)
         cosine = math.cos(math.radians(self.config["geometry"]["normal_angle_deg"]))
-        live = normals.valid[canonical] & (abs(normals.normals[canonical, 2]) >= cosine)
-        keep = rows[live]
-        return np.asarray(points)[keep], original[keep]
+        valid = normals.valid[canonical]
+        live = valid & (abs(normals.normals[canonical, 2]) >= cosine)
+        live &= abs(normals.normals[canonical] @ plane_normal) >= cosine
+        observed, consistent = int(valid.sum()), int(live.sum())
+        return dict(
+            valid_normal_point_count=observed,
+            consistent_normal_point_count=consistent,
+            normal_mode_support_ratio=consistent / max(observed, 1),
+            consistent_normal_source_point_indexes=original[rows[live]].tolist(),
+            estimator="ISOTROPIC_FULL_3D_NEIGHBOURHOOD",
+        )
 
     def _plane_candidates(self, points, indexes, segment_id, role):
-        points, indexes = self._horizontal_points(points, indexes)
         if len(points) < self.config["geometry"]["min_plane_points"]:
             return []
         hypotheses = _gravity_hypotheses(points, self.config)
@@ -144,6 +151,14 @@ class ReviewCornerHeight:
             ):
                 continue
             selected = points[mask]
+            normal_support = self._normal_support(np.asarray(indexes)[mask], normal)
+            if (
+                normal_support["consistent_normal_point_count"]
+                < self.config["geometry"]["normal_min_points"]
+                or normal_support["normal_mode_support_ratio"]
+                < self.config["roi"]["deck_normal_mode_support_ratio"]
+            ):
+                continue
             origin = selected[:, :2].mean(0)
             design = np.column_stack((selected[:, :2] - origin, np.ones(len(selected))))
             if np.linalg.matrix_rank(design) < 3:
@@ -167,6 +182,7 @@ class ReviewCornerHeight:
                         selected[:, :2].max(0).tolist(),
                     ],
                     source_point_indexes=np.asarray(indexes)[mask].astype(int).tolist(),
+                    normal_support=normal_support,
                     plane_parameter_origin_uv=origin.tolist(),
                     plane_parameter_covariance=covariance.tolist(),
                     plane_covariance_semantic="CURRENT_LINEAR_FIT_RESIDUAL_COVARIANCE_NOT_SENSOR_CALIBRATED",
