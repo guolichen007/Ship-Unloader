@@ -318,6 +318,7 @@ class SignedRoleResolver:
             sections = best["sections"]
             if measurement_only:
                 from .rim_top_height import absolute_surface_evidence
+                from .raw_pair_provenance import trace_section_pairs
 
                 sections = copy.deepcopy(sections)
                 for section in sections:
@@ -328,6 +329,9 @@ class SignedRoleResolver:
                     section.update(elevation)
                     if "section_record" in section:
                         section["section_record"]["absolute_z_evidence"] = elevation
+                        section["source_pair_provenance"] = trace_section_pairs(
+                            self.measurement, section, axis, interval, sign, config
+                        )
             return dict(
                 status="STRONG_UNIQUE_EDGE",
                 rho=best["rho"],

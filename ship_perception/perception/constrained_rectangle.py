@@ -204,10 +204,11 @@ def separator_constraints(region, bridge):
 def orientation_update_qualification(region, sides, groups, config):
     """A lone end wall cannot recalibrate unmeasured long-side directions.
 
-    Retain the existing parallel review direction until the current opening
-    supplies a persistent Raw long side or independently qualified opposed
-    end walls. This holds a review inference, not the measured line or its
-    uncertainty, and never supplies a shared angle to different hatches.
+    Retain the existing parallel review direction only when current Raw and
+    coverage constraints remain compatible. Persistent Raw long sides,
+    independently qualified opposed ends, or contradictory current evidence
+    require the joint estimate. A held angle is a review inference, not a
+    measured direction, and never supplies a shared angle to other hatches.
     """
     minimum = config["boundary"]["profile_min_sections"]
     qualified = {}
@@ -278,14 +279,39 @@ def orientation_update_qualification(region, sides, groups, config):
                     compatible=deviation is not None and deviation <= group["sigma_m"],
                 )
             )
+    coverage_compatible = True
+    if parallel and not observed:
+        a = np.array([math.cos(angle), math.sin(angle)])
+        b = np.array([-a[1], a[0]])
+        for (name, axis, sign), group in zip(SIDE_LAYOUT, groups):
+            if group["independent_opening_role_gain"]:
+                continue
+            previous = sides[name]
+            candidate = a if axis == 0 else b
+            den = float(candidate @ previous["normal_uv"])
+            if den <= 0:
+                coverage_compatible = False
+                break
+            projected = line_points(previous) @ candidate
+            inward = config["boundary"]["corner_join_m"] if group["measured"] else 0.0
+            outward = config["roi"]["boundary_search_m"] / 2
+            lower = float(np.max(projected - (outward if sign < 0 else inward) * den))
+            upper = float(np.min(projected + (inward if sign < 0 else outward) * den))
+            if lower > upper:
+                coverage_compatible = False
+                break
     held = bool(
-        not observed and parallel and all(r["compatible"] for r in end_compatibility)
+        not observed
+        and parallel
+        and coverage_compatible
+        and all(r["compatible"] for r in end_compatibility)
     )
     return dict(
         opening_identity=region.region_id,
         orientation_held=held,
         held_theta_rad=angle if held else None,
         raw_end_direction_compatibility=end_compatibility,
+        conservative_direction_coverage_compatible=coverage_compatible,
         qualified_raw_sides=[name for name, valid in qualified.items() if valid],
         reason=(
             "CONSERVATIVE_LONGITUDINAL_DIRECTION_RETAINED_NO_INDEPENDENT_RAW_AXIS"
@@ -294,9 +320,13 @@ def orientation_update_qualification(region, sides, groups, config):
                 "INDEPENDENT_CURRENT_RAW_ORIENTATION_AVAILABLE"
                 if observed
                 else (
-                    "CURRENT_RAW_END_CONTRADICTS_CONSERVATIVE_DIRECTION_JOINT_REVIEW_REQUIRED"
-                    if parallel
-                    else "NO_COMMON_CONSERVATIVE_LONGITUDINAL_DIRECTION"
+                    "CONSERVATIVE_DIRECTION_INCOMPATIBLE_WITH_CURRENT_COVERAGE"
+                    if parallel and not coverage_compatible
+                    else (
+                        "CURRENT_RAW_END_CONTRADICTS_CONSERVATIVE_DIRECTION_JOINT_REVIEW_REQUIRED"
+                        if parallel
+                        else "NO_COMMON_CONSERVATIVE_LONGITUDINAL_DIRECTION"
+                    )
                 )
             )
         ),

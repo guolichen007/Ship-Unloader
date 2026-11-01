@@ -144,6 +144,23 @@ class ConstrainedRectangleContracts(unittest.TestCase):
         )
         self.assertGreater(abs(result["theta_rad"] - 0.2), 1e-4)
 
+    def test_conservative_direction_cannot_make_coverage_constraints_infeasible(self):
+        region, sides = self.fixture((0.085, 0.085, 0.0, 0.0))
+        for side in sides.values():
+            side.update(
+                final_source="CONSERVATIVE_REGION_BOUND",
+                final_state="CONSERVATIVE_PRIOR",
+                candidate_modes=[],
+                selected_mode_id=None,
+            )
+        result = ConstrainedRectangleSolver(self.config).solve(region, sides)
+        decision = result["orientation_update"]
+        self.assertFalse(decision["orientation_held"])
+        self.assertFalse(decision["conservative_direction_coverage_compatible"])
+        self.assertIn("INCOMPATIBLE_WITH_CURRENT_COVERAGE", decision["reason"])
+        self.assertTrue(result["rectangularity"]["rectangularity_gate_pass"])
+        self.assertGreaterEqual(result["minimum_guard_margin_m"], -1e-6)
+
     def test_conservative_orientation_hold_commutes_with_rigid_transforms(self):
         region, sides = self.orientation_fixture({"U1"})
         first = ConstrainedRectangleSolver(self.config).solve(region, sides)
