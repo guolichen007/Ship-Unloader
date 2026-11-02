@@ -256,7 +256,7 @@ class OpeningRimSource:
         self.audit["candidate_patches"] += len(output)
         return output
 
-    def _low_attachment(self, patch, members, other, barriers):
+    def _low_attachment(self, patch, members, other, barriers, retain_attached=False):
         self.audit["attachment_queries"] += 1
         n, t, rho, sign = patch["normal"], patch["tangent"], patch["rho"], patch["sign"]
         lo, hi = patch["span"]
@@ -375,6 +375,10 @@ class OpeningRimSource:
                 dict(along_bin=int(bin_id), point_indexes=path)
             )
         result["supported"] = True
+        if retain_attached:
+            result["attached_original_point_indexes"] = self.original[
+                local[attached]
+            ].tolist()
         return result
 
     def _contact(self, first, second):

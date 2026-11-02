@@ -204,6 +204,11 @@ class ReviewGeometryAssembler:
     def _apply_mode(self, side, mode):
         self.assembly_operation_count += 1
         side["candidate_modes"].append(copy.deepcopy(mode))
+        if mode.get("ownership_rejected"):
+            side["rejected_mode_ids"].append(mode["mode_id"])
+            side["guard_result"] = "CURRENT_OPENING_RAW_ASSIGNMENT_NOT_PROVEN"
+            side["movement_reason"] = "KEEP_OWNED_COMPLETE_REVIEW_BOUNDARY"
+            return
         if side.get("side_ownership_constraint"):
             coordinates = [
                 line_coordinate_at(mode, p, 0) for p in side["comparison_points_uv"]

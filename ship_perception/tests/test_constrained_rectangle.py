@@ -191,6 +191,42 @@ class ConstrainedRectangleContracts(unittest.TestCase):
         self.assertFalse(decision["orientation_held"])
         self.assertEqual(decision["qualified_raw_sides"], ["V0"])
 
+    def test_separated_raw_sections_constrain_direction_without_filling_gaps(self):
+        region, sides = self.orientation_fixture({"V0"})
+        mode = sides["V0"]["candidate_modes"][0]
+        lo, hi = mode["support_span"]
+        length = hi - lo
+        mode["measured_intervals"] = [
+            [lo + f * length, lo + (f + 0.02) * length] for f in (0.0, 0.2, 0.6, 0.98)
+        ]
+        before = copy.deepcopy(sides)
+        groups = [
+            evidence_group(n, sides[n], self.config) for n in ["U0", "U1", "V0", "V1"]
+        ]
+        decision = orientation_update_qualification(region, sides, groups, self.config)
+        self.assertEqual(decision["qualified_raw_sides"], ["V0"])
+        self.assertFalse(decision["orientation_held"])
+        support = decision["raw_direction_support"]["V0"]
+        self.assertLess(support["measured_coverage_length_m"], length * 0.1)
+        self.assertAlmostEqual(support["observed_spatial_baseline_m"], length)
+        self.assertFalse(support["gaps_promoted_to_measurement"])
+        self.assertEqual(sides, before)
+
+    def test_compact_raw_sections_have_insufficient_direction_baseline(self):
+        region, sides = self.orientation_fixture({"V0"})
+        mode = sides["V0"]["candidate_modes"][0]
+        lo, hi = mode["support_span"]
+        length = hi - lo
+        mode["measured_intervals"] = [
+            [lo + f * length, lo + (f + 0.02) * length] for f in (0.0, 0.04, 0.08, 0.12)
+        ]
+        groups = [
+            evidence_group(n, sides[n], self.config) for n in ["U0", "U1", "V0", "V1"]
+        ]
+        decision = orientation_update_qualification(region, sides, groups, self.config)
+        self.assertEqual(decision["qualified_raw_sides"], [])
+        self.assertTrue(decision["orientation_held"])
+
     def test_strong_end_direction_can_contradict_conservative_axis(self):
         region, sides = self.orientation_fixture({"U1"})
         mode = sides["U1"]["candidate_modes"][0]

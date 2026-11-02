@@ -32,6 +32,24 @@ class BudgetedLocalSurfaceNormals(LocalSurfaceNormals):
                 self.budget.check()
 
 
+def review_normal_cache(measurement, config, context=False):
+    """Share the exact input/canonical index contract across XY and Z probes."""
+    primary = getattr(measurement.local, "primary_cache", measurement.local)
+    points = measurement.raw_uvz if context else primary.xyz
+    source = measurement.raw_point_indexes if context else primary.vessel.point_indexes
+    name = "review_context_normals" if context else "review_primary_normals"
+    normals = getattr(measurement, name, None)
+    if normals is None:
+        normals = BudgetedLocalSurfaceNormals(
+            points, config, getattr(measurement, "budget", None), measurement.counters
+        )
+        setattr(measurement, name, normals)
+    if not hasattr(normals, "input_to_canonical"):
+        normals.input_to_canonical = np.empty(len(points), dtype=np.int64)
+        normals.input_to_canonical[normals.input_point_indexes] = np.arange(len(points))
+    return normals, np.asarray(source)
+
+
 class RawSpatialIndex:
     """Sorted indices select original returns; no voxelization or point removal."""
 

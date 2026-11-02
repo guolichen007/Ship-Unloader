@@ -211,7 +211,7 @@ def orientation_update_qualification(region, sides, groups, config):
     measured direction, and never supplies a shared angle to other hatches.
     """
     minimum = config["boundary"]["profile_min_sections"]
-    qualified = {}
+    qualified, direction_support = {}, {}
     for (name, axis, _), group in zip(SIDE_LAYOUT, groups):
         measured = group["measured"]
         prior = sides[name].get("conservative_review_line", sides[name])
@@ -226,12 +226,25 @@ def orientation_update_qualification(region, sides, groups, config):
             else:
                 merged.append([lo, hi])
         observed_length = sum(hi - lo for lo, hi in merged)
+        # Direction is observed over the lever arm between actual supports.
+        # Occlusion gaps reduce measured coverage, not that lever arm. They
+        # remain gaps in measured_intervals and never become measured edges.
+        spatial_baseline = merged[-1][1] - merged[0][0] if merged else 0.0
+        direction_support[name] = dict(
+            measured_coverage_length_m=float(observed_length),
+            observed_spatial_baseline_m=float(spatial_baseline),
+            conservative_side_span_m=span,
+            independent_raw_sections=(measured or {}).get(
+                "independent_raw_sections", 0
+            ),
+            gaps_promoted_to_measurement=False,
+        )
         qualified[name] = bool(
             measured
             and group["independent_opening_role_gain"]
             and measured.get("independent_raw_sections", 0) >= minimum
             and span > 0
-            and observed_length >= span * config["roi"]["min_enclosure_ratio"]
+            and spatial_baseline >= span * config["roi"]["min_enclosure_ratio"]
         )
     observed = (
         qualified["V0"] or qualified["V1"] or (qualified["U0"] and qualified["U1"])
@@ -313,6 +326,7 @@ def orientation_update_qualification(region, sides, groups, config):
         raw_end_direction_compatibility=end_compatibility,
         conservative_direction_coverage_compatible=coverage_compatible,
         qualified_raw_sides=[name for name, valid in qualified.items() if valid],
+        raw_direction_support=direction_support,
         reason=(
             "CONSERVATIVE_LONGITUDINAL_DIRECTION_RETAINED_NO_INDEPENDENT_RAW_AXIS"
             if held

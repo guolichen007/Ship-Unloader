@@ -5,7 +5,7 @@ import numpy as np
 
 from ship_perception.r1_static.perimeter_deck import _gravity_hypotheses
 from .rim_top_height import RimTopHeightEstimator
-from .measurement import BudgetedLocalSurfaceNormals
+from .measurement import review_normal_cache
 
 SEMANTIC = "HATCH_INNER_RIM_TOP_ELEVATION"
 TIERS = (
@@ -86,31 +86,7 @@ class ReviewCornerHeight:
         self._associated_rim_sources = {}
 
     def _normal_cache(self, context=False):
-        primary = getattr(
-            self.measurement.local, "primary_cache", self.measurement.local
-        )
-        points = self.measurement.raw_uvz if context else primary.xyz
-        source = (
-            self.measurement.raw_point_indexes
-            if context
-            else primary.vessel.point_indexes
-        )
-        name = "review_context_normals" if context else "review_primary_normals"
-        normals = getattr(self.measurement, name, None)
-        if normals is None:
-            normals = BudgetedLocalSurfaceNormals(
-                points,
-                self.config,
-                getattr(self.measurement, "budget", None),
-                self.measurement.counters,
-            )
-            setattr(self.measurement, name, normals)
-        if not hasattr(normals, "input_to_canonical"):
-            normals.input_to_canonical = np.empty(len(points), dtype=np.int64)
-            normals.input_to_canonical[normals.input_point_indexes] = np.arange(
-                len(points)
-            )
-        return normals, np.asarray(source)
+        return review_normal_cache(self.measurement, self.config, context)
 
     def _normal_support(self, indexes, plane_normal, context=False):
         """Observed normals qualify a plane; context fitting proves no ownership."""

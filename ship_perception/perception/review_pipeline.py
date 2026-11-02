@@ -34,6 +34,7 @@ from .review_geometry import ReviewGeometryAssembler, SIDES
 from .constrained_rectangle import constrain_review_geometry
 from .review_height import ReviewCornerHeight
 from .review_runtime import MeasurementTasks
+from .opening_boundary_assignment import OpeningBoundaryAssignment
 from .review_measurement import (
     raw_face_measurements,
     qualified_raw_pair_gain,
@@ -263,6 +264,7 @@ def run_perception(
             measurement.budget = budget or ProgressOnly(measurement_progress)
             refiner = FinalBoundaryRefiner(measurement.raw_uvz, [], config, measurement)
             resolver = SignedRoleResolver(measurement, refiner)
+            assignment = OpeningBoundaryAssignment(measurement, config)
             with stage("BOUNDARY_MEASUREMENT"):
                 for index, region in enumerate(canonical):
                     result = hatches[index]
@@ -301,6 +303,7 @@ def run_perception(
                                         result=row,
                                     )
                                 )
+                                assigned_profile = False
                                 if (
                                     row["status"] == "STRONG_UNIQUE_EDGE"
                                     and row.get("measurement_source")
@@ -308,6 +311,11 @@ def run_perception(
                                 ):
                                     fit = row["fit"]
                                     line = raw_profile_line(row, axis, span)
+                                    ownership = assignment.profile(region, row)
+                                    row["opening_assignment"] = ownership
+                                    assigned_profile = (
+                                        ownership["state"] == "ASSIGNED_CURRENT_OPENING"
+                                    )
                                     modes[name].append(
                                         dict(
                                             mode_id=task,
@@ -318,14 +326,21 @@ def run_perception(
                                                 config["geometry"]["plane_inlier_m"],
                                                 fit.get("residual_mad_m", 0.0),
                                             ),
-                                            independent_raw_sections=len(
+                                            independent_raw_sections=ownership[
+                                                "supported_section_count"
+                                            ],
+                                            geometric_raw_section_count=len(
                                                 row["sections"]
                                             ),
                                             physical_role_improved=True,
                                             independent_opening_role_gain=qualified_raw_pair_gain(
                                                 row, config
-                                            ),
-                                            physical_role_gain_basis="SELF_QUALIFIED_SIGNED_RAW_PAIRS_WITH_FINITE_CROSS_SECTION_CONSENSUS",
+                                            )
+                                            and assigned_profile,
+                                            physical_role_gain_basis="SIGNED_RAW_PAIRS_WITH_CURRENT_OPENING_MATERIAL_ASSIGNMENT",
+                                            opening_assignment_state=ownership["state"],
+                                            opening_assignment=ownership,
+                                            ownership_rejected=not assigned_profile,
                                             raw_support_ids=[
                                                 task + ":section:" + str(k)
                                                 for k in range(len(row["sections"]))
@@ -333,7 +348,7 @@ def run_perception(
                                             raw_profile_sections=row["sections"],
                                         )
                                     )
-                                else:
+                                if not assigned_profile:
                                     face_modes = raw_face_measurements(
                                         measurement,
                                         region,
@@ -344,6 +359,21 @@ def run_perception(
                                         candidates.get(name, []),
                                         config,
                                     )
+                                    if not any(
+                                        m.get("independent_opening_role_gain")
+                                        for m in face_modes
+                                    ):
+                                        complete_modes, face_audit = (
+                                            assignment.complete_faces(
+                                                region, name, axis, pos, span
+                                            )
+                                        )
+                                        face_modes = (
+                                            assignment.corroborate_primary_faces(
+                                                face_modes, complete_modes
+                                            )
+                                        )
+                                        row["opening_face_investigation"] = face_audit
                                     modes[name].extend(face_modes)
                                 signature = hashlib.sha256(
                                     json.dumps(row, sort_keys=True).encode()
