@@ -4,7 +4,11 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
@@ -18,6 +22,48 @@ spec.loader.exec_module(runner)
 
 
 class ReviewBatchLauncherContracts(unittest.TestCase):
+    @unittest.skipUnless(
+        os.name == "posix" and shutil.which("bash"), "POSIX shell entry test"
+    )
+    def test_shell_relative_inputs_resolve_from_callers_directory(self):
+        with tempfile.TemporaryDirectory(prefix="review caller ") as tmp:
+            root = Path(tmp)
+            folder = root / "input spaced"
+            folder.mkdir()
+            pcd = folder / "sample.PCD"
+            pcd.write_bytes(b"input")
+            manifest = root / "batch.json"
+            manifest.write_text(
+                json.dumps(
+                    dict(
+                        schema="ship_perception.review_batch.1",
+                        scenes=[dict(scene="S", pcd="input spaced/sample.PCD")],
+                    )
+                ),
+                encoding="utf-8",
+            )
+            for option, value in [
+                ("--pcd", "input spaced/sample.PCD"),
+                ("--pcd-dir", "input spaced"),
+                ("--manifest", "batch.json"),
+            ]:
+                result = subprocess.run(
+                    [
+                        "bash",
+                        str(ROOT / "scripts/run_ship_hatch_review.sh"),
+                        option,
+                        value,
+                        "--list-only",
+                    ],
+                    cwd=root,
+                    env=dict(os.environ, PYTHON_BIN=sys.executable),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)[0]["pcd"], str(pcd))
+
     def args(self, **kw):
         values = dict(
             manifest=None,

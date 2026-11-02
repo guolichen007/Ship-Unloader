@@ -12,5 +12,4 @@ if [[ -z "${PYTHON_BIN:-}" ]]; then
 fi
 export PYTHON_BIN PYTHONNOUSERSITE=1 MPLBACKEND=Agg
 export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 OMP_NUM_THREADS=1
-cd -- "$REPO_ROOT"
-exec "$PYTHON_BIN" -s scripts/hatch_review_runner.py "$@"
+exec "$PYTHON_BIN" -s "$REPO_ROOT/scripts/hatch_review_runner.py" "$@"
