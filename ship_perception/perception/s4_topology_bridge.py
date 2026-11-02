@@ -83,6 +83,23 @@ def topology_components(vertices, relations):
     return sorted(groups, key=lambda g: sorted(g))
 
 
+def unassociated_internal_pairs(members, relations):
+    """A higher height slice cannot establish missing opening ownership.
+
+    Separate low lobes may share independently observed opening boundaries
+    without touching at their own level. That differs from two regions with
+    no common opening evidence that only meet through a higher surface.
+    Keep the latter combination searchable, but do not confirm one opening.
+    """
+    return sorted(
+        sorted(row["node_ids"])
+        for row in relations
+        if row["relation_decision"] == "AMBIGUOUS"
+        and set(row["node_ids"]).issubset(members)
+        and not row.get("shared_family_evidence")
+    )
+
+
 def member_cell_assignment(xy, member_masks, region_bounds, nomination_bounds):
     """Map a nomination to an already compiled component using observed cells.
 
@@ -717,7 +734,8 @@ class S4TopologyBridge:
             groups.remove(right)
             ambiguous_members.update(left)
         for members in groups:
-            compound = bool(members.intersection(ambiguous_members))
+            unresolved_pairs = unassociated_internal_pairs(members, self.relations)
+            compound = bool(members.intersection(ambiguous_members) or unresolved_pairs)
             attached = sorted({i for n in members for i in by_id[n]["side_family_ids"]})
             families = [f for f in self.families if f["family_id"] in attached]
             longitudinal = [f for f in families if f["axis_role"] == "LONGITUDINAL"]
@@ -794,6 +812,11 @@ class S4TopologyBridge:
                 detail["relationship_decision"] = (
                     "AMBIGUOUS_SEARCH_GROUP_NOT_A_MERGED_HATCH"
                 )
+                if unresolved_pairs:
+                    detail["unassociated_internal_pairs"] = unresolved_pairs
+                    detail["identity_guard"] = (
+                        "TRANSITIVE_HEIGHT_CONTINUITY_DOES_NOT_PROVE_COMMON_OPENING"
+                    )
             support = TopologySupport(
                 "S4_OPENING_TOPOLOGY", "SUPPORTING", tuple(attached), source, detail
             )
@@ -859,6 +882,13 @@ class S4TopologyBridge:
                 ).hexdigest(),
                 current_independent_enclosure_scope=independent_scope,
             )
+            if unresolved_pairs:
+                region.identity_evidence["unassociated_internal_pairs"] = (
+                    unresolved_pairs
+                )
+                region.identity_evidence["identity_guard"] = (
+                    "TRANSITIVE_HEIGHT_CONTINUITY_DOES_NOT_PROVE_COMMON_OPENING"
+                )
             # Associate a recall nomination only through its observed interior
             # cells in this proven component. No nomination bbox expands it.
             for prior in existing:

@@ -9,12 +9,124 @@ from ship_perception.perception.s4_topology_bridge import (
     member_cell_assignment,
     topology_relation,
     topology_components,
+    unassociated_internal_pairs,
 )
+from ship_perception.perception.review_geometry import ReviewGeometryEligibility
 from ship_perception.r1_static.height_grid import R1HeightGrid
 from ship_perception.r1_static.run import resolve_config
 
 
 class S4TopologyContracts(unittest.TestCase):
+    def transitive_height_bridge(self, shared_low_boundary):
+        config, _ = resolve_config()
+        x, y = np.meshgrid(np.arange(10.0), np.arange(5.0))
+        bridge = S4TopologyBridge.__new__(S4TopologyBridge)
+        bridge.config, bridge.vessel_id = config, "V"
+        bridge.axes = list(np.eye(2))
+        bridge.axis = dict(status="AXIS_ESTIMATED", axis_uncertainty_deg=1.0)
+        bridge.grid = SimpleNamespace(cell_m=1.0, x0=-0.5, y0=-0.5)
+        bridge.xy = np.stack((x, y), axis=-1)
+        bridge.projected = bridge.xy
+        bridge.cache = SimpleNamespace(vessel=SimpleNamespace(axes=np.eye(2)))
+        masks = (
+            [y < 2, y > 2, np.ones_like(x, dtype=bool)]
+            if shared_low_boundary
+            else [x < 4, x > 5, np.ones_like(x, dtype=bool)]
+        )
+        bridge.nodes = {
+            name: SimpleNamespace(
+                mask=mask,
+                bbox_xy=tuple(np.r_[bridge.xy[mask].min(0), bridge.xy[mask].max(0)]),
+            )
+            for name, mask in zip("ABC", masks)
+        }
+        bridge.families = [
+            dict(
+                family_id="F" + str(i),
+                direction_axis=0,
+                axis_role="LONGITUDINAL",
+                rho=rho,
+                rho_uncertainty=0.1,
+                support_span=[0.0, 9.0],
+            )
+            for i, rho in enumerate((0.0, 4.0))
+        ]
+        bridge.families.extend(
+            dict(
+                family_id="T" + str(i),
+                direction_axis=1,
+                axis_role="TRANSVERSE",
+                rho=rho,
+                rho_uncertainty=0.1,
+                support_span=[0.0, 4.0],
+                observed_intervals=[[0.0, 4.0]],
+                evidence_types=["OBSERVED_3D_FACE"],
+            )
+            for i, rho in enumerate((0.0, 9.0))
+        )
+        assignments = (
+            [["F0", "F1", "T0", "T1"]] * 3
+            if shared_low_boundary
+            else [["F0", "T0"], ["F1", "T1"], ["F0", "F1", "T0", "T1"]]
+        )
+        bridge.vertices = [
+            dict(node_id=name, vessel_id="V", side_family_ids=families)
+            for name, families in zip("ABC", assignments)
+        ]
+        a, b, c = bridge.vertices
+        bridge.relations = [
+            topology_relation(
+                a, b, shared_low_boundary, dict(observed_continuity=False), []
+            ),
+            topology_relation(a, c, ["F0", "F1"], dict(observed_continuity=True), []),
+            topology_relation(b, c, ["F0", "F1"], dict(observed_continuity=True), []),
+        ]
+        # An enclosure nomination alone does not disambiguate two unassociated
+        # members already connected by a higher height component.
+        bridge.legacy_nominations = [
+            dict(
+                bounds_axial=[0.0, 0.0, 9.0, 4.0],
+                measured_strong_side_count=3,
+                opening_evidence=dict(status="OPENING_LOWER"),
+            )
+        ]
+        return bridge
+
+    def test_transitive_height_connection_without_common_opening_stays_compound(self):
+        bridge = self.transitive_height_bridge([])
+        regions = bridge.compile_regions([])
+        self.assertEqual(len(regions), 1)
+        region = regions[0]
+        self.assertEqual(region.identity_role, "COMPOUND_SEARCH_GROUP")
+        self.assertEqual(
+            region.identity_evidence["unassociated_internal_pairs"], [["A", "B"]]
+        )
+        self.assertFalse(ReviewGeometryEligibility.assess(region)["eligible"])
+        self.assertEqual(bridge.relations[0]["relation_decision"], "AMBIGUOUS")
+        self.assertEqual(
+            sum(r["relation_decision"] == "CONNECT" for r in bridge.relations), 2
+        )
+
+    def test_disconnected_height_lobes_with_common_opening_evidence_stay_confirmed(
+        self,
+    ):
+        bridge = self.transitive_height_bridge(["T0", "T1"])
+        region = bridge.compile_regions([])[0]
+        self.assertEqual(region.identity_role, "CONFIRMED_CONNECTED_OPENING")
+        self.assertNotIn("unassociated_internal_pairs", region.identity_evidence)
+        self.assertTrue(ReviewGeometryEligibility.assess(region)["eligible"])
+
+    def test_unassociated_pair_guard_is_order_independent_and_ignores_other_groups(
+        self,
+    ):
+        bridge = self.transitive_height_bridge([])
+        expected = [["A", "B"]]
+        for rows in (bridge.relations, list(reversed(bridge.relations))):
+            self.assertEqual(
+                unassociated_internal_pairs({"A", "B", "C"}, rows), expected
+            )
+            self.assertEqual(unassociated_internal_pairs({"A", "C"}, rows), [])
+
     def test_incomplete_continuity_keeps_a_compound_search_identity(self):
         config, _ = resolve_config()
         x, y = np.meshgrid(np.arange(10.0), np.arange(5.0))
