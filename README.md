@@ -22,6 +22,15 @@
 
 ## 两个现场入口
 
+人工审查批量入口（显式 review-first，保留算法默认 bounded）：
+
+```bash
+bash scripts/run_ship_hatch_review.sh --pcd /data/map.pcd --output-dir /data/review
+bash scripts/run_ship_hatch_review.sh --manifest /data/review_batch.json --output-dir /data/review
+```
+
+同一入口也支持 `--pcd-dir /data/pcd`。结果含带 XYZ 的原始标定图、`index.html` 审查索引及原云/派生裁剪独立矩阵；未决、缺测与超时分别保留。依赖准备、清单格式和靠岸船 ROI 见 [Ubuntu 一键审查](docs/02_ROS2现场一键识别运行说明.md)。
+
 首次安装依赖见 [ROS2 现场说明](docs/02_ROS2现场一键识别运行说明.md)。在仓库根目录运行：
 
 ```bash
