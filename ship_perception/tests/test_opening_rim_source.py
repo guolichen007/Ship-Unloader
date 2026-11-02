@@ -7,6 +7,7 @@ import numpy as np
 from ship_perception.perception.measurement import VesselMeasurementContext
 from ship_perception.perception.review_height import ReviewCornerHeight
 from ship_perception.perception.opening_rim_source import (
+    OpeningRimSource,
     member_mask,
     support_fingerprint,
 )
@@ -16,6 +17,39 @@ from ship_perception.r1_static.run import resolve_config
 class OpeningRimSourceContracts(unittest.TestCase):
     def setUp(self):
         self.config, _ = resolve_config()
+
+    def test_contact_provenance_keeps_independent_points_on_both_surfaces(self):
+        first = np.c_[np.arange(8) * 0.2, np.zeros(8), np.full(8, 2.0)]
+        second = np.repeat(first, 3, axis=0)
+        second[:, 0] += np.tile([-0.002, 0.0, 0.002], 8)
+        second[:, 1] = 0.02
+        points = np.vstack((first, second))
+        local = SimpleNamespace(
+            vessel=SimpleNamespace(vessel_id="V", point_indexes=np.arange(len(points)))
+        )
+        measurement = SimpleNamespace(
+            raw_uvz=points, raw_point_indexes=np.arange(len(points)), local=local
+        )
+        provider = OpeningRimSource(measurement, self.config, None, None)
+        a = dict(
+            normal_uvz=[0.0, 0.0, 1.0],
+            offset_m=-2.0,
+            source_point_indexes=list(range(len(first))),
+        )
+        b = dict(a, source_point_indexes=list(range(len(first), len(points))))
+        contact = provider._contact(dict(plane=a), dict(plane=b))
+        self.assertIsNotNone(contact)
+        minimum = self.config["boundary"]["line_min_points"]
+        for key in ("first_point_indexes", "second_point_indexes"):
+            self.assertEqual(len(set(contact[key])), minimum)
+        qa = points[contact["first_point_indexes"]]
+        qb = points[contact["second_point_indexes"]]
+        self.assertTrue(
+            (
+                np.linalg.norm(qa - qb, axis=1)
+                <= self.config["boundary"]["max_support_gap_m"]
+            ).all()
+        )
 
     def fixture(self, ridge=False, quay=False, neighbour=False, visible_length=None):
         along = np.linspace(0, 12, 121)

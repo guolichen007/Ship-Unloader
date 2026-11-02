@@ -398,7 +398,12 @@ class OpeningRimSource:
         minimum = self.config["boundary"]["line_min_points"]
         if int(live.sum()) < minimum or len(set(nearest[live].tolist())) < minimum:
             return None
-        ids = np.flatnonzero(live)[:minimum]
+        # Preserve the independent contacts that qualified this link. Dense
+        # returns can share one nearest point, so the first live pairs need
+        # not contain the required number of distinct witnesses on both sides.
+        live_ids = np.flatnonzero(live)
+        _, first = np.unique(nearest[live_ids], return_index=True)
+        ids = live_ids[np.sort(first)[:minimum]]
         return dict(
             first_point_indexes=np.asarray(a["source_point_indexes"])[
                 nearest[ids]
