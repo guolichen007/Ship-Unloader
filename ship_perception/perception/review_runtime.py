@@ -12,12 +12,23 @@ import time
 import uuid
 
 
-def _atomic(path, value):
+def _json_bytes(value):
+    return json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8")
+
+
+def _atomic(path, value, review_objects_json=None):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(value, f, ensure_ascii=False, allow_nan=False)
+    encoded = _json_bytes(value)
+    with tmp.open("wb") as f:
+        if review_objects_json is None:
+            f.write(encoded)
+        else:
+            f.write(encoded[:-1])
+            f.write(b', "review_objects": ')
+            f.write(review_objects_json)
+            f.write(b"}")
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
@@ -100,6 +111,7 @@ class ReviewRunMonitor:
         self.process = None
         self.stop = None
         self.trace = None
+        self._review_objects_json = None
 
     def __enter__(self):
         self.checkpoint()
@@ -123,9 +135,11 @@ class ReviewRunMonitor:
         if cache_state is not None:
             self.state["cache_state"] = copy.deepcopy(cache_state)
         if review_objects is not None:
-            self.state["review_objects"] = copy.deepcopy(review_objects)
+            # A heartbeat updates counters, not the last published review objects.
+            # Serialize at publication so later mutations cannot change that snapshot.
+            self._review_objects_json = _json_bytes(review_objects)
         self.state["elapsed_s"] = time.monotonic() - self.started
-        _atomic(self.folder / "checkpoint.json", self.state)
+        _atomic(self.folder / "checkpoint.json", self.state, self._review_objects_json)
 
     def __exit__(self, kind, value, traceback):
         self.state["status"] = "FAILED" if kind else "COMPLETED"
@@ -172,5 +186,5 @@ class MeasurementTasks:
     def flush(self, cache_state=None):
         if self.monitor:
             self.monitor.checkpoint(
-                stage="BOUNDARY_MEASUREMENT", tasks=self.rows, cache_state=cache_state
+                tasks=self.rows, cache_state=cache_state
             )
