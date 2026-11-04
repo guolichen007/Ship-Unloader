@@ -421,8 +421,7 @@ def run_perception(
                         )
                     )
             hatches = strict_hatches
-            checkpoint("RECTANGLE_REVIEW_READY", review_objects=hatches,
-                       unresolved_rectangle_candidates=unresolved_rectangles)
+            checkpoint("RECTANGLE_REVIEW_READY", review_objects=hatches)
         with stage("CORNER_HEIGHT_OUTPUT"):
             for result in hatches:
                 height_estimator = ReviewCornerHeight(measurement, config)
