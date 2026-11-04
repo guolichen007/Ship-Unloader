@@ -255,6 +255,24 @@ class NativeObserver:
             for p in proposals
         )
 
+    def native_result(self, result, *args, **kwargs):
+        self.bundle["native_geometry"] = frozen(result["geometry_only"])
+        selection = result["berth_selection"]
+        if selection["active_vessel_id"] is None:
+            self.bundle["capture_terminal"] = frozen(
+                dict(
+                    status="NO_ACTIVE_VESSEL",
+                    ir_status="IR_NOT_COMPILED_NO_ACTIVE_VESSEL",
+                    selector_status="SELECTOR_NOT_RUN",
+                    berth_selection=selection,
+                    scene=result["scene"],
+                    native_review_count=result["geometry_only"]["review_candidate_count"],
+                    input_sha256=self.bundle["input_sha256"],
+                    source_identity=self.bundle["source_identity"],
+                    config_sha256=result["config_sha256"],
+                )
+            )
+
     def s4_nodes(self, bridge, phase):
         rows = []
         for ident, node in sorted(bridge.nodes.items()):
@@ -338,9 +356,7 @@ class NativeObserver:
             self.watch(
                 review,
                 "run_perception",
-                after=lambda r, *a, **k: self.bundle.update(
-                    native_geometry=frozen(r["geometry_only"])
-                ),
+                after=self.native_result,
             )
         )
         return stack
@@ -728,6 +744,11 @@ def main():
         sys.argv = old
         atomic(args.output_dir / "recorded_observation_bundle.json", observer.bundle)
     (args.output_dir / "native.exit_code").write_text(str(code), encoding="utf-8")
+    terminal = observer.bundle.get("capture_terminal")
+    if code == 0 and terminal is not None and not observer.bundle["errors"]:
+        atomic(args.output_dir / "ir_gate.json", terminal)
+        print(json.dumps(terminal, ensure_ascii=False))
+        return 0
     gate = compile_bundle(observer.bundle, args.output_dir)
     print(json.dumps(gate))
     return 0 if all(v != "FAIL" for v in gate.values()) else 2
