@@ -113,3 +113,38 @@ def by_local_interior(bundle, vessel, raw_uv):
         )
         by_members[frozenset(map(tuple, membership))].append((evidence, independent))
     return by_members
+
+
+def observed_partial_sides(hatch):
+    """Keep measured, assigned source intervals without constructing a rectangle."""
+    sides = hatch.get("raw_evidence_geometry", hatch)["sides"]
+    result = {}
+    for side, observation in sides.items():
+        witnesses = []
+        for mode in observation.get("candidate_modes", []):
+            if (
+                mode["source"] != "MEASURED_RAW"
+                or mode.get("opening_assignment_state") != "ASSIGNED_CURRENT_OPENING"
+                or not mode.get("independent_opening_role_gain")
+                or mode.get("ownership_rejected")
+            ):
+                continue
+            indexes = set(mode.get("source_point_indexes", []))
+            profiles = mode.get("raw_profile_sections", [])
+            for section in mode["opening_assignment"].get("sections", []):
+                if profiles and section.get("supported"):
+                    trace = profiles[section["section_index"]]["source_pair_provenance"]
+                    indexes.update(trace["source_pair_point_indexes"])
+            if indexes:
+                witnesses.append(
+                    dict(mode_id=mode["mode_id"], point_index_sha256=fingerprint(indexes),
+                         original_index_count=len(indexes), measured_intervals=mode.get("measured_intervals", []),
+                         independent_sections=mode.get("independent_raw_sections"),
+                         signed_assignment=mode["opening_assignment_state"],
+                         source_observation_ids=mode.get("raw_support_ids", []))
+                )
+        result[side] = dict(
+            status="OBSERVED_ASSIGNED_RAW_SIDE" if witnesses else "UNKNOWN_UNOBSERVED",
+            witnesses=witnesses,
+        )
+    return result

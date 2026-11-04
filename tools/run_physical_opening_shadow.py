@@ -15,7 +15,7 @@ import numpy as np
 from scipy import ndimage
 
 from run_opening_ir_shadow import atomic, cell_intersections, cell_overlap
-from shadow_terminal_evidence import by_local_interior
+from shadow_terminal_evidence import by_local_interior, observed_partial_sides
 
 
 BOUND = "BOUND_CURRENT_OPENING"
@@ -841,6 +841,51 @@ def select(review):
     return review
 
 
+def retain_review_partials(review, snapshot, bundle):
+    """Expose observed fragments without changing the selection graph or XY."""
+    scopes = {s["observation_id"]: s for s in review["scopes"]}
+    represented = set(review["selected_structure_scope_ids"])
+    represented.update(r["scope_id"] for r in review["substructure_relations"])
+    for record in review["records"]:
+        if record["selected"]:
+            represented.update(record["structure_scope_ids"])
+    represented_regions = {scopes[i].get("region_id") for i in represented}
+    chosen = {r["hypothesis_id"] for r in review["records"] if r["selected"]}
+    for h in snapshot["hypotheses"]:
+        if h["hypothesis_id"] in chosen:
+            represented_regions.update(h["source_region_ids"])
+    geometry = bundle.get("native_geometry", {})
+    regions = {r["region_id"]: r for r in geometry.get("opening_regions", [])}
+    objects = list(geometry.get("hatches", [])) + [
+        row["pre_solve_candidate"] for row in geometry.get("unresolved_rectangle_candidates", [])
+    ]
+    partials = []
+    for hatch in objects:
+        identity = hatch["opening_identity"]
+        region = regions.get(identity)
+        if (
+            region is None or identity in represented_regions
+            or region["vessel_id"] != bundle["vessel_id"]
+            or not region["identity_evidence"].get("member_support_cells_rc")
+        ):
+            continue
+        sides = observed_partial_sides(hatch)
+        if not any(side["witnesses"] for side in sides.values()):
+            continue
+        partials.append(
+            dict(
+                formal_source_opening_id=identity, vessel_id=region["vessel_id"],
+                status="REVIEW_ONLY_PARTIAL", physical_identity_verified=False,
+                visibility="UNKNOWN_WITHOUT_RAY_PROVENANCE", sides=sides,
+                original_member_support=region["identity_evidence"]["member_support_cells_rc"],
+                original_member_grid=region["identity_evidence"].get("member_support_grid"),
+                corner_z_m=[None] * 4, steel_certified=False,
+            )
+        )
+    review["review_only_partials"] = partials
+    return review
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("snapshot_dir", type=Path)
@@ -868,7 +913,9 @@ def main():
             raise ValueError("SHADOW_RAW_INPUT_IDENTITY_MISMATCH")
         raw_xyz = frame.xyz
     review = audit(snapshot, bundle, raw_xyz)
-    atomic(args.output, select(review) if args.select else review)
+    if args.select:
+        review = retain_review_partials(select(review), snapshot, bundle)
+    atomic(args.output, review)
 
 
 if __name__ == "__main__":

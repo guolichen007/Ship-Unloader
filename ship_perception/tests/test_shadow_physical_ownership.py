@@ -3,7 +3,9 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
-from run_physical_opening_shadow import select, structure_adjacency, weighted_membership
+from run_physical_opening_shadow import (
+    retain_review_partials, select, structure_adjacency, weighted_membership,
+)
 
 
 class ShadowPhysicalOwnership(unittest.TestCase):
@@ -60,3 +62,29 @@ class ShadowPhysicalOwnership(unittest.TestCase):
                 self.assertEqual(len(links), 4)
                 self.assertAlmostEqual(sum(r["source_fraction"] for r in links), 1.)
                 self.assertAlmostEqual(sum(r["target_fraction"] for r in links), 1.)
+
+    def test_partial_raw_evidence_never_promotes_identity_or_unknown_sides(self):
+        mode = dict(
+            mode_id="M", source="MEASURED_RAW", source_point_indexes=[5, 6],
+            independent_opening_role_gain=True, opening_assignment={},
+            opening_assignment_state="ASSIGNED_CURRENT_OPENING",
+        )
+        candidate = dict(opening_identity="R", sides={
+            "U0": {"candidate_modes": [mode]}, "U1": {"candidate_modes": []},
+        })
+        region = dict(region_id="R", vessel_id="V",
+                      identity_evidence={"member_support_cells_rc": [[0, 1]]})
+        bundle = dict(vessel_id="V", native_geometry=dict(
+            hatches=[candidate], opening_regions=[region],
+        ))
+        review = dict(scopes=[], selected_structure_scope_ids=[], records=[], substructure_relations=[])
+        output = retain_review_partials(review, {"hypotheses": []}, bundle)
+        partial, = output["review_only_partials"]
+        self.assertEqual(partial["status"], "REVIEW_ONLY_PARTIAL")
+        self.assertFalse(partial["physical_identity_verified"])
+        self.assertEqual(partial["sides"]["U1"]["status"], "UNKNOWN_UNOBSERVED")
+        self.assertEqual(partial["corner_z_m"], [None] * 4)
+        mode["opening_assignment_state"] = "UNASSIGNED_CURRENT_OPENING"
+        self.assertEqual(
+            retain_review_partials(review, {"hypotheses": []}, bundle)["review_only_partials"], []
+        )
