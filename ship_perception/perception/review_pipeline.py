@@ -22,7 +22,7 @@ from .berth import load_berth_reference, select_berth_vessel
 from .operator_selection import select_operator_vessel
 from .selected_context import SelectedVesselRawContext
 from .local_evidence import VesselLocalEvidence
-from .measurement import VesselMeasurementContext
+from .measurement import VesselMeasurementContext, replicated_corner_view
 from .legacy_expert import (
     LegacyProposalExpert,
     verify_legacy_b2_core,
@@ -423,14 +423,27 @@ def run_perception(
             hatches = strict_hatches
             checkpoint("RECTANGLE_REVIEW_READY", review_objects=hatches)
         with stage("CORNER_HEIGHT_OUTPUT"):
+            replication = replicated_corner_view(measurement) if hatches else None
             for result in hatches:
-                height_estimator = ReviewCornerHeight(measurement, config)
-                result["corner_heights"] = height_estimator.measure(
-                    result,
-                    getattr(cache, "review_rim_plane_sources", {}).get(
-                        result["opening_identity"], ()
-                    ),
+                plane_sources = getattr(cache, "review_rim_plane_sources", {}).get(
+                    result["opening_identity"], ()
                 )
+                use_view = replication is not None and not plane_sources
+                height_context = replication[0] if use_view else measurement
+                height_estimator = ReviewCornerHeight(height_context, config)
+                result["corner_heights"] = height_estimator.measure(result, plane_sources)
+                if use_view:
+                    _, groups, replication_audit = replication
+                    for corner in result["corner_heights"]:
+                        sources = corner["source_point_indexes"]
+                        if sources:
+                            rows = np.isin(groups[:, 0], sources, assume_unique=True)
+                            corner["exact_duplicate_raw_source_groups"] = groups[rows].tolist()
+                    height_estimator.audit["exact_replication"] = replication_audit
+                elif replication is not None:
+                    height_estimator.audit["exact_replication"] = dict(
+                        replication[2], status="UPSTREAM_RIM_SOURCE_CONTRACT_RETAINED"
+                    )
                 result["z_measurement_audit"] = height_estimator.audit
                 result.update(
                     input_frame=frame.frame_id,

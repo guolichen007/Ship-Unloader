@@ -2,8 +2,11 @@
 
 from .precision_diagnostics import stage as precision_stage, side_completed
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from collections import OrderedDict
+import copy
+import hashlib
+from types import SimpleNamespace
 import numpy as np
 from ship_perception.r1_static.raw_surface_normals import LocalSurfaceNormals
 
@@ -48,6 +51,61 @@ def review_normal_cache(measurement, config, context=False):
         normals.input_to_canonical = np.empty(len(points), dtype=np.int64)
         normals.input_to_canonical[normals.input_point_indexes] = np.arange(len(points))
     return normals, np.asarray(source)
+
+
+def replicated_corner_view(measurement):
+    """Recognize uniform exact row replication within the current vessel context."""
+    xyz = measurement.raw_uvz
+    original = measurement.raw_point_indexes
+    if (
+        len(xyz) < 2
+        or not np.array_equal(xyz[0], xyz[1])
+        or not np.array_equal(xyz[-1], xyz[-2])
+    ):
+        return None
+    primary = getattr(measurement.local, "primary_cache", measurement.local)
+    owned = np.isin(original, primary.vessel.point_indexes, assume_unique=True)
+    adjacent = np.all(xyz[1:] == xyz[:-1], axis=1) & (owned[1:] == owned[:-1])
+    run_lengths = np.diff(np.r_[0, np.flatnonzero(~adjacent) + 1, len(xyz)])
+    factor = int(np.gcd.reduce(run_lengths))
+    if factor == 1:
+        return None
+
+    # Every row in each group is an exact repeat with the same ownership.
+    # Preserve any original non-uniform multiplicity between distinct runs.
+    groups = original.reshape(-1, factor)
+    indexes = groups[:, 0].copy()
+    uvz = xyz[::factor].copy()
+    uvz.setflags(write=False)
+    indexes.setflags(write=False)
+    local = copy.copy(measurement.local)
+    primary_view = copy.copy(primary)
+    primary_mask = owned[::factor]
+    primary_view.xyz = uvz[primary_mask]
+    primary_indexes = indexes[primary_mask]
+    primary_view.xyz.setflags(write=False)
+    primary_indexes.setflags(write=False)
+    primary_view.vessel = replace(
+        primary.vessel, point_indexes=primary_indexes,
+        point_index_sha256=hashlib.sha256(primary_indexes.astype("<i8", copy=False).tobytes()).hexdigest(),
+    )
+    local.primary_cache = primary_view
+    view = SimpleNamespace(
+        raw_uvz=uvz, raw_point_indexes=indexes, local=local,
+        spatial=RawSpatialIndex(uvz, measurement.counters),
+        counters=measurement.counters, budget=getattr(measurement, "budget", None),
+    )
+    audit = dict(
+        source_kind="UNIFORM_EXACT_CONSECUTIVE_ROW_REPLICATION",
+        replica_factor=factor,
+        original_row_count=len(original),
+        computation_row_count=len(indexes),
+        original_groups_sha256=hashlib.sha256(
+            groups.astype("<i8", copy=False).tobytes()
+        ).hexdigest(),
+        identity_scope="ORIGINAL_FINITE_INPUT_FRAME_INDEXES",
+    )
+    return view, groups, audit
 
 
 class RawSpatialIndex:
