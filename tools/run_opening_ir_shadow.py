@@ -149,14 +149,13 @@ def restored_inventory(observations):
     return records
 
 
-def cell_overlap(cells, source_grid, target_grid):
+def cell_intersections(cells, source_grid, target_grid):
     """Exact rectangle intersection on two existing B1 raster lattices.
 
     A different grid origin is not a different Vessel frame. Native cell IDs
     remain untouched. Fractional overlap is relation evidence only, never a
     relabelled point, a new cell observation, or a Frame rotation/translation.
     """
-    weights = {}
     size, target = source_grid["cell_m"], target_grid["cell_m"]
     for row, col in cells:
         low = np.asarray(
@@ -178,7 +177,14 @@ def cell_overlap(cells, source_grid, target_grid):
                     0.0, np.minimum(high, corner + target) - np.maximum(low, corner)
                 ).prod()
                 if area > 0:
-                    weights[(r, c)] = weights.get((r, c), 0.0) + float(area / target**2)
+                    yield (row, col), (r, c), float(area)
+
+
+def cell_overlap(cells, source_grid, target_grid):
+    weights = {}
+    size, target = source_grid["cell_m"], target_grid["cell_m"]
+    for _, rc, area in cell_intersections(cells, source_grid, target_grid):
+        weights[rc] = weights.get(rc, 0.0) + area / target**2
     expected = len(cells) * (size / target) ** 2
     if not math.isclose(sum(weights.values()), expected, rel_tol=1e-10, abs_tol=1e-10):
         raise ValueError("B1_LATTICE_INTERSECTION_AREA_NOT_CONSERVED")
