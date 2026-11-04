@@ -125,6 +125,12 @@ def _render_scene(payload, frame, path, *, fusion=False, grid=None):
     y_low, y_high = ax.get_ylim()
     ax.set_ylim(y_low - 0.1 * (y_high - y_low), y_high + 0.04 * (y_high - y_low))
     result = payload["intensity_fusion" if fusion else "geometry_only"]
+    for unresolved in result.get("unresolved_rectangle_candidates", []):
+        footprint = np.asarray(unresolved["pre_solve_candidate"]["boundary_xy"])
+        ax.plot(*np.vstack((footprint, footprint[0])).T, color="#f1a6ff",
+                lw=1.3, ls=":")
+        ax.text(*footprint.mean(axis=0), "矩形未决", color="#f1a6ff",
+                fontsize=9, ha="center")
     for hatch in result["hatches"]:
         poly = np.asarray(hatch["boundary_xy"])
         coverage = np.asarray(hatch["review_coverage_boundary_xy"])

@@ -7,10 +7,47 @@ geometry, size prior, corner snapping or rectangle enumeration capability.
 import copy
 import math
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import linprog, minimize
 
 SIDE_LAYOUT = (("U0", 0, -1), ("U1", 0, 1), ("V0", 1, -1), ("V1", 1, 1))
 INCIDENT = {"U0": (0, 3), "U1": (1, 2), "V0": (0, 1), "V1": (3, 2)}
+
+
+class RectangleInfeasible(ValueError):
+    def __init__(self, code, region_id, audit=None):
+        super().__init__(code + ":" + region_id)
+        self.audit = audit or {}
+
+
+def fixed_angle_feasibility(initial, values, jacobian, sources, scale):
+    """The fixed-angle guards are affine in center and positive side sizes."""
+    coordinates = np.r_[initial[1:3], np.exp(initial[3:5])]
+    linear = jacobian[:, 1:].copy() / scale
+    linear[:, 2:] /= coordinates[2:]
+    offset = values / scale - linear @ coordinates
+    # Preserve the final solver's existing numeric tolerance.
+    rhs = offset + 1e-8
+    bounds = [(None, None)] * 2 + [(math.exp(-30), math.exp(30))] * 2
+
+    def solve(rows):
+        return linprog(
+            np.zeros(4), A_ub=-linear[rows], b_ub=rhs[rows],
+            bounds=bounds, method="highs",
+        )
+
+    rows = list(range(len(sources)))
+    result = solve(rows)
+    audit = dict(
+        angle_rad=float(initial[0]), status=int(result.status), message=str(result.message),
+        constraints=sources, initial_signed_margins_m=values.tolist(),
+    )
+    if result.status == 2:
+        for i in range(len(sources)):
+            trial = [row for row in rows if row != i]
+            if trial and solve(trial).status == 2:
+                rows = trial
+        audit["infeasible_constraint_subset"] = rows
+    return audit
 
 
 def rectangle_audit(points):
@@ -430,7 +467,7 @@ class ConstrainedRectangleSolver:
                 coordinates[i] = float(np.clip(coordinates[i], lower, upper))
         u0, u1, v0, v1 = coordinates
         if u1 <= u0 or v1 <= v0:
-            raise ValueError("RECTANGLE_SIDE_ORDER_CONFLICT:" + region.region_id)
+            raise RectangleInfeasible("RECTANGLE_SIDE_ORDER_CONFLICT", region.region_id)
         initial = np.array(
             [
                 theta,
@@ -558,6 +595,36 @@ class ConstrainedRectangleSolver:
         def inequalities(x):
             return constraint_values_and_jacobian(x)[0]
 
+        feasibility = None
+        if ownership and orientation["orientation_held"]:
+            sources = [
+                dict(kind="SEPARATOR", corner=index + 1, **value)
+                for value in ownership for index in range(4)
+            ]
+            eu, ev = model(initial)[:2]
+            for (name, axis, sign), group in zip(SIDE_LAYOUT, groups):
+                if group["independent_opening_role_gain"]:
+                    continue
+                prior = sides[name]
+                if float((eu, ev)[axis] @ prior["normal_uv"]) <= 0:
+                    sources.append(dict(kind="NORMAL_CONFLICT", side=name))
+                    continue
+                for kind in ("INWARD_COVERAGE", "OUTWARD_MOVE"):
+                    sources.extend(
+                        dict(kind=kind, side=name, station_uv=point.tolist(),
+                             side_sign=sign, normal_uv=prior["normal_uv"],
+                             source=prior.get("final_source"),
+                             raw_point_index_set="NOT_ATTACHED_TO_COVERAGE_STATION")
+                        for point in line_points(prior)
+                    )
+            values, jacobian = constraint_values_and_jacobian(initial)
+            feasibility = fixed_angle_feasibility(initial, values, jacobian, sources, scale)
+            if feasibility["status"] == 2:
+                raise RectangleInfeasible(
+                    "RECTANGLE_INFEASIBLE", region.region_id,
+                    dict(orientation=orientation, fixed_angle_feasibility=feasibility),
+                )
+
         result = minimize(
             objective,
             initial,
@@ -588,7 +655,16 @@ class ConstrainedRectangleSolver:
         numeric_tolerance = 1e-8 * scale
         feasible = bool(np.min(inequalities(result.x)) >= -numeric_tolerance)
         if not feasible or not audit["rectangularity_gate_pass"]:
-            raise ValueError("RECTANGLE_CONSTRAINED_SOLVER_INVALID:" + region.region_id)
+            raise RectangleInfeasible(
+                "RECTANGLE_CONSTRAINED_SOLVER_INVALID", region.region_id,
+                dict(
+                    orientation=orientation,
+                    fixed_angle_feasibility=feasibility,
+                    solver=dict(success=bool(result.success), status=int(result.status),
+                                message=str(result.message)),
+                    minimum_guard_margin_m=float(np.min(inequalities(result.x))),
+                ),
+            )
         output_sides = {}
         conflicts = []
         for i, ((name, axis, _), group) in enumerate(zip(SIDE_LAYOUT, groups)):
@@ -696,6 +772,7 @@ class ConstrainedRectangleSolver:
             ),
             separator_constraints=ownership,
             orientation_update=orientation,
+            fixed_angle_feasibility=feasibility,
             minimum_guard_margin_m=float(np.min(inequalities(result.x))),
         )
 

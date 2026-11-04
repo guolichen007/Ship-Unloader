@@ -31,7 +31,7 @@ from .legacy_expert import (
 from .experts import HeightBasinExpert
 from .opening_regions import build_regions
 from .review_geometry import ReviewGeometryAssembler, SIDES
-from .constrained_rectangle import constrain_review_geometry
+from .constrained_rectangle import RectangleInfeasible, constrain_review_geometry
 from .review_height import ReviewCornerHeight
 from .review_runtime import MeasurementTasks
 from .opening_boundary_assignment import OpeningBoundaryAssignment
@@ -156,6 +156,7 @@ def run_perception(
         for v in scene.vessels
     ]
     hatches = []
+    unresolved_rectangles = []
     regions = []
     legacy_batches = []
     failures = []
@@ -396,11 +397,32 @@ def run_perception(
                     )
                     checkpoint("BOUNDARY_MEASUREMENT", review_objects=hatches)
         with stage("CONSTRAINED_REVIEW_RECTANGLE"):
-            for index, region in enumerate(canonical):
-                hatches[index] = constrain_review_geometry(
-                    region, hatches[index], config, bridge
-                )
-            checkpoint("RECTANGLE_REVIEW_READY", review_objects=hatches)
+            strict_hatches = []
+            for region, candidate in zip(canonical, hatches):
+                try:
+                    strict_hatches.append(
+                        constrain_review_geometry(region, candidate, config, bridge)
+                    )
+                except RectangleInfeasible as error:
+                    failures.append(
+                        dict(stage="CONSTRAINED_REVIEW_RECTANGLE", code=str(error),
+                             opening_identity=region.region_id)
+                    )
+                    unresolved_rectangles.append(
+                        dict(
+                            opening_identity=region.region_id,
+                            status="UNRESOLVED_REVIEW_CANDIDATE",
+                            reason=str(error),
+                            audit=error.audit,
+                            pre_solve_candidate=candidate,
+                            steel_certified=False,
+                            certification_status="NOT_CERTIFIED",
+                            corner_z_m=[None] * 4,
+                        )
+                    )
+            hatches = strict_hatches
+            checkpoint("RECTANGLE_REVIEW_READY", review_objects=hatches,
+                       unresolved_rectangle_candidates=unresolved_rectangles)
         with stage("CORNER_HEIGHT_OUTPUT"):
             for result in hatches:
                 height_estimator = ReviewCornerHeight(measurement, config)
@@ -532,6 +554,7 @@ def run_perception(
             hatch_count_status="REVIEW_ONLY_NOT_TOTAL_HATCH_COUNT",
             hatches=hatches,
             review_objects=hatches,
+            unresolved_rectangle_candidates=unresolved_rectangles,
             opening_regions=regions,
             intensity_used=False,
         ),
