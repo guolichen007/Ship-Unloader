@@ -714,6 +714,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pcd", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--opening-topology-v2", action="store_true")
+    parser.add_argument("--opening-preview", action="store_true")
     args = parser.parse_args()
     from ship_perception.perception import cli
     from ship_perception.perception.pipeline import (
@@ -743,6 +745,10 @@ def main():
         "--output-dir",
         str(args.output_dir / "native"),
     ]
+    if args.opening_topology_v2:
+        sys.argv.append("--opening-topology-v2")
+    if args.opening_preview:
+        sys.argv.append("--opening-preview")
     try:
         with observer.hooks():
             code = cli.pcd_main()

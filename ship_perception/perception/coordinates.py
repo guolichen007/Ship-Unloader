@@ -143,7 +143,15 @@ def corner_coordinates(payload, source_result_sha256):
             ):
                 if key in hatch:
                     rows[-1][key] = copy.deepcopy(hatch[key])
+    opening_review = {}
+    if "review_opening_count" in result:
+        opening_review = {
+            key: copy.deepcopy(result[key])
+            for key in ("coarse_opening_reviews", "confirmed_opening_count",
+                        "review_opening_count", "strict_rectangle_count", "opening_review_level")
+        }
     return dict(
+        **opening_review,
         schema=(
             "ship_perception.hatch_corners.3"
             if v3

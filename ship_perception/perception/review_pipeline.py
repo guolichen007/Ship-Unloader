@@ -30,6 +30,7 @@ from .legacy_expert import (
 )
 from .experts import HeightBasinExpert
 from .opening_regions import build_regions
+from .opening_cells import opening_cells, coarse_review
 from .review_geometry import ReviewGeometryAssembler, SIDES
 from .constrained_rectangle import RectangleInfeasible, constrain_review_geometry
 from .review_height import ReviewCornerHeight
@@ -71,6 +72,8 @@ def run_perception(
     mode="bounded",
     operator_vessel_roi=None,
     monitor=None,
+    opening_topology_v2=False,
+    opening_preview=False,
 ):
     if mode not in ("bounded", "review-first"):
         raise ValueError("INVALID_REVIEW_MODE")
@@ -109,6 +112,12 @@ def run_perception(
         effective["operator_roi_sha256"] = hashlib.sha256(
             Path(operator_vessel_roi).read_bytes()
         ).hexdigest()
+    opening_topology_v2 = opening_topology_v2 or opening_preview
+    if opening_topology_v2:
+        effective["opening_topology_v2"] = True
+        effective["opening_review_level"] = (
+            "FAST_OPENING_REVIEW" if opening_preview else "PRECISION_RECTANGLE_REVIEW"
+        )
     config_hash = hashlib.sha256(
         json.dumps(effective, sort_keys=True).encode()
     ).hexdigest()
@@ -157,6 +166,7 @@ def run_perception(
     ]
     hatches = []
     unresolved_rectangles = []
+    selected_cells, cell_relations, coarse_boxes = [], [], []
     regions = []
     legacy_batches = []
     failures = []
@@ -242,9 +252,9 @@ def run_perception(
                     else current_side_constraints(cache, measurement, r, config)
                 )
                 for r in cache.opening_identities
-                if r.identity_role.startswith("CONFIRMED")
+                if not opening_preview and r.identity_role.startswith("CONFIRMED")
             }
-            compiled_constraints = compile_constraints(
+            compiled_constraints = {} if opening_preview else compile_constraints(
                 cache, cache.opening_identities, config, initial_constraints
             )
             for region in cache.opening_identities:
@@ -257,7 +267,19 @@ def run_perception(
                     canonical.append(region)
                     hatches.append(result)
             checkpoint("REVIEW_GEOMETRY_READY", review_objects=hatches)
-        if measurement is not None:
+        if opening_topology_v2:
+            with stage("OPENING_CELL_OWNERSHIP"):
+                selected_cells, cell_relations = opening_cells(
+                    canonical, bridge, getattr(cache, "local_enclosure_evidence", ()),
+                    config["geometry"]["coarse_voxel_m"],
+                )
+                precision_ids = {cell["primary_region_id"] for cell in selected_cells
+                                 if not opening_preview and not cell["expanded_review_only"]}
+                paired = [(region, hatch) for region, hatch in zip(canonical, hatches)
+                          if region.region_id in precision_ids]
+                canonical = [region for region, _ in paired]
+                hatches = [hatch for _, hatch in paired]
+        if measurement is not None and (canonical or not opening_topology_v2):
 
             def measurement_progress():
                 tasks.flush(dict(measurement.counters))
@@ -450,6 +472,26 @@ def run_perception(
                     transform_provenance="SELECTED_VESSEL_UV_TO_ORIGINAL_XYZ",
                     candidate_blockers=["STEEL_INNER_EDGE_UNVERIFIED"],
                 )
+        if opening_topology_v2:
+            strict_by_id = {h["opening_identity"]: h for h in hatches}
+            infeasible = {r["opening_identity"]: r for r in unresolved_rectangles}
+            for cell in selected_cells:
+                key = cell["primary_region_id"]
+                if key in strict_by_id:
+                    strict = strict_by_id[key]
+                    cell.update(strict_rectangle_state="FEASIBLE", geometry=dict(
+                        opening_identity=key, hatch_id=strict["hatch_id"],
+                        boundary_xy=strict["boundary_xy"],
+                        corners_xyz=[[x, y, height.get("z_m")] for (x, y), height in
+                                     zip(strict["boundary_xy"], strict["corner_heights"])],
+                        geometry_role=strict["geometry_role"], steel_certified=False,
+                    ))
+                    continue
+                state = "INFEASIBLE" if key in infeasible else "NOT_RUN"
+                review = coarse_review(cell, vessel.axes, measurement, state)
+                cell.update(strict_rectangle_state=state, geometry=review)
+                if review is not None:
+                    coarse_boxes.append(review)
         regions = [r.audit() for r in cache.opening_identities]
         for r in regions:
             for source, target in [
@@ -486,6 +528,20 @@ def run_perception(
                 for r in hatches
             ],
             aggregate_summary=dict(group_count=len(hatches), hatch_count=len(hatches)),
+        )
+    cell_output = {}
+    if opening_topology_v2:
+        by_opening = {row["opening_identity"]: row for row in hatches + coarse_boxes}
+        visible = [by_opening[c["primary_region_id"]] for c in selected_cells
+                   if c["primary_region_id"] in by_opening]
+        cell_output = dict(
+            opening_review_level=effective["opening_review_level"],
+            selected_opening_cells=selected_cells,
+            opening_cell_relations=cell_relations,
+            review_opening_count=len(visible),
+            confirmed_opening_count=sum(cell["identity_state"] == "SUPPORTED" for cell in selected_cells),
+            strict_rectangle_count=len(hatches),
+            coarse_opening_reviews=coarse_boxes,
         )
     identity = source_identity()
     intensity = admission_stats(
@@ -565,7 +621,8 @@ def run_perception(
             review_candidate_count=len(hatches),
             hatch_count_status="REVIEW_ONLY_NOT_TOTAL_HATCH_COUNT",
             hatches=hatches,
-            review_objects=hatches,
+            review_objects=visible if opening_topology_v2 else hatches,
+            **cell_output,
             unresolved_rectangle_candidates=unresolved_rectangles,
             opening_regions=regions,
             intensity_used=False,

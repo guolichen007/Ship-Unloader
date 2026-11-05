@@ -36,6 +36,10 @@ def parser(description):
                          help="Review first or bounded measurement; default changes only after Normal6 passes")
     command.add_argument("--operator-vessel-roi", type=Path,
                          help="Explicit operator vessel index scope; original input is retained")
+    command.add_argument("--opening-topology-v2", action="store_true",
+                         help="Use same-vessel opening cells in review-first mode")
+    command.add_argument("--opening-preview", action="store_true",
+                         help="Show opening cells without strict rectangle measurement")
     return command
 
 
@@ -51,7 +55,9 @@ def execute(frame, args, progress):
 
         options = dict(berth_reference=getattr(args, "berth_reference", None),
                        mode=getattr(args,"mode","bounded"),
-                       operator_vessel_roi=getattr(args,"operator_vessel_roi",None))
+                       operator_vessel_roi=getattr(args,"operator_vessel_roi",None),
+                       opening_topology_v2=getattr(args, "opening_topology_v2", False),
+                       opening_preview=getattr(args, "opening_preview", False))
     from .output import save_output
 
     from .review_runtime import ReviewRunMonitor
@@ -70,6 +76,10 @@ def execute(frame, args, progress):
         "HATCH_COUNT_STATUS=" + payload["geometry_only"]["hatch_count_status"],
         flush=True,
     )
+    geometry = payload["geometry_only"]
+    if "review_opening_count" in geometry:
+        print("OPENING_REVIEW_COUNT=" + str(geometry["review_opening_count"]), flush=True)
+        print("STRICT_RECTANGLE_COUNT=" + str(geometry["strict_rectangle_count"]), flush=True)
     print("INTENSITY_STATUS=" + payload["intensity_status"]["status"], flush=True)
     print(
         "UNRESOLVED_PROPOSAL_COUNT="

@@ -177,8 +177,11 @@ def final_support_sides(result, config):
 
 
 def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=None,
-                   mode="bounded", operator_vessel_roi=None, monitor=None):
+                   mode="bounded", operator_vessel_roi=None, monitor=None,
+                   opening_topology_v2=False, opening_preview=False):
     if mode == "bounded":
+        if opening_topology_v2 or opening_preview:
+            raise ValueError("OPENING_TOPOLOGY_REQUIRES_REVIEW_FIRST")
         if operator_vessel_roi is not None:
             raise ValueError("OPERATOR_ROI_REQUIRES_EXPLICIT_REVIEW_FIRST_UNTIL_GATE_PASS")
         return run_pre_v29_bounded(frame, progress, legacy_evidence, berth_reference)
@@ -186,7 +189,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
         raise ValueError("INVALID_REVIEW_MODE")
     from .review_pipeline import run_perception as run_review
     return run_review(frame, progress, legacy_evidence, berth_reference,
-                      mode, operator_vessel_roi, monitor)
+                      mode, operator_vessel_roi, monitor, opening_topology_v2, opening_preview)
 
 
 def run_pre_v29_bounded(frame, progress=None, legacy_evidence=True, berth_reference=None):

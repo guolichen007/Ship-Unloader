@@ -125,7 +125,15 @@ def _render_scene(payload, frame, path, *, fusion=False, grid=None):
     y_low, y_high = ax.get_ylim()
     ax.set_ylim(y_low - 0.1 * (y_high - y_low), y_high + 0.04 * (y_high - y_low))
     result = payload["intensity_fusion" if fusion else "geometry_only"]
+    coarse = result.get("coarse_opening_reviews", ())
+    coarse_ids = {row["opening_identity"] for row in coarse}
+    for hatch in coarse:
+        footprint = np.asarray(hatch["boundary_xy"])
+        ax.plot(*np.vstack((footprint, footprint[0])).T, color="#75ecff", lw=1.6, ls="--")
+        ax.text(*footprint.mean(axis=0), "开口待审", color="#75ecff", fontsize=9, ha="center")
     for unresolved in result.get("unresolved_rectangle_candidates", []):
+        if unresolved["opening_identity"] in coarse_ids:
+            continue
         footprint = np.asarray(unresolved["pre_solve_candidate"]["boundary_xy"])
         ax.plot(*np.vstack((footprint, footprint[0])).T, color="#f1a6ff",
                 lw=1.3, ls=":")
