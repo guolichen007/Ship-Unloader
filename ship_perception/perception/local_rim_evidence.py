@@ -656,7 +656,16 @@ class LocalRimEvidence:
 
 
 def shadow_rectangle_ab(
-    region, candidate, evidence, measurement, assembler, config, bridge
+    region,
+    candidate,
+    evidence,
+    measurement,
+    assembler,
+    config,
+    bridge,
+    review_anchor=None,
+    retained_member_mask=None,
+    opening_cell=None,
 ):
     """Only a measured Raw chain can challenge the unchanged legacy solve."""
     import copy
@@ -673,6 +682,7 @@ def shadow_rectangle_ab(
         reason="NO_UNIQUE_QUALIFIED_RAW_CHAIN",
         sides={},
         steel_certified=False,
+        legacy_solver_state="INFEASIBLE" if legacy_error else "FEASIBLE",
     )
     trial = copy.deepcopy(candidate)
     selected = {}
@@ -694,14 +704,38 @@ def shadow_rectangle_ab(
             entry["selected_reason"] = "EXISTING_SIDE_OWNERSHIP_OR_MODE_CONFLICT"
             continue
         selected[side] = mode
-    if selected and legacy is not None:
+    if selected:
         try:
             alternate = constrain_review_geometry(region, trial, config, bridge)
-            before = np.asarray(legacy["boundary_xy"])
+            anchor = legacy
+            if anchor is None:
+                anchor = review_anchor
+                if anchor is None and opening_cell is not None:
+                    from .opening_cells import coarse_review
+
+                    axes = getattr(
+                        measurement.local, "primary_cache", measurement.local
+                    ).vessel.axes
+                    anchor = coarse_review(
+                        opening_cell, axes, measurement, "INFEASIBLE"
+                    )
+                    if anchor is None:
+                        raise RectangleInfeasible(
+                            "EXISTING_CELL_REVIEW_ANCHOR_UNAVAILABLE", region.region_id
+                        )
+                if anchor is None:
+                    anchor = candidate
+            before = np.asarray(anchor["boundary_xy"])
             after = np.asarray(alternate["boundary_xy"])
             jump = float(np.max(np.linalg.norm(after - before, axis=1)))
             audit["max_corner_jump_m"] = jump
-            accepted = jump <= config["boundary"]["corner_join_m"]
+            audit["alternate_raw_conflict_count"] = alternate[
+                "rectangle_constraint_conflict_count"
+            ]
+            accepted = (
+                jump <= config["boundary"]["corner_join_m"]
+                and alternate["rectangle_constraint_conflict_count"] == 0
+            )
             primary = getattr(measurement.local, "primary_cache", measurement.local)
             axes = primary.vessel.axes
             old_uv = before @ axes.T
@@ -709,7 +743,11 @@ def shadow_rectangle_ab(
             ids = measurement.spatial.query_indexes(np.r_[old_uv.min(0), old_uv.max(0)])
             from .opening_rim_source import member_mask
 
-            members = member_mask(measurement.raw_uvz, region)
+            members = (
+                retained_member_mask
+                if retained_member_mask is not None
+                else member_mask(measurement.raw_uvz, region)
+            )
             owned = np.isin(
                 measurement.raw_point_indexes[ids], primary.vessel.point_indexes
             )
@@ -752,7 +790,18 @@ def shadow_rectangle_ab(
                     ),
                     :2,
                 ]
-                old_line = legacy["sides"][side]
+                if legacy is not None:
+                    old_line = legacy["sides"][side]
+                else:
+                    pair = {"U0": (0, 3), "U1": (1, 2), "V0": (0, 1), "V1": (3, 2)}[
+                        side
+                    ]
+                    p, q = old_uv[list(pair)]
+                    normal = np.array([q[1] - p[1], p[0] - q[0]])
+                    normal /= np.linalg.norm(normal)
+                    old_line = dict(
+                        normal_uv=normal.tolist(), final_rho=float(normal @ p)
+                    )
                 new_line = alternate["sides"][side]
                 old_residual = float(
                     np.median(
@@ -778,7 +827,11 @@ def shadow_rectangle_ab(
                     required_gain_m=mode["uncertainty_m"],
                     raw_index_digest=mode["raw_index_digest"],
                 )
-                accepted = accepted and gain > mode["uncertainty_m"]
+                accepted = (
+                    accepted
+                    and gain > mode["uncertainty_m"]
+                    and new_residual <= mode["uncertainty_m"]
+                )
             if accepted:
                 audit.update(
                     status="COMMITTED_GEOMETRY",
@@ -792,6 +845,8 @@ def shadow_rectangle_ab(
                         ),
                         selected_reason=audit["reason"],
                     )
+                for entry in evidence.values():
+                    entry["shadow_rectangle_ab"] = audit
                 alternate["local_rim_shadow_ab"] = audit
                 return alternate
             audit["reason"] = "INSUFFICIENT_RESIDUAL_GAIN_OR_CORNER_MEMBER_PROTECTION"
@@ -799,11 +854,102 @@ def shadow_rectangle_ab(
             audit["reason"] = str(error)
         for side in selected:
             evidence[side]["selected_reason"] = audit["reason"]
-    elif selected:
-        audit["reason"] = "LEGACY_INFEASIBLE_REVIEW_ANCHOR_RETAINED"
     for entry in evidence.values():
         entry["shadow_rectangle_ab"] = audit
     if legacy_error is not None:
         raise legacy_error
     legacy["local_rim_shadow_ab"] = audit
     return legacy
+
+
+def shadow_review_only_cell(
+    region, cell, evidence, region_by_id, measurement, assembler, config, bridge
+):
+    """A review-only identity may advance only after a committed Raw A/B gain.
+
+    Reuse the existing guarded Cell polygon and all frozen member masks. This
+    neither registers a new opening nor promotes a merely feasible old box.
+    """
+    from dataclasses import replace
+    from .opening_cells import coarse_review
+    from .opening_rim_source import member_mask
+    from .constrained_rectangle import RectangleInfeasible
+    from .review_geometry import SIDES
+
+    def retained(reason):
+        for entry in evidence.values():
+            entry["selected_reason"] = reason
+            gate = dict(
+                status="NOT_COMMITTED",
+                reason=reason,
+                review_only_cell=True,
+                steel_certified=False,
+            )
+            entry["review_only_gate"] = gate
+            entry.setdefault("shadow_rectangle_ab", gate)
+        return None
+
+    if not any(
+        len(e["side_candidates"]) == 1
+        and e["side_candidates"][0]["qualified_for_shadow"]
+        for e in evidence.values()
+    ):
+        return retained("REVIEW_ONLY_CELL_WITHOUT_COMPLETE_VERIFIED_RAW_CHAIN")
+    if region.identity_role not in (
+        "CONFIRMED_INDEPENDENT_OPENING",
+        "CONFIRMED_CONNECTED_OPENING",
+    ):
+        return retained("CURRENT_CELL_IDENTITY_NOT_ELIGIBLE_FOR_STRICT_SOLVE")
+    primary = getattr(measurement.local, "primary_cache", measurement.local)
+    if (
+        region.vessel_id != cell["vessel_id"]
+        or region.vessel_id != primary.vessel.vessel_id
+    ):
+        return retained("CELL_REVIEW_FRAME_VESSEL_MISMATCH")
+    members = np.zeros(len(measurement.raw_uvz), dtype=bool)
+    for key in cell["candidate_ids"]:
+        source = region_by_id.get(key)
+        if source is not None and source.vessel_id != region.vessel_id:
+            return retained("FOREIGN_VESSEL_CANNOT_SUPPLY_CELL_MEMBERS")
+        mask = member_mask(measurement.raw_uvz, source) if source is not None else None
+        if mask is None:
+            return retained("FROZEN_CELL_MEMBER_PROVENANCE_INCOMPLETE")
+        members |= mask
+    axes = getattr(measurement.local, "primary_cache", measurement.local).vessel.axes
+    anchor = coarse_review(cell, axes, measurement, "NOT_RUN")
+    if anchor is None:
+        return retained("CURRENT_GUARDED_CELL_REVIEW_UNAVAILABLE")
+    uv = np.asarray(anchor["boundary_uv"])
+    bounds = tuple(np.r_[uv.min(0), uv.max(0)])
+    search = tuple(
+        np.r_[
+            np.minimum(region.search_envelope[:2], bounds[:2]),
+            np.maximum(region.search_envelope[2:], bounds[2:]),
+        ]
+    )
+    review_region = replace(region, conservative_bounds=bounds, search_envelope=search)
+    sides = {
+        name: assembler._prior(review_region, name, axis, pos, sign)
+        for name, axis, pos, sign in SIDES
+    }
+    candidate = assembler._result(review_region, axes, sides)
+    try:
+        result = shadow_rectangle_ab(
+            review_region,
+            candidate,
+            evidence,
+            measurement,
+            assembler,
+            config,
+            bridge,
+            review_anchor=anchor,
+            retained_member_mask=members,
+        )
+    except RectangleInfeasible:
+        return retained("VERIFIED_CHAIN_DID_NOT_RESOLVE_CURRENT_RECTANGLE_CONSTRAINTS")
+    audit = result["local_rim_shadow_ab"]
+    audit["review_only_cell"] = True
+    audit["review_seed_bounds_uv"] = list(bounds)
+    if audit["status"] != "COMMITTED_GEOMETRY":
+        return None
+    return result

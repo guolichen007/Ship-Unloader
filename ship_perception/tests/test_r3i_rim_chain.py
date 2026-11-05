@@ -11,6 +11,7 @@ from ship_perception.perception.local_rim_evidence import (
     gravity_surfaces,
     isotropic_face,
     shadow_rectangle_ab,
+    shadow_review_only_cell,
 )
 from ship_perception.perception.measurement import RawSpatialIndex
 from ship_perception.perception.review_geometry import ReviewGeometryAssembler, SIDES
@@ -190,6 +191,219 @@ class LocalRimChainContracts(unittest.TestCase):
         self.assertAlmostEqual(result["boundary_xy"][3][0], 0.18, places=5)
         self.assertEqual(candidate, before)
         self.assertFalse(result["steel_edge_certified"])
+
+    def review_fixture(self, separator=None):
+        from ship_perception.perception.region_model import (
+            OpeningRegion,
+            TopologySupport,
+        )
+
+        measurement, members, polygon = self.fixture()
+        evidence = {
+            "U0": LocalRimEvidence(measurement, self.config).side(
+                polygon, "U0", members, np.zeros(len(members), bool)
+            )
+        }
+        identity = (
+            {}
+            if separator is None
+            else {"side_ownership_constraints": {"U0": {"lower_u": separator}}}
+        )
+        region = OpeningRegion(
+            "R",
+            "V",
+            (0.0, 0.0, 10.0, 6.0),
+            (0.0, 0.0, 10.0, 6.0),
+            (TopologySupport("STRUCTURAL_LINE_FAMILY", "SUPPORTING"),),
+            identity_role="CONFIRMED_CONNECTED_OPENING",
+            identity_evidence=identity,
+        )
+        cell = dict(
+            cell_id="OC:R",
+            vessel_id="V",
+            primary_region_id="R",
+            candidate_ids=["R"],
+            bounds_uv=[0.0, 0.0, 10.0, 6.0],
+            separator_constraints=(
+                [] if separator is None else [dict(bound="lower_u", value=separator)]
+            ),
+        )
+        assembler = ReviewGeometryAssembler(self.config)
+        sides = {
+            name: assembler._prior(region, name, axis, pos, sign)
+            for name, axis, pos, sign in SIDES
+        }
+        candidate = assembler._result(region, np.eye(2), sides)
+        return measurement, members, region, cell, assembler, candidate, evidence
+
+    def test_verified_side_can_resolve_infeasible_legacy_without_removing_separator(
+        self,
+    ):
+        measurement, members, region, cell, assembler, candidate, evidence = (
+            self.review_fixture(0.1)
+        )
+        with patch(
+            "ship_perception.perception.opening_rim_source.member_mask",
+            return_value=members,
+        ):
+            result = shadow_rectangle_ab(
+                region,
+                candidate,
+                evidence,
+                measurement,
+                assembler,
+                self.config,
+                {},
+                opening_cell=cell,
+            )
+        self.assertEqual(
+            result["local_rim_shadow_ab"]["legacy_solver_state"], "INFEASIBLE"
+        )
+        self.assertEqual(result["local_rim_shadow_ab"]["status"], "COMMITTED_GEOMETRY")
+        self.assertAlmostEqual(result["boundary_xy"][0][0], 0.18, places=5)
+        self.assertTrue(result["constrained_review_rectangle"]["separator_constraints"])
+
+    def test_solver_cannot_trade_verified_raw_residual_for_a_feasible_rectangle(self):
+        from ship_perception.perception.constrained_rectangle import RectangleInfeasible
+
+        measurement, members, region, cell, assembler, candidate, evidence = (
+            self.review_fixture(0.4)
+        )
+        with patch(
+            "ship_perception.perception.opening_rim_source.member_mask",
+            return_value=members,
+        ):
+            with self.assertRaises(RectangleInfeasible):
+                shadow_rectangle_ab(
+                    region,
+                    candidate,
+                    evidence,
+                    measurement,
+                    assembler,
+                    self.config,
+                    {},
+                    opening_cell=cell,
+                )
+        self.assertIsNone(evidence["U0"]["new_line"])
+
+    def test_verified_side_can_promote_existing_review_only_identity(self):
+        measurement, members, region, cell, assembler, _, evidence = (
+            self.review_fixture()
+        )
+        before = copy.deepcopy(region.audit())
+        with patch(
+            "ship_perception.perception.opening_rim_source.member_mask",
+            return_value=members,
+        ):
+            result = shadow_review_only_cell(
+                region,
+                cell,
+                evidence,
+                {"R": region},
+                measurement,
+                assembler,
+                self.config,
+                {},
+            )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["opening_identity"], "R")
+        self.assertEqual(result["local_rim_shadow_ab"]["status"], "COMMITTED_GEOMETRY")
+        self.assertEqual(region.audit(), before)
+
+    def test_review_only_cell_without_complete_new_chain_stays_review_only(self):
+        measurement, _, region, cell, assembler, _, evidence = self.review_fixture()
+        evidence["U0"]["side_candidates"][0]["qualified_for_shadow"] = False
+        result = shadow_review_only_cell(
+            region,
+            cell,
+            evidence,
+            {"R": region},
+            measurement,
+            assembler,
+            self.config,
+            {},
+        )
+        self.assertIsNone(result)
+        self.assertIsNone(evidence["U0"]["new_line"])
+
+    def test_review_only_cell_requires_every_alias_member_provenance(self):
+        measurement, members, region, cell, assembler, _, evidence = (
+            self.review_fixture()
+        )
+        cell["candidate_ids"].append("MISSING")
+        with patch(
+            "ship_perception.perception.opening_rim_source.member_mask",
+            return_value=members,
+        ):
+            result = shadow_review_only_cell(
+                region,
+                cell,
+                evidence,
+                {"R": region},
+                measurement,
+                assembler,
+                self.config,
+                {},
+            )
+        self.assertIsNone(result)
+        self.assertIn("PROVENANCE_INCOMPLETE", evidence["U0"]["selected_reason"])
+
+    def test_new_side_cannot_drop_another_alias_of_the_same_cell(self):
+        from dataclasses import replace
+
+        measurement, members, region, cell, assembler, _, evidence = (
+            self.review_fixture()
+        )
+        alias = replace(region, region_id="A")
+        cell["candidate_ids"].append("A")
+        alias_members = (measurement.raw_uvz[:, 0] > 0.01) & (
+            measurement.raw_uvz[:, 0] < 0.15
+        )
+
+        def frozen_mask(points, source):
+            return members if source.region_id == "R" else alias_members
+
+        with patch(
+            "ship_perception.perception.opening_rim_source.member_mask",
+            side_effect=frozen_mask,
+        ):
+            result = shadow_review_only_cell(
+                region,
+                cell,
+                evidence,
+                {"R": region, "A": alias},
+                measurement,
+                assembler,
+                self.config,
+                {},
+            )
+        self.assertIsNone(result)
+        self.assertIsNone(evidence["U0"]["new_line"])
+
+    def test_foreign_vessel_alias_cannot_enter_the_review_only_solver(self):
+        from dataclasses import replace
+
+        measurement, members, region, cell, assembler, _, evidence = (
+            self.review_fixture()
+        )
+        alias = replace(region, region_id="A", vessel_id="OTHER")
+        cell["candidate_ids"].append("A")
+        with patch(
+            "ship_perception.perception.opening_rim_source.member_mask",
+            return_value=members,
+        ):
+            result = shadow_review_only_cell(
+                region,
+                cell,
+                evidence,
+                {"R": region, "A": alias},
+                measurement,
+                assembler,
+                self.config,
+                {},
+            )
+        self.assertIsNone(result)
+        self.assertIn("FOREIGN_VESSEL", evidence["U0"]["selected_reason"])
 
 
 if __name__ == "__main__":

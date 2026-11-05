@@ -31,7 +31,11 @@ from .legacy_expert import (
 from .experts import HeightBasinExpert
 from .opening_regions import build_regions
 from .opening_cells import opening_cells, coarse_review
-from .local_rim_evidence import LocalRimEvidence, shadow_rectangle_ab
+from .local_rim_evidence import (
+    LocalRimEvidence,
+    shadow_rectangle_ab,
+    shadow_review_only_cell,
+)
 from .recall_snapshot import RecallSnapshot
 from .runtime_metrics import peak_rss_bytes
 from .review_geometry import ReviewGeometryAssembler, SIDES
@@ -558,6 +562,7 @@ def run_perception(
                     local_rim_by_region[key] = evidence
         with stage("CONSTRAINED_REVIEW_RECTANGLE"):
             strict_hatches = []
+            cell_by_region = {c["primary_region_id"]: c for c in selected_cells}
             for region, candidate in zip(canonical, hatches):
                 try:
                     strict_hatches.append(
@@ -569,6 +574,7 @@ def run_perception(
                             assembler,
                             config,
                             bridge,
+                            opening_cell=cell_by_region.get(region.region_id),
                         )
                         if local_rim_review and not precision_deferred
                         else constrain_review_geometry(
@@ -595,6 +601,24 @@ def run_perception(
                             corner_z_m=[None] * 4,
                         )
                     )
+            if local_rim_review and not opening_preview and not precision_deferred:
+                precision_keys = {r.region_id for r in canonical}
+                for cell in selected_cells:
+                    key = cell["primary_region_id"]
+                    if key in precision_keys or key not in region_by_id:
+                        continue
+                    promoted = shadow_review_only_cell(
+                        region_by_id[key],
+                        cell,
+                        local_rim_by_region.get(key, {}),
+                        region_by_id,
+                        measurement,
+                        assembler,
+                        config,
+                        bridge,
+                    )
+                    if promoted is not None:
+                        strict_hatches.append(promoted)
             hatches = strict_hatches
             checkpoint("RECTANGLE_REVIEW_READY", review_objects=hatches)
         with stage("CORNER_HEIGHT_OUTPUT"):
