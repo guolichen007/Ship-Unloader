@@ -56,11 +56,14 @@ from ship_perception.r1_static.heightmap_batch import RESEARCH_CONFIG
 
 
 class ProgressOnly:
-    def __init__(self, callback):
+    def __init__(self, callback, deadline=None):
         self.callback = callback
+        self.deadline = deadline
         self.last = 0.0
 
     def check(self):
+        if self.deadline is not None and time.perf_counter() >= self.deadline:
+            raise PerformanceBudgetExceeded("PRECISION_DEFERRED_FOR_REVIEW_OUTPUT")
         now = time.monotonic()
         if now - self.last >= 1.0:
             self.last = now
@@ -120,6 +123,7 @@ def run_perception(
     opening_topology_v2 = opening_topology_v2 or opening_preview or local_rim_review
     if local_rim_review:
         effective["local_rim_review"] = "CELL_LOCAL_RAW_ROLE_V1"
+        effective["review_output_reserve_s"] = 60.0
     if opening_topology_v2:
         effective["opening_topology_v2"] = True
         effective["opening_review_level"] = (
@@ -206,6 +210,7 @@ def run_perception(
     legacy_batches = []
     failures = []
     measurement = None
+    precision_deferred = False
     selected_audit = None
     diagnostics = {}
     attempts = []
@@ -332,7 +337,11 @@ def run_perception(
             def measurement_progress():
                 tasks.flush(dict(measurement.counters))
 
-            measurement.budget = budget or ProgressOnly(measurement_progress)
+            precision_deadline = (
+                start + effective["hard_process_watchdog_s"] - effective["review_output_reserve_s"]
+                if local_rim_review else None
+            )
+            measurement.budget = budget or ProgressOnly(measurement_progress, precision_deadline)
             refiner = FinalBoundaryRefiner(measurement.raw_uvz, [], config, measurement)
             resolver = SignedRoleResolver(measurement, refiner)
             assignment = OpeningBoundaryAssignment(measurement, config)
@@ -455,11 +464,17 @@ def run_perception(
                                     signature,
                                     dict(measurement.counters),
                                 )
-                    except PerformanceBudgetExceeded:
+                    except PerformanceBudgetExceeded as error:
+                        precision_deferred = local_rim_review and str(error) == "PRECISION_DEFERRED_FOR_REVIEW_OUTPUT"
+                        for pending in list(tasks.rows.values()):
+                            if pending["status"] == "RUNNING":
+                                tasks.finish(pending["task_id"],"DEFERRED_PERFORMANCE",
+                                             pending["progress_signature"],dict(measurement.counters))
                         failures.append(
                             dict(
                                 stage="BOUNDARY_MEASUREMENT",
-                                code="BOUNDED_MEASUREMENT_INTERRUPTED_REVIEW_PRESERVED",
+                                code=("PRECISION_DEFERRED_FOR_REVIEW_OUTPUT" if precision_deferred
+                                      else "BOUNDED_MEASUREMENT_INTERRUPTED_REVIEW_PRESERVED"),
                             )
                         )
                     hatches[index] = assembler.update(
@@ -493,7 +508,9 @@ def run_perception(
             hatches = strict_hatches
             checkpoint("RECTANGLE_REVIEW_READY", review_objects=hatches)
         with stage("CORNER_HEIGHT_OUTPUT"):
-            replication = replicated_corner_view(measurement) if hatches else None
+            replication = replicated_corner_view(measurement) if hatches and not precision_deferred else None
+            if measurement is not None and precision_deferred:
+                measurement.budget = ProgressOnly(measurement_progress)
             for result in hatches:
                 plane_sources = getattr(cache, "review_rim_plane_sources", {}).get(
                     result["opening_identity"], ()
@@ -501,7 +518,15 @@ def run_perception(
                 use_view = replication is not None and not plane_sources
                 height_context = replication[0] if use_view else measurement
                 height_estimator = ReviewCornerHeight(height_context, config)
-                result["corner_heights"] = height_estimator.measure(result, plane_sources)
+                if precision_deferred:
+                    result["corner_heights"] = [
+                        dict(height_estimator._empty(), z_probe_attempted=False,
+                             reason="DEFERRED_PERFORMANCE")
+                        for _ in range(4)
+                    ]
+                    height_estimator.audit = dict(status="DEFERRED_PERFORMANCE")
+                else:
+                    result["corner_heights"] = height_estimator.measure(result, plane_sources)
                 if use_view:
                     _, groups, replication_audit = replication
                     for corner in result["corner_heights"]:
@@ -577,7 +602,7 @@ def run_perception(
             ],
             aggregate_summary=dict(group_count=len(hatches), hatch_count=len(hatches)),
         )
-    if local_rim_review and measurement is not None and not opening_preview:
+    if local_rim_review and measurement is not None and not opening_preview and not precision_deferred:
         with stage("LOCAL_RIM"):
             local_rim = LocalRimEvidence(measurement, config)
             for cell in selected_cells:
@@ -690,6 +715,7 @@ def run_perception(
         ),
         recall_snapshot=snapshot.audit,
         pipeline_health=dict(
+            precision_state="DEFERRED_PERFORMANCE" if precision_deferred else "COMPLETED",
             status="REVIEW_REQUIRED",
             first_failure_stage=failures[0]["stage"] if failures else None,
             isolated_failures=failures,

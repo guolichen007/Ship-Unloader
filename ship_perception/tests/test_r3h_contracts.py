@@ -61,6 +61,17 @@ class R3HContracts(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,"OUTPUT_INPUT_SHA_MISMATCH"):
                 module.verify_output(path,"other")
 
+    def test_precision_deadline_yields_before_publishing_window(self):
+        from unittest.mock import patch
+        from ship_perception.perception.review_pipeline import ProgressOnly
+        from ship_perception.perception.budget import PerformanceBudgetExceeded
+        callbacks=[]
+        progress=ProgressOnly(lambda:callbacks.append(True),deadline=10.)
+        with patch("ship_perception.perception.review_pipeline.time.perf_counter",return_value=11.):
+            with self.assertRaisesRegex(PerformanceBudgetExceeded,"PRECISION_DEFERRED_FOR_REVIEW_OUTPUT"):
+                progress.check()
+        self.assertEqual(callbacks,[])
+
     def test_vertical_wall_and_cargo_slope_have_different_plane_roles(self):
         from ship_perception.r1_static.run import resolve_config
         cfg,_=resolve_config()

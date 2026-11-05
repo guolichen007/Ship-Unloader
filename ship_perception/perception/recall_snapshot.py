@@ -124,6 +124,9 @@ class RecallSnapshot:
                 archive.writestr("state.json",data)
                 archive.writestr("manifest.json",json.dumps(dict(identity=self.identity,
                     state_sha256=hashlib.sha256(data).hexdigest(),array_count=count[0])))
+            with open(name,"r+b") as stream:
+                stream.flush()
+                os.fsync(stream.fileno())
             os.replace(name,self.path)
             self.audit.update(saved=True)
         finally:
