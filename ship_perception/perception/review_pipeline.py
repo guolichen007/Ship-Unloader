@@ -31,7 +31,7 @@ from .legacy_expert import (
 from .experts import HeightBasinExpert
 from .opening_regions import build_regions
 from .opening_cells import opening_cells, coarse_review
-from .local_rim_evidence import LocalRimEvidence
+from .local_rim_evidence import LocalRimEvidence, shadow_rectangle_ab
 from .recall_snapshot import RecallSnapshot
 from .runtime_metrics import peak_rss_bytes
 from .review_geometry import ReviewGeometryAssembler, SIDES
@@ -150,29 +150,44 @@ def run_perception(
                 yield
         finally:
             stage_resources[name] = dict(
-                wall_s=time.perf_counter()-started_wall,
-                cpu_s=time.process_time()-started_cpu,
+                wall_s=time.perf_counter() - started_wall,
+                cpu_s=time.process_time() - started_cpu,
                 process_peak_rss_bytes=peak_rss_bytes(),
             )
 
     reference_key = berth_reference
     if not isinstance(reference_key, dict):
-        reference_path = Path(reference_key) if reference_key else (
-            Path(__file__).resolve().parents[1] / "config/site/berth_reference.yaml"
+        reference_path = (
+            Path(reference_key)
+            if reference_key
+            else (
+                Path(__file__).resolve().parents[1] / "config/site/berth_reference.yaml"
+            )
         )
         reference_key = hashlib.sha256(reference_path.read_bytes()).hexdigest()
-    snapshot = RecallSnapshot(review_snapshot, dict(
-        version="RECALL_SNAPSHOT_V1_B1_REVIEW_UV",
-        input_sha256=input_identity, semantic_sha256=frame.sha256, frame_id=frame.frame_id,
-        provenance=frame.provenance_json, physical_config_sha256=physical_hash,
-        research_sha256=hashlib.sha256(research_bytes).hexdigest(),
-        runtime_source_sha256=source_identity()["runtime_source_sha256"],
-        berth_reference=reference_key, operator_roi=effective.get("operator_roi_sha256"),
-        legacy_evidence=legacy_evidence,
-    ))
+    snapshot = RecallSnapshot(
+        review_snapshot,
+        dict(
+            version="RECALL_SNAPSHOT_V1_B1_REVIEW_UV",
+            input_sha256=input_identity,
+            semantic_sha256=frame.sha256,
+            frame_id=frame.frame_id,
+            provenance=frame.provenance_json,
+            physical_config_sha256=physical_hash,
+            research_sha256=hashlib.sha256(research_bytes).hexdigest(),
+            runtime_source_sha256=source_identity()["runtime_source_sha256"],
+            berth_reference=reference_key,
+            operator_roi=effective.get("operator_roi_sha256"),
+            legacy_evidence=legacy_evidence,
+        ),
+    )
     with stage("SCENE_PREPROCESS"):
-        scene = snapshot.value["scene"] if snapshot.value else SceneEvidenceContext.build(
-            frame, config, research, physical_hash, software_identity()
+        scene = (
+            snapshot.value["scene"]
+            if snapshot.value
+            else SceneEvidenceContext.build(
+                frame, config, research, physical_hash, software_identity()
+            )
         )
         scene.validate_frame(frame)
     with stage("BERTH_SIDE_VESSEL_SELECTION"):
@@ -290,9 +305,16 @@ def run_perception(
                     local_evidence_before_identity=True,
                 )
             with stage("RECALL_SNAPSHOT_SAVE"):
-                snapshot.save(dict(scene=scene, primary=RecallSnapshot.cache_state(primary),
-                    cache=RecallSnapshot.cache_state(cache), proposals=proposals,
-                    diagnostics=diagnostics, legacy_batches=legacy_batches))
+                snapshot.save(
+                    dict(
+                        scene=scene,
+                        primary=RecallSnapshot.cache_state(primary),
+                        cache=RecallSnapshot.cache_state(cache),
+                        proposals=proposals,
+                        diagnostics=diagnostics,
+                        legacy_batches=legacy_batches,
+                    )
+                )
         bridge = getattr(cache, "s4_topology_bridge", {})
         canonical = []
         eligibility = []
@@ -307,8 +329,12 @@ def run_perception(
                 for r in cache.opening_identities
                 if not opening_preview and r.identity_role.startswith("CONFIRMED")
             }
-            compiled_constraints = {} if opening_preview else compile_constraints(
-                cache, cache.opening_identities, config, initial_constraints
+            compiled_constraints = (
+                {}
+                if opening_preview
+                else compile_constraints(
+                    cache, cache.opening_identities, config, initial_constraints
+                )
             )
             for region in cache.opening_identities:
                 topology_sides = compiled_constraints.get(region.region_id)
@@ -323,13 +349,21 @@ def run_perception(
         if opening_topology_v2:
             with stage("OPENING_CELL_OWNERSHIP"):
                 selected_cells, cell_relations = opening_cells(
-                    canonical, bridge, getattr(cache, "local_enclosure_evidence", ()),
+                    canonical,
+                    bridge,
+                    getattr(cache, "local_enclosure_evidence", ()),
                     config["geometry"]["coarse_voxel_m"],
                 )
-                precision_ids = {cell["primary_region_id"] for cell in selected_cells
-                                 if not opening_preview and not cell["expanded_review_only"]}
-                paired = [(region, hatch) for region, hatch in zip(canonical, hatches)
-                          if region.region_id in precision_ids]
+                precision_ids = {
+                    cell["primary_region_id"]
+                    for cell in selected_cells
+                    if not opening_preview and not cell["expanded_review_only"]
+                }
+                paired = [
+                    (region, hatch)
+                    for region, hatch in zip(canonical, hatches)
+                    if region.region_id in precision_ids
+                ]
                 canonical = [region for region, _ in paired]
                 hatches = [hatch for _, hatch in paired]
         if measurement is not None and (canonical or not opening_topology_v2):
@@ -338,10 +372,15 @@ def run_perception(
                 tasks.flush(dict(measurement.counters))
 
             precision_deadline = (
-                start + effective["hard_process_watchdog_s"] - effective["review_output_reserve_s"]
-                if local_rim_review else None
+                start
+                + effective["hard_process_watchdog_s"]
+                - effective["review_output_reserve_s"]
+                if local_rim_review
+                else None
             )
-            measurement.budget = budget or ProgressOnly(measurement_progress, precision_deadline)
+            measurement.budget = budget or ProgressOnly(
+                measurement_progress, precision_deadline
+            )
             refiner = FinalBoundaryRefiner(measurement.raw_uvz, [], config, measurement)
             resolver = SignedRoleResolver(measurement, refiner)
             assignment = OpeningBoundaryAssignment(measurement, config)
@@ -465,33 +504,83 @@ def run_perception(
                                     dict(measurement.counters),
                                 )
                     except PerformanceBudgetExceeded as error:
-                        precision_deferred = local_rim_review and str(error) == "PRECISION_DEFERRED_FOR_REVIEW_OUTPUT"
+                        precision_deferred = (
+                            local_rim_review
+                            and str(error) == "PRECISION_DEFERRED_FOR_REVIEW_OUTPUT"
+                        )
                         for pending in list(tasks.rows.values()):
                             if pending["status"] == "RUNNING":
-                                tasks.finish(pending["task_id"],"DEFERRED_PERFORMANCE",
-                                             pending["progress_signature"],dict(measurement.counters))
+                                tasks.finish(
+                                    pending["task_id"],
+                                    "DEFERRED_PERFORMANCE",
+                                    pending["progress_signature"],
+                                    dict(measurement.counters),
+                                )
                         failures.append(
                             dict(
                                 stage="BOUNDARY_MEASUREMENT",
-                                code=("PRECISION_DEFERRED_FOR_REVIEW_OUTPUT" if precision_deferred
-                                      else "BOUNDED_MEASUREMENT_INTERRUPTED_REVIEW_PRESERVED"),
+                                code=(
+                                    "PRECISION_DEFERRED_FOR_REVIEW_OUTPUT"
+                                    if precision_deferred
+                                    else "BOUNDED_MEASUREMENT_INTERRUPTED_REVIEW_PRESERVED"
+                                ),
                             )
                         )
                     hatches[index] = assembler.update(
                         region, result, modes, vessel.axes
                     )
                     checkpoint("BOUNDARY_MEASUREMENT", review_objects=hatches)
+        local_rim_by_region = {}
+        if local_rim_review and not opening_preview and not precision_deferred:
+            with stage("LOCAL_RIM_NOMINATION"):
+                local_rim = LocalRimEvidence(measurement, config)
+                region_by_id = {r.region_id: r for r in cache.opening_identities}
+                candidate_by_id = {h["opening_identity"]: h for h in hatches}
+                for cell in selected_cells:
+                    key = cell["primary_region_id"]
+                    candidate = candidate_by_id.get(key, {})
+                    xy = candidate.get("boundary_xy")
+                    if xy is not None and np.asarray(xy).shape == (4, 2):
+                        polygon_uv = np.asarray(xy) @ vessel.axes.T
+                    else:
+                        u0, v0, u1, v1 = cell["bounds_uv"]
+                        polygon_uv = np.array([[u0, v0], [u1, v0], [u1, v1], [u0, v1]])
+                    region = region_by_id.get(key)
+                    members, other = (
+                        assignment.masks(region) if region is not None else (None, None)
+                    )
+                    evidence = {
+                        name: local_rim.side(polygon_uv, name, members, other)
+                        for name in ("U0", "U1", "V0", "V1")
+                    }
+                    cell["local_rim_evidence"] = evidence
+                    local_rim_by_region[key] = evidence
         with stage("CONSTRAINED_REVIEW_RECTANGLE"):
             strict_hatches = []
             for region, candidate in zip(canonical, hatches):
                 try:
                     strict_hatches.append(
-                        constrain_review_geometry(region, candidate, config, bridge)
+                        shadow_rectangle_ab(
+                            region,
+                            candidate,
+                            local_rim_by_region.get(region.region_id, {}),
+                            measurement,
+                            assembler,
+                            config,
+                            bridge,
+                        )
+                        if local_rim_review and not precision_deferred
+                        else constrain_review_geometry(
+                            region, candidate, config, bridge
+                        )
                     )
                 except RectangleInfeasible as error:
                     failures.append(
-                        dict(stage="CONSTRAINED_REVIEW_RECTANGLE", code=str(error),
-                             opening_identity=region.region_id)
+                        dict(
+                            stage="CONSTRAINED_REVIEW_RECTANGLE",
+                            code=str(error),
+                            opening_identity=region.region_id,
+                        )
                     )
                     unresolved_rectangles.append(
                         dict(
@@ -508,7 +597,11 @@ def run_perception(
             hatches = strict_hatches
             checkpoint("RECTANGLE_REVIEW_READY", review_objects=hatches)
         with stage("CORNER_HEIGHT_OUTPUT"):
-            replication = replicated_corner_view(measurement) if hatches and not precision_deferred else None
+            replication = (
+                replicated_corner_view(measurement)
+                if hatches and not precision_deferred
+                else None
+            )
             if measurement is not None and precision_deferred:
                 measurement.budget = ProgressOnly(measurement_progress)
             for result in hatches:
@@ -520,20 +613,27 @@ def run_perception(
                 height_estimator = ReviewCornerHeight(height_context, config)
                 if precision_deferred:
                     result["corner_heights"] = [
-                        dict(height_estimator._empty(), z_probe_attempted=False,
-                             reason="DEFERRED_PERFORMANCE")
+                        dict(
+                            height_estimator._empty(),
+                            z_probe_attempted=False,
+                            reason="DEFERRED_PERFORMANCE",
+                        )
                         for _ in range(4)
                     ]
                     height_estimator.audit = dict(status="DEFERRED_PERFORMANCE")
                 else:
-                    result["corner_heights"] = height_estimator.measure(result, plane_sources)
+                    result["corner_heights"] = height_estimator.measure(
+                        result, plane_sources
+                    )
                 if use_view:
                     _, groups, replication_audit = replication
                     for corner in result["corner_heights"]:
                         sources = corner["source_point_indexes"]
                         if sources:
                             rows = np.isin(groups[:, 0], sources, assume_unique=True)
-                            corner["exact_duplicate_raw_source_groups"] = groups[rows].tolist()
+                            corner["exact_duplicate_raw_source_groups"] = groups[
+                                rows
+                            ].tolist()
                     height_estimator.audit["exact_replication"] = replication_audit
                 elif replication is not None:
                     height_estimator.audit["exact_replication"] = dict(
@@ -552,13 +652,22 @@ def run_perception(
                 key = cell["primary_region_id"]
                 if key in strict_by_id:
                     strict = strict_by_id[key]
-                    cell.update(strict_rectangle_state="FEASIBLE", geometry=dict(
-                        opening_identity=key, hatch_id=strict["hatch_id"],
-                        boundary_xy=strict["boundary_xy"],
-                        corners_xyz=[[x, y, height.get("z_m")] for (x, y), height in
-                                     zip(strict["boundary_xy"], strict["corner_heights"])],
-                        geometry_role=strict["geometry_role"], steel_certified=False,
-                    ))
+                    cell.update(
+                        strict_rectangle_state="FEASIBLE",
+                        geometry=dict(
+                            opening_identity=key,
+                            hatch_id=strict["hatch_id"],
+                            boundary_xy=strict["boundary_xy"],
+                            corners_xyz=[
+                                [x, y, height.get("z_m")]
+                                for (x, y), height in zip(
+                                    strict["boundary_xy"], strict["corner_heights"]
+                                )
+                            ],
+                            geometry_role=strict["geometry_role"],
+                            steel_certified=False,
+                        ),
+                    )
                     continue
                 state = "INFEASIBLE" if key in infeasible else "NOT_RUN"
                 review = coarse_review(cell, vessel.axes, measurement, state)
@@ -602,29 +711,22 @@ def run_perception(
             ],
             aggregate_summary=dict(group_count=len(hatches), hatch_count=len(hatches)),
         )
-    if local_rim_review and measurement is not None and not opening_preview and not precision_deferred:
-        with stage("LOCAL_RIM"):
-            local_rim = LocalRimEvidence(measurement, config)
-            for cell in selected_cells:
-                geometry = cell.get("geometry")
-                if geometry is None:
-                    continue
-                polygon_uv = np.asarray(geometry["boundary_xy"]) @ vessel.axes.T
-                cell["local_rim_evidence"] = {
-                    name: local_rim.side(polygon_uv, name)
-                    for name in ("U0", "U1", "V0", "V1")
-                }
     cell_output = {}
     if opening_topology_v2:
         by_opening = {row["opening_identity"]: row for row in hatches + coarse_boxes}
-        visible = [by_opening[c["primary_region_id"]] for c in selected_cells
-                   if c["primary_region_id"] in by_opening]
+        visible = [
+            by_opening[c["primary_region_id"]]
+            for c in selected_cells
+            if c["primary_region_id"] in by_opening
+        ]
         cell_output = dict(
             opening_review_level=effective["opening_review_level"],
             selected_opening_cells=selected_cells,
             opening_cell_relations=cell_relations,
             review_opening_count=len(visible),
-            confirmed_opening_count=sum(cell["identity_state"] == "SUPPORTED" for cell in selected_cells),
+            confirmed_opening_count=sum(
+                cell["identity_state"] == "SUPPORTED" for cell in selected_cells
+            ),
             strict_rectangle_count=len(hatches),
             coarse_opening_reviews=coarse_boxes,
         )
@@ -715,7 +817,9 @@ def run_perception(
         ),
         recall_snapshot=snapshot.audit,
         pipeline_health=dict(
-            precision_state="DEFERRED_PERFORMANCE" if precision_deferred else "COMPLETED",
+            precision_state=(
+                "DEFERRED_PERFORMANCE" if precision_deferred else "COMPLETED"
+            ),
             status="REVIEW_REQUIRED",
             first_failure_stage=failures[0]["stage"] if failures else None,
             isolated_failures=failures,
