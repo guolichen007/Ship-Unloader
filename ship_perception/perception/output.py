@@ -360,16 +360,17 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
                 + "\n",
                 encoding="utf-8",
             )
-        _atomic_json(
-            staged / "runtime_io_metrics.json",
-            dict(
-                input_sha256=payload.get("input_sha256"),
-                runtime_source_sha256=payload.get("runtime_source_sha256"),
-                stages=io_resources,
-                json_serialization_count=1,
-                metrics_scope="FINAL_RENDER_AND_MAIN_JSON;OWN_PUBLICATION_COST_EXCLUDED",
-            ),
-        )
+        if "selected_opening_cells" in clean["geometry_only"]:
+            _atomic_json(
+                staged / "runtime_io_metrics.json",
+                dict(
+                    input_sha256=payload.get("input_sha256"),
+                    runtime_source_sha256=payload.get("runtime_source_sha256"),
+                    stages=io_resources,
+                    json_serialization_count=1,
+                    metrics_scope="FINAL_RENDER_AND_MAIN_JSON;OWN_PUBLICATION_COST_EXCLUDED",
+                ),
+            )
         staged.rename(final)
     return final
 

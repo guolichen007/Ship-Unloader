@@ -460,10 +460,15 @@ class LocalRimEvidence:
         positive_sections = sum(
             any(m["inner_rim_positive"] for m in s["modes"]) for s in sections
         )
+        complete = len(coherent) == 1 and coherent[0]["qualified_for_shadow"]
         if len(coherent) > 1:
             state = "MULTIMODE_COMPETING"
         elif coherent:
-            state = "INNER_RIM_OBSERVED"
+            state = (
+                "INNER_RIM_OBSERVED"
+                if complete
+                else "PROVISIONAL_INNER_RIM_SEGMENTS_OBSERVED"
+            )
         elif not len(st):
             state = "UNOBSERVED_OR_CROPPED"
         elif continued and deck_sections < minimum:
@@ -473,7 +478,14 @@ class LocalRimEvidence:
         return dict(
             state=state,
             measurement_state=(
-                "measured" if coherent else "estimated" if deck_sections else "unknown"
+                "measured"
+                if complete
+                else "estimated" if coherent or deck_sections else "unknown"
+            ),
+            measurement_scope=(
+                "FULL_SIDE_RAW_CHAIN"
+                if complete
+                else "PARTIAL_RAW_SEGMENTS_OR_SURFACE_CONTEXT"
             ),
             old_line=dict(
                 origin_uv=a.tolist(),

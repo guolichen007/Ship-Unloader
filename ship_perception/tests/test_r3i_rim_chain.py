@@ -21,8 +21,8 @@ class LocalRimChainContracts(unittest.TestCase):
     def setUp(self):
         self.config, _ = resolve_config()
 
-    def fixture(self, lower=-1.0, offset=0.18):
-        s = np.arange(0.0, 6.001, 0.05)
+    def fixture(self, lower=-1.0, offset=0.18, length=6.0):
+        s = np.arange(0.0, length + 0.001, 0.05)
         ss, tt = np.meshgrid(s, np.arange(-0.8, offset, 0.05))
         deck = np.column_stack((tt.ravel(), ss.ravel(), np.zeros(ss.size)))
         ss, tt = np.meshgrid(s, np.arange(offset + 0.05, 2.001, 0.05))
@@ -46,7 +46,7 @@ class LocalRimChainContracts(unittest.TestCase):
         return (
             measurement,
             members,
-            np.array([[0.0, 0.0], [10.0, 0.0], [10.0, 6.0], [0.0, 6.0]]),
+            np.array([[0.0, 0.0], [10.0, 0.0], [10.0, length], [0.0, length]]),
         )
 
     def test_mixed_surfaces_preserve_deck_despite_dense_vertical_returns(self):
@@ -88,6 +88,18 @@ class LocalRimChainContracts(unittest.TestCase):
         measurement, _, polygon = self.fixture()
         entry = LocalRimEvidence(measurement, self.config).side(polygon, "U0")
         self.assertEqual(entry["side_candidates"], [])
+        self.assertIsNone(entry["new_line"])
+
+    def test_partial_disjoint_measurements_do_not_certify_the_full_side(self):
+        measurement, members, polygon = self.fixture(length=24.0)
+        members &= measurement.raw_uvz[:, 1] < 12.0
+        entry = LocalRimEvidence(measurement, self.config).side(
+            polygon, "U0", members, np.zeros(len(members), bool)
+        )
+        self.assertEqual(entry["state"], "PROVISIONAL_INNER_RIM_SEGMENTS_OBSERVED")
+        self.assertEqual(entry["measurement_state"], "estimated")
+        self.assertTrue(entry["side_candidates"])
+        self.assertFalse(entry["side_candidates"][0]["qualified_for_shadow"])
         self.assertIsNone(entry["new_line"])
 
     def test_material_on_both_sides_is_not_inner_rim(self):

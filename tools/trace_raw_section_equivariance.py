@@ -54,8 +54,12 @@ def capture(args):
         source_ids = np.sort(source_ids).astype("<i8")
         probe = self.config["boundary"]["side_probe_m"]
         normal_coordinates = points[:, axis]
-        low = (normal_coordinates >= anchor - probe) & (normal_coordinates < anchor)
-        high = (normal_coordinates >= anchor) & (normal_coordinates <= anchor + probe)
+        low = (normal_coordinates >= anchor - probe) & (
+            normal_coordinates <= anchor if sign == -1 else normal_coordinates < anchor
+        )
+        high = (normal_coordinates <= anchor + probe) & (
+            normal_coordinates > anchor if sign == -1 else normal_coordinates >= anchor
+        )
         primary = getattr(context.local, "primary_cache", context.local)
         axes = np.asarray(primary.vessel.axes)
         uv = np.zeros(2)
