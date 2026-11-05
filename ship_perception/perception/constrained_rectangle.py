@@ -31,15 +31,21 @@ def fixed_angle_feasibility(initial, values, jacobian, sources, scale):
 
     def solve(rows):
         return linprog(
-            np.zeros(4), A_ub=-linear[rows], b_ub=rhs[rows],
-            bounds=bounds, method="highs",
+            np.zeros(4),
+            A_ub=-linear[rows],
+            b_ub=rhs[rows],
+            bounds=bounds,
+            method="highs",
         )
 
     rows = list(range(len(sources)))
     result = solve(rows)
     audit = dict(
-        angle_rad=float(initial[0]), status=int(result.status), message=str(result.message),
-        constraints=sources, initial_signed_margins_m=values.tolist(),
+        angle_rad=float(initial[0]),
+        status=int(result.status),
+        message=str(result.message),
+        constraints=sources,
+        initial_signed_margins_m=values.tolist(),
     )
     if result.status == 2:
         for i in range(len(sources)):
@@ -389,6 +395,40 @@ def orientation_update_qualification(region, sides, groups, config):
     )
 
 
+def fixed_side_guard(x, points, normal, axis, sign, scale, inward_m, outward_m):
+    """Fixed-size coverage inequalities, without division by cos(theta).
+
+    On the same-normal half-plane these are exactly the old displacement
+    bounds multiplied by a positive denominator. An explicit normal alignment
+    inequality retains a useful angular derivative across perpendicularity.
+    """
+    a = np.array([math.cos(x[0]), math.sin(x[0])])
+    b = np.array([-a[1], a[0]])
+    candidate, derivative = (a, b) if axis == 0 else (b, -a)
+    den = float(candidate @ normal)
+    dden = float(derivative @ normal)
+    size = scale * math.exp(x[3 + axis])
+    numerator = scale * x[1 + axis] + sign * size / 2 - points @ candidate
+    jacobian = np.zeros((len(points), 5))
+    jacobian[:, 0] = -points @ derivative
+    jacobian[:, 1 + axis] = scale
+    jacobian[:, 3 + axis] = sign * size / 2
+    alignment = np.zeros((1, 5))
+    alignment[0, 0] = scale * dden
+    lower = sign * jacobian
+    upper = -sign * jacobian
+    lower[:, 0] += inward_m * dden
+    upper[:, 0] += outward_m * dden
+    return (
+        np.r_[
+            scale * (den - np.finfo(float).eps),
+            inward_m * den + sign * numerator,
+            outward_m * den - sign * numerator,
+        ],
+        np.vstack((alignment, lower, upper)),
+    )
+
+
 class ConstrainedRectangleSolver:
     def __init__(self, config):
         self.config = config
@@ -552,24 +592,7 @@ class ConstrainedRectangleSolver:
                     continue
                 previous = sides[name]
                 normal = np.asarray(previous["normal_uv"])
-                candidate = a if axis == 0 else b
-                candidate_derivative = b if axis == 0 else -a
-                den = float(candidate @ normal)
-                if den <= 0:
-                    values.append(-1.0)
-                    derivatives.append(np.zeros(5))
-                    continue
                 points = line_points(previous) - origin
-                size = length if axis == 0 else width
-                numerator = scale * x[1 + axis] + sign * size / 2 - points @ candidate
-                displacement = numerator / den
-                jacobian = np.zeros((len(points), 5))
-                jacobian[:, 0] = (
-                    -points @ candidate_derivative * den
-                    - numerator * (candidate_derivative @ normal)
-                ) / (den * den)
-                jacobian[:, 1 + axis] = scale / den
-                jacobian[:, 3 + axis] = sign * size / (2 * den)
                 # Existing conservative coverage and large-move protection,
                 # now applied during the joint solve rather than after snap.
                 # A model constraint supplies no new inward evidence. Keep
@@ -580,12 +603,18 @@ class ConstrainedRectangleSolver:
                     if group["measured"] is not None
                     else 0.0
                 )
-                values.extend(allowed_inward + sign * displacement)
-                derivatives.extend(sign * jacobian)
-                values.extend(
-                    self.config["roi"]["boundary_search_m"] / 2 - sign * displacement
+                side_values, side_jacobian = fixed_side_guard(
+                    x,
+                    points,
+                    normal,
+                    axis,
+                    sign,
+                    scale,
+                    allowed_inward,
+                    self.config["roi"]["boundary_search_m"] / 2,
                 )
-                derivatives.extend(-sign * jacobian)
+                values.extend(side_values)
+                derivatives.extend(side_jacobian)
             return (
                 (np.asarray(values), np.asarray(derivatives))
                 if values
@@ -599,29 +628,36 @@ class ConstrainedRectangleSolver:
         if ownership and orientation["orientation_held"]:
             sources = [
                 dict(kind="SEPARATOR", corner=index + 1, **value)
-                for value in ownership for index in range(4)
+                for value in ownership
+                for index in range(4)
             ]
             eu, ev = model(initial)[:2]
             for (name, axis, sign), group in zip(SIDE_LAYOUT, groups):
                 if group["independent_opening_role_gain"]:
                     continue
                 prior = sides[name]
-                if float((eu, ev)[axis] @ prior["normal_uv"]) <= 0:
-                    sources.append(dict(kind="NORMAL_CONFLICT", side=name))
-                    continue
+                sources.append(dict(kind="NORMAL_ALIGNMENT", side=name))
                 for kind in ("INWARD_COVERAGE", "OUTWARD_MOVE"):
                     sources.extend(
-                        dict(kind=kind, side=name, station_uv=point.tolist(),
-                             side_sign=sign, normal_uv=prior["normal_uv"],
-                             source=prior.get("final_source"),
-                             raw_point_index_set="NOT_ATTACHED_TO_COVERAGE_STATION")
+                        dict(
+                            kind=kind,
+                            side=name,
+                            station_uv=point.tolist(),
+                            side_sign=sign,
+                            normal_uv=prior["normal_uv"],
+                            source=prior.get("final_source"),
+                            raw_point_index_set="NOT_ATTACHED_TO_COVERAGE_STATION",
+                        )
                         for point in line_points(prior)
                     )
             values, jacobian = constraint_values_and_jacobian(initial)
-            feasibility = fixed_angle_feasibility(initial, values, jacobian, sources, scale)
+            feasibility = fixed_angle_feasibility(
+                initial, values, jacobian, sources, scale
+            )
             if feasibility["status"] == 2:
                 raise RectangleInfeasible(
-                    "RECTANGLE_INFEASIBLE", region.region_id,
+                    "RECTANGLE_INFEASIBLE",
+                    region.region_id,
                     dict(orientation=orientation, fixed_angle_feasibility=feasibility),
                 )
 
@@ -653,15 +689,27 @@ class ConstrainedRectangleSolver:
         a, b, length, width, center, polygon, rhos = model(result.x)
         audit = rectangle_audit(polygon)
         numeric_tolerance = 1e-8 * scale
-        feasible = bool(np.min(inequalities(result.x)) >= -numeric_tolerance)
+        aligned = all(
+            group["independent_opening_role_gain"]
+            or float((a, b)[axis] @ np.asarray(sides[name]["normal_uv"]))
+            > np.finfo(float).eps
+            for (name, axis, _), group in zip(SIDE_LAYOUT, groups)
+        )
+        feasible = bool(
+            aligned and np.min(inequalities(result.x)) >= -numeric_tolerance
+        )
         if not feasible or not audit["rectangularity_gate_pass"]:
             raise RectangleInfeasible(
-                "RECTANGLE_CONSTRAINED_SOLVER_INVALID", region.region_id,
+                "RECTANGLE_CONSTRAINED_SOLVER_INVALID",
+                region.region_id,
                 dict(
                     orientation=orientation,
                     fixed_angle_feasibility=feasibility,
-                    solver=dict(success=bool(result.success), status=int(result.status),
-                                message=str(result.message)),
+                    solver=dict(
+                        success=bool(result.success),
+                        status=int(result.status),
+                        message=str(result.message),
+                    ),
                     minimum_guard_margin_m=float(np.min(inequalities(result.x))),
                 ),
             )
