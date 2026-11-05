@@ -81,7 +81,7 @@ def worker(args):
             opening_topology_v2=True,
             opening_preview=mode == "preview",
             local_rim_review=True,
-            review_snapshot=args.snapshot,
+            review_snapshot=args.snapshot if args.mode == "staged" else None,
             no_legacy_evidence=False,
             output_dir=folder,
             save_snapshot=False,
