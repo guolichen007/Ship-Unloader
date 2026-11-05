@@ -1,6 +1,6 @@
 """Region-first complete review, finite boundary jobs, independent certification."""
 
-from contextlib import nullcontext
+from contextlib import nullcontext, contextmanager
 from dataclasses import replace
 import copy
 import hashlib
@@ -31,6 +31,9 @@ from .legacy_expert import (
 from .experts import HeightBasinExpert
 from .opening_regions import build_regions
 from .opening_cells import opening_cells, coarse_review
+from .local_rim_evidence import LocalRimEvidence
+from .recall_snapshot import RecallSnapshot
+from .runtime_metrics import peak_rss_bytes
 from .review_geometry import ReviewGeometryAssembler, SIDES
 from .constrained_rectangle import RectangleInfeasible, constrain_review_geometry
 from .review_height import ReviewCornerHeight
@@ -74,6 +77,8 @@ def run_perception(
     monitor=None,
     opening_topology_v2=False,
     opening_preview=False,
+    local_rim_review=False,
+    review_snapshot=None,
 ):
     if mode not in ("bounded", "review-first"):
         raise ValueError("INVALID_REVIEW_MODE")
@@ -112,7 +117,9 @@ def run_perception(
         effective["operator_roi_sha256"] = hashlib.sha256(
             Path(operator_vessel_roi).read_bytes()
         ).hexdigest()
-    opening_topology_v2 = opening_topology_v2 or opening_preview
+    opening_topology_v2 = opening_topology_v2 or opening_preview or local_rim_review
+    if local_rim_review:
+        effective["local_rim_review"] = "CELL_LOCAL_RAW_ROLE_V1"
     if opening_topology_v2:
         effective["opening_topology_v2"] = True
         effective["opening_review_level"] = (
@@ -127,12 +134,40 @@ def run_perception(
         if monitor:
             monitor.checkpoint(stage=stage, **kw)
 
+    stage_resources = {}
+
+    @contextmanager
     def stage(name):
         checkpoint(name)
-        return timing.stage(name)
+        started_cpu = time.process_time()
+        started_wall = time.perf_counter()
+        try:
+            with timing.stage(name):
+                yield
+        finally:
+            stage_resources[name] = dict(
+                wall_s=time.perf_counter()-started_wall,
+                cpu_s=time.process_time()-started_cpu,
+                process_peak_rss_bytes=peak_rss_bytes(),
+            )
 
+    reference_key = berth_reference
+    if not isinstance(reference_key, dict):
+        reference_path = Path(reference_key) if reference_key else (
+            Path(__file__).resolve().parents[1] / "config/site/berth_reference.yaml"
+        )
+        reference_key = hashlib.sha256(reference_path.read_bytes()).hexdigest()
+    snapshot = RecallSnapshot(review_snapshot, dict(
+        version="RECALL_SNAPSHOT_V1_B1_REVIEW_UV",
+        input_sha256=input_identity, semantic_sha256=frame.sha256, frame_id=frame.frame_id,
+        provenance=frame.provenance_json, physical_config_sha256=physical_hash,
+        research_sha256=hashlib.sha256(research_bytes).hexdigest(),
+        runtime_source_sha256=source_identity()["runtime_source_sha256"],
+        berth_reference=reference_key, operator_roi=effective.get("operator_roi_sha256"),
+        legacy_evidence=legacy_evidence,
+    ))
     with stage("SCENE_PREPROCESS"):
-        scene = SceneEvidenceContext.build(
+        scene = snapshot.value["scene"] if snapshot.value else SceneEvidenceContext.build(
             frame, config, research, physical_hash, software_identity()
         )
         scene.validate_frame(frame)
@@ -216,30 +251,43 @@ def run_perception(
                 checkpoint("S4_" + label, cache_state=dict(measurement.counters))
 
         cache.review_checkpoint = s4_progress
-        with stage("LOCAL_RECALL"):
-            proposals = ()
-            if legacy_evidence:
-                verify_legacy_b2_core()
-                batch = LegacyProposalExpert().propose(primary, research)
-                proposals = batch.proposals
-                legacy_batches.append(
-                    dict(
-                        vessel_id=vessel.vessel_id,
-                        proposal_sha256=batch.output_sha256,
-                        proposal_count=len(batch.proposals),
-                        frozen_source_base_sha="51410e3f4f932fcbdcc7fc88b8f9979c60c2b954",
-                        raw_proposal_evidence=batch.raw_output(),
+        if snapshot.value:
+            with stage("RECALL_SNAPSHOT_RESTORE"):
+                state = snapshot.value
+                RecallSnapshot.restore_cache(primary, state["primary"])
+                RecallSnapshot.restore_cache(cache, state["cache"])
+                proposals = state["proposals"]
+                diagnostics = state["diagnostics"]
+                legacy_batches = state["legacy_batches"]
+        else:
+            with stage("LOCAL_RECALL"):
+                proposals = ()
+                if legacy_evidence:
+                    verify_legacy_b2_core()
+                    batch = LegacyProposalExpert().propose(primary, research)
+                    proposals = batch.proposals
+                    legacy_batches.append(
+                        dict(
+                            vessel_id=vessel.vessel_id,
+                            proposal_sha256=batch.output_sha256,
+                            proposal_count=len(batch.proposals),
+                            frozen_source_base_sha="51410e3f4f932fcbdcc7fc88b8f9979c60c2b954",
+                            raw_proposal_evidence=batch.raw_output(),
+                        )
                     )
+                cache.providers = primary.structural_providers()
+                proposals += HeightBasinExpert().propose(cache, research, budget)
+                _, diagnostics = build_regions(
+                    cache,
+                    proposals,
+                    tuple(np.r_[primary.xyz[:, :2].min(0), primary.xyz[:, :2].max(0)]),
+                    research,
+                    local_evidence_before_identity=True,
                 )
-            cache.providers = primary.structural_providers()
-            proposals += HeightBasinExpert().propose(cache, research, budget)
-            _, diagnostics = build_regions(
-                cache,
-                proposals,
-                tuple(np.r_[primary.xyz[:, :2].min(0), primary.xyz[:, :2].max(0)]),
-                research,
-                local_evidence_before_identity=True,
-            )
+            with stage("RECALL_SNAPSHOT_SAVE"):
+                snapshot.save(dict(scene=scene, primary=RecallSnapshot.cache_state(primary),
+                    cache=RecallSnapshot.cache_state(cache), proposals=proposals,
+                    diagnostics=diagnostics, legacy_batches=legacy_batches))
         bridge = getattr(cache, "s4_topology_bridge", {})
         canonical = []
         eligibility = []
@@ -529,6 +577,18 @@ def run_perception(
             ],
             aggregate_summary=dict(group_count=len(hatches), hatch_count=len(hatches)),
         )
+    if local_rim_review and measurement is not None and not opening_preview:
+        with stage("LOCAL_RIM"):
+            local_rim = LocalRimEvidence(measurement, config)
+            for cell in selected_cells:
+                geometry = cell.get("geometry")
+                if geometry is None:
+                    continue
+                polygon_uv = np.asarray(geometry["boundary_xy"]) @ vessel.axes.T
+                cell["local_rim_evidence"] = {
+                    name: local_rim.side(polygon_uv, name)
+                    for name in ("U0", "U1", "V0", "V1")
+                }
     cell_output = {}
     if opening_topology_v2:
         by_opening = {row["opening_identity"]: row for row in hatches + coarse_boxes}
@@ -606,6 +666,7 @@ def run_perception(
         intensity_status=intensity,
         intensity_aux_weight=0.0,
         stage_elapsed=timing.elapsed,
+        stage_resources=stage_resources,
         per_vessel_status=by_vessel,
         per_hatch_status={r["hatch_id"]: r["status"] for r in hatches},
         per_side_uncertainty={
@@ -627,6 +688,7 @@ def run_perception(
             opening_regions=regions,
             intensity_used=False,
         ),
+        recall_snapshot=snapshot.audit,
         pipeline_health=dict(
             status="REVIEW_REQUIRED",
             first_failure_stage=failures[0]["stage"] if failures else None,

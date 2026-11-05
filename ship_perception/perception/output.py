@@ -281,6 +281,7 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
             Draft202012Validator(json.loads(schema.read_text())).validate(clean)
             _atomic_results_json(staged / "03_results.json", clean)
             from .coordinates import corner_coordinates
+            from .r3h_geometry import compact_hatches, write_dimensions_csv
 
             _atomic_json(
                 staged / "05_hatch_corners.json",
@@ -291,6 +292,12 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
                     ).hexdigest(),
                 ),
             )
+            if "selected_opening_cells" in clean["geometry_only"]:
+                _atomic_json(staged / "opening_cells.json",
+                             clean["geometry_only"]["selected_opening_cells"])
+                compact = compact_hatches(clean)
+                _atomic_json(staged / "hatches_compact.json", compact)
+                write_dimensions_csv(staged / "船舱四角长宽_简表.csv", compact)
             (staged / "04_input_summary.txt").write_text(
                 "\n".join(
                     key.upper() + "=" + json.dumps(value, allow_nan=False)

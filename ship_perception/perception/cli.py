@@ -40,6 +40,10 @@ def parser(description):
                          help="Use same-vessel opening cells in review-first mode")
     command.add_argument("--opening-preview", action="store_true",
                          help="Show opening cells without strict rectangle measurement")
+    command.add_argument("--local-rim-review", action="store_true",
+                         help="Attach cell-local Raw rim roles to opening review")
+    command.add_argument("--review-snapshot", type=Path,
+                         help="Validated reusable scene and local recall snapshot")
     return command
 
 
@@ -57,7 +61,9 @@ def execute(frame, args, progress):
                        mode=getattr(args,"mode","bounded"),
                        operator_vessel_roi=getattr(args,"operator_vessel_roi",None),
                        opening_topology_v2=getattr(args, "opening_topology_v2", False),
-                       opening_preview=getattr(args, "opening_preview", False))
+                       opening_preview=getattr(args, "opening_preview", False),
+                       local_rim_review=getattr(args, "local_rim_review", False),
+                       review_snapshot=getattr(args, "review_snapshot", None))
     from .output import save_output
 
     from .review_runtime import ReviewRunMonitor

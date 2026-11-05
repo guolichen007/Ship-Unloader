@@ -716,6 +716,8 @@ def main():
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--opening-topology-v2", action="store_true")
     parser.add_argument("--opening-preview", action="store_true")
+    parser.add_argument("--local-rim-review", action="store_true")
+    parser.add_argument("--review-snapshot", type=Path)
     args = parser.parse_args()
     from ship_perception.perception import cli
     from ship_perception.perception.pipeline import (
@@ -749,6 +751,10 @@ def main():
         sys.argv.append("--opening-topology-v2")
     if args.opening_preview:
         sys.argv.append("--opening-preview")
+    if args.local_rim_review:
+        sys.argv.append("--local-rim-review")
+    if args.review_snapshot:
+        sys.argv.extend(["--review-snapshot", str(args.review_snapshot)])
     try:
         with observer.hooks():
             code = cli.pcd_main()

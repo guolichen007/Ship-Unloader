@@ -148,3 +148,23 @@ Ship-Unloader-Work/              # builds, logs and validation; never pushed
 ```
 
 正式历史跟踪 Tag `baseline-v1.4-ubuntu20-20260919` 保留。`archive/*` 只用于追溯；开发、合入和历史保全遵守[开发与 Git 协作规范](docs/05_开发与Git协作规范.md)。
+
+## R3-H 实验复核入口
+
+R3-H 从本地 R3-F 候选和身份合同继续开发。局部逐边输出记录 Raw 甲板、立面、连续回波、污染和多模式来源。当前所有几何结果需要人工审查，钢边精度未认证。
+
+Windows 使用 Python 环境中的数值依赖后运行以下命令。第一个参数可为单个 PCD 或目录。
+
+~~~bat
+scripts\run_R3H_windows.bat "C:\data\pcd" "C:\data\review"
+~~~
+
+Ubuntu 使用项目数值环境运行以下命令。
+
+~~~bash
+bash scripts/run_R3H_ubuntu.sh /data/pcd /data/review
+~~~
+
+默认在每个输入的同一子进程里解码一次，先导出预览，再用校验快照续跑精修。独立运行可追加 --mode preview 或 --mode full，冷进程三轮计时可追加 --rounds 3。输入 SHA、配置、源码或坐标合同变化会重建快照。
+
+每次原生输出发布 opening_cells.json、05_hatch_corners.json、hatches_compact.json 和船舱四角长宽_简表.csv。尺寸来自原始 XY 的对边平均边长，缺测 Z 为 null。运行总表.csv/json 记录每场退出码、失败原因、日志目录、CPU、进程峰值内存和墙钟。表内 PASS 表示程序与输出合同完成，人工识别质量另行评估。超时或缺少必需文件返回非零退出码，批次继续下一场。
