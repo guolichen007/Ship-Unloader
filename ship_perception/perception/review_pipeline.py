@@ -122,7 +122,7 @@ def run_perception(
         ).hexdigest()
     opening_topology_v2 = opening_topology_v2 or opening_preview or local_rim_review
     if local_rim_review:
-        effective["local_rim_review"] = "CELL_LOCAL_RAW_ROLE_V1"
+        effective["local_rim_review"] = "CELL_LOCAL_RAW_MULTISURFACE_V2"
         effective["review_output_reserve_s"] = 60.0
     if opening_topology_v2:
         effective["opening_topology_v2"] = True
@@ -165,22 +165,23 @@ def run_perception(
             )
         )
         reference_key = hashlib.sha256(reference_path.read_bytes()).hexdigest()
-    snapshot = RecallSnapshot(
-        review_snapshot,
-        dict(
-            version="RECALL_SNAPSHOT_V1_B1_REVIEW_UV",
-            input_sha256=input_identity,
-            semantic_sha256=frame.sha256,
-            frame_id=frame.frame_id,
-            provenance=frame.provenance_json,
-            physical_config_sha256=physical_hash,
-            research_sha256=hashlib.sha256(research_bytes).hexdigest(),
-            runtime_source_sha256=source_identity()["runtime_source_sha256"],
-            berth_reference=reference_key,
-            operator_roi=effective.get("operator_roi_sha256"),
-            legacy_evidence=legacy_evidence,
-        ),
-    )
+    with stage("RECALL_SNAPSHOT_VALIDATE_AND_LOAD"):
+        snapshot = RecallSnapshot(
+            review_snapshot,
+            dict(
+                version="RECALL_SNAPSHOT_V1_B1_REVIEW_UV",
+                input_sha256=input_identity,
+                semantic_sha256=frame.sha256,
+                frame_id=frame.frame_id,
+                provenance=frame.provenance_json,
+                physical_config_sha256=physical_hash,
+                research_sha256=hashlib.sha256(research_bytes).hexdigest(),
+                runtime_source_sha256=source_identity()["runtime_source_sha256"],
+                berth_reference=reference_key,
+                operator_roi=effective.get("operator_roi_sha256"),
+                legacy_evidence=legacy_evidence,
+            ),
+        )
     with stage("SCENE_PREPROCESS"):
         scene = (
             snapshot.value["scene"]

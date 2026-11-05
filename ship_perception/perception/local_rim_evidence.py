@@ -309,9 +309,11 @@ class LocalRimEvidence:
                 b - normal * radius,
             ]
         )
+        query_started = time.perf_counter()
         candidates = self.index.query_indexes(
             np.r_[corners.min(0) - margin, corners.max(0) + margin]
         )
+        query_elapsed = time.perf_counter() - query_started
         positives = candidates[self.owned[candidates]]
         delta = self.xyz[positives, :2] - a
         st = np.column_stack((delta @ tangent, delta @ normal, self.xyz[positives, 2]))
@@ -498,6 +500,7 @@ class LocalRimEvidence:
             source="OWNED_RAW_MULTISURFACE_V2",
             reason="PHYSICAL_ROLE_REQUIRES_DECK_FACE_AND_FROZEN_OPENING_MEMBERS",
             phase_wall_s=dict(
+                RAW_QUERY=query_elapsed,
                 LOCAL_RIM_NOMINATION=nomination_elapsed,
                 SIDE_ROLE_CONSENSUS=consensus_elapsed,
             ),

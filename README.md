@@ -168,3 +168,23 @@ bash scripts/run_R3H_ubuntu.sh /data/pcd /data/review
 默认在每个输入的同一子进程里解码一次，先导出预览，再用校验快照续跑精修。独立运行可追加 --mode preview 或 --mode full，冷进程三轮计时可追加 --rounds 3。输入 SHA、配置、源码或坐标合同变化会重建快照。
 
 每次原生输出发布 opening_cells.json、05_hatch_corners.json、hatches_compact.json 和船舱四角长宽_简表.csv。尺寸来自原始 XY 的对边平均边长，缺测 Z 为 null。运行总表.csv/json 记录每场退出码、失败原因、日志目录、CPU、进程峰值内存和墙钟。表内 PASS 表示程序与输出合同完成，人工识别质量另行评估。超时或缺少必需文件返回非零退出码，批次继续下一场。
+
+## R3-I：局部 Raw 证据与受保护求解
+
+R3-I 继承上述入口。默认 staged 先发布预览再恢复快照；`--mode full` 是独立冷完整流程，`--mode preview` 只发布预览。性能回执分别统计两种完整命令、首次预览和快照续跑，不能把阶段耗时当作冷启动提速。
+
+局部证据在矩形求解前生成。每个物理断面分别保留多个水平表面；真实立面支持使用完整三维邻域法向，薄切片低残差不能单独证明立面。只有同船甲板、立面与冻结开口成员归属相容，才形成测量候选。相互独立的断面不足、覆盖不足或多模式竞争时保留原复核边。结构延续且甲板未确认不再等同于已识别船壳。
+
+同一开口的 Legacy 与候选矩形共用原隔板和覆盖约束。只有 Raw 残差确有改善、严格约束可行、角点移动受保护且未丢失原开口成员，才采用新解；所有拒绝理由与原始点索引摘要保留。SLSQP 覆盖约束在法向跨过垂直方向时维数保持固定。几何可行、局部测量和钢边认证分别记录，真实钢内沿精度仍待独立标注，缺测 Z 保持 null。
+
+每份复核另存 `runtime_io_metrics.json`，记录绘图、主 JSON 编码、规范化、schema 校验、原子写入与四角导出资源；编码后的主 JSON 复用同一份已校验字节，完整证据不删减。快照校验/加载、局部查询和断面共识单独记录。`worker_receipt.json` 的 `published_perf_counter` 可与同机外部调度器的启动时刻对应，计量首次可用输出。
+
+首差诊断工具只用于离线回放，追踪开销不能混入性能验收：
+
+~~~bash
+python tools/trace_raw_section_equivariance.py capture --pcd /data/reference.pcd --output /review/before
+python tools/trace_raw_section_equivariance.py capture --pcd /data/transformed.pcd --output /review/after --source-index-map /review/source_finite_indexes.npy
+python tools/trace_raw_section_equivariance.py compare --before /review/before/raw_profile_trace.json --after /review/after/raw_profile_trace.json --transform /review/transform.json --output /review/first_difference.json
+~~~
+
+变换元数据只描述回放的刚体变换，不包含人工舱边。工具按同轴、同极性最近测站报告轴、源有限点索引、测站和 Raw 分侧统计的首差；测站发生移动会明确报告，不能假定其等价。完整 B1/Raw 等变性尚未认证，不能据局部单测宣布厘米级标定通过。

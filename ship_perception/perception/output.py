@@ -14,6 +14,7 @@ from ship_perception.r1_static.height_grid import R1HeightGrid
 from ship_perception.r1_static.intensity_evidence import IntensityEvidence, AUX_WEIGHT
 from ship_perception.r1_static.run import _atomic_json
 from .pipeline import _json_default
+from .runtime_metrics import resource_stage
 from .review_labels import FIGURE_TEXT, annotate_measurements, chinese_plot_style
 
 
@@ -31,6 +32,12 @@ def _atomic_results_json(path, data):
         ).encode("utf-8")
         + b"\n"
     )
+    _atomic_results_bytes(path, encoded)
+
+
+def _atomic_results_bytes(path, encoded):
+    """Publish bytes already normalized and schema-validated by save_output."""
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     with temporary.open("wb") as stream:
@@ -129,25 +136,43 @@ def _render_scene(payload, frame, path, *, fusion=False, grid=None):
     coarse_ids = {row["opening_identity"] for row in coarse}
     for hatch in coarse:
         footprint = np.asarray(hatch["boundary_xy"])
-        ax.plot(*np.vstack((footprint, footprint[0])).T, color="#75ecff", lw=1.6, ls="--")
-        ax.text(*footprint.mean(axis=0), "开口待审", color="#75ecff", fontsize=9, ha="center")
+        ax.plot(
+            *np.vstack((footprint, footprint[0])).T, color="#75ecff", lw=1.6, ls="--"
+        )
+        ax.text(
+            *footprint.mean(axis=0),
+            "开口待审",
+            color="#75ecff",
+            fontsize=9,
+            ha="center",
+        )
     for unresolved in result.get("unresolved_rectangle_candidates", []):
         if unresolved["opening_identity"] in coarse_ids:
             continue
         footprint = np.asarray(unresolved["pre_solve_candidate"]["boundary_xy"])
-        ax.plot(*np.vstack((footprint, footprint[0])).T, color="#f1a6ff",
-                lw=1.3, ls=":")
-        ax.text(*footprint.mean(axis=0), "矩形未决", color="#f1a6ff",
-                fontsize=9, ha="center")
+        ax.plot(
+            *np.vstack((footprint, footprint[0])).T, color="#f1a6ff", lw=1.3, ls=":"
+        )
+        ax.text(
+            *footprint.mean(axis=0),
+            "矩形未决",
+            color="#f1a6ff",
+            fontsize=9,
+            ha="center",
+        )
     for hatch in result["hatches"]:
         poly = np.asarray(hatch["boundary_xy"])
         coverage = np.asarray(hatch["review_coverage_boundary_xy"])
         if payload["schema"] == "ship_perception.hatch_once.3":
             for index, side_id in enumerate(("V0", "U1", "V1", "U0")):
-                segment=np.array([poly[index],poly[(index+1)%4]])
-                measured=hatch['sides'][side_id]['final_source']=='MEASURED_RAW'
-                ax.plot(*segment.T,color="#ffbb33",lw=1.6 if measured else 1.2,
-                        ls="-" if measured else "--")
+                segment = np.array([poly[index], poly[(index + 1) % 4]])
+                measured = hatch["sides"][side_id]["final_source"] == "MEASURED_RAW"
+                ax.plot(
+                    *segment.T,
+                    color="#ffbb33",
+                    lw=1.6 if measured else 1.2,
+                    ls="-" if measured else "--",
+                )
         else:
             ax.plot(*np.vstack((poly, poly[0])).T, color="#ffbb33", lw=1.6)
         ax.plot(
@@ -176,12 +201,17 @@ def _render_scene(payload, frame, path, *, fusion=False, grid=None):
         bbox=dict(facecolor="white", alpha=0.85),
     )
     figure.tight_layout()
-    annotate_measurements(ax, result["hatches"],draw_corner_points=payload['schema']!='ship_perception.hatch_once.3')
+    annotate_measurements(
+        ax,
+        result["hatches"],
+        draw_corner_points=payload["schema"] != "ship_perception.hatch_once.3",
+    )
     figure.savefig(path, dpi=150, bbox_inches="tight", pad_inches=0.15)
     plt.close(figure)
 
 
 def save_output(payload, frame, output_dir, save_snapshot, timing):
+    io_resources = {}
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     final = output_dir / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -211,13 +241,17 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
             previous = os.environ.get("MPLCONFIGDIR")
             os.environ["MPLCONFIGDIR"] = mpl_cache
             try:
-                with timing.stage("RENDER_PREPARE"):
+                with timing.stage("RENDER_PREPARE"), resource_stage(
+                    io_resources, "RENDER_PREPARE"
+                ):
                     display_grid = R1HeightGrid.from_points(frame.xyz, 0.5)
                 for fusion, filename in (
                     (False, "01_geometry_only.png"),
                     (True, "02_intensity_fusion.png"),
                 ):
-                    with timing.stage("RENDER_" + filename[:2]):
+                    with timing.stage("RENDER_" + filename[:2]), resource_stage(
+                        io_resources, "RENDER_" + filename[:2]
+                    ):
                         render(
                             payload,
                             frame,
@@ -265,39 +299,55 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
                 )
                 report["total_elapsed_s"] += elapsed
                 report["total_budget_exceeded"] = (
-                    report["total_budget_s"] is not None and report["total_elapsed_s"] > report["total_budget_s"]
+                    report["total_budget_s"] is not None
+                    and report["total_elapsed_s"] > report["total_budget_s"]
                 )
             payload["stage_elapsed"].update(timing.elapsed)
             if timing.progress is not None:
                 payload["stage_elapsed"].update(timing.progress.elapsed_stages)
-            clean = json.loads(
-                json.dumps(payload, default=_json_default, allow_nan=False)
-            )
+            with resource_stage(io_resources, "JSON_SERIALIZE"):
+                encoded = (
+                    json.dumps(
+                        payload,
+                        default=_json_default,
+                        ensure_ascii=False,
+                        allow_nan=False,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    + b"\n"
+                )
+            with resource_stage(io_resources, "JSON_NORMALIZE"):
+                clean = json.loads(encoded)
             from jsonschema import Draft202012Validator
 
             schema = (
                 Path(__file__).resolve().parents[1] / "config/hatch_once.schema.json"
             )
-            Draft202012Validator(json.loads(schema.read_text())).validate(clean)
-            _atomic_results_json(staged / "03_results.json", clean)
-            from .coordinates import corner_coordinates
-            from .r3h_geometry import compact_hatches, write_dimensions_csv
+            with resource_stage(io_resources, "JSON_SCHEMA_VALIDATE"):
+                Draft202012Validator(json.loads(schema.read_text())).validate(clean)
+            with resource_stage(io_resources, "JSON_ATOMIC_WRITE"):
+                _atomic_results_bytes(staged / "03_results.json", encoded)
+            with resource_stage(io_resources, "GEOMETRY_EXPORT"):
+                from .coordinates import corner_coordinates
+                from .r3h_geometry import compact_hatches, write_dimensions_csv
 
-            _atomic_json(
-                staged / "05_hatch_corners.json",
-                corner_coordinates(
-                    clean,
-                    hashlib.sha256(
-                        (staged / "03_results.json").read_bytes()
-                    ).hexdigest(),
-                ),
-            )
-            if "selected_opening_cells" in clean["geometry_only"]:
-                _atomic_json(staged / "opening_cells.json",
-                             clean["geometry_only"]["selected_opening_cells"])
-                compact = compact_hatches(clean)
-                _atomic_json(staged / "hatches_compact.json", compact)
-                write_dimensions_csv(staged / "船舱四角长宽_简表.csv", compact)
+                _atomic_json(
+                    staged / "05_hatch_corners.json",
+                    corner_coordinates(
+                        clean,
+                        hashlib.sha256(
+                            (staged / "03_results.json").read_bytes()
+                        ).hexdigest(),
+                    ),
+                )
+                if "selected_opening_cells" in clean["geometry_only"]:
+                    _atomic_json(
+                        staged / "opening_cells.json",
+                        clean["geometry_only"]["selected_opening_cells"],
+                    )
+                    compact = compact_hatches(clean)
+                    _atomic_json(staged / "hatches_compact.json", compact)
+                    write_dimensions_csv(staged / "船舱四角长宽_简表.csv", compact)
             (staged / "04_input_summary.txt").write_text(
                 "\n".join(
                     key.upper() + "=" + json.dumps(value, allow_nan=False)
@@ -310,6 +360,16 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
                 + "\n",
                 encoding="utf-8",
             )
+        _atomic_json(
+            staged / "runtime_io_metrics.json",
+            dict(
+                input_sha256=payload.get("input_sha256"),
+                runtime_source_sha256=payload.get("runtime_source_sha256"),
+                stages=io_resources,
+                json_serialization_count=1,
+                metrics_scope="FINAL_RENDER_AND_MAIN_JSON;OWN_PUBLICATION_COST_EXCLUDED",
+            ),
+        )
         staged.rename(final)
     return final
 
