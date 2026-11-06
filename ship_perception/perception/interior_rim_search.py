@@ -430,13 +430,13 @@ def section_role(
             context_surface_ref=plane["surface_id"],
             fill=fill,
         )
-    face = None
-    if deck:
-        face = (
-            normal_cache.face(points, indexes, cut, tangent_uv, inward_uv)
-            if normal_cache is not None
-            else isotropic_face(points, indexes, full, full_ids, tree, cut, config)
-        )
+    # A missing deck is a qualification veto, not permission to omit an
+    # independently observable 3-D facade from the candidate audit.
+    face = (
+        normal_cache.face(points, indexes, cut, tangent_uv, inward_uv)
+        if normal_cache is not None
+        else isotropic_face(points, indexes, full, full_ids, tree, cut, config)
+    )
     attached = bool(
         np.count_nonzero(inner & member) >= b["profile_min_points"]
         and np.count_nonzero(outer & member) < b["profile_min_points"]
@@ -473,6 +473,7 @@ def section_role(
         outside_trusted_count=int(np.count_nonzero(outer & member)),
         other_cell_contamination=foreign,
         cargo_above_deck_face_only_risk=cargo_ridge,
+        cargo_above_deck_risk_state=("OBSERVED" if deck else "UNOBSERVABLE_WITHOUT_DECK"),
         observed_face_s_interval_m=observed_interval,
         opening_attachment=attached,
         inner_rim_positive=positive,
