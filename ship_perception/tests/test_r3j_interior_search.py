@@ -147,6 +147,77 @@ class InteriorSearchTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "CELL_MEMBER_PROVENANCE_INCOMPLETE")
 
+    def test_unexplained_boundary_member_is_not_silently_deleted(self):
+        m, r, c, p = fixture()
+        cfg = resolve_config()[0]
+        # This original occupied member is neither the observed deck nor face.
+        m.raw_uvz = np.vstack((m.raw_uvz, [[5.13, 1.17, -0.41]]))
+        m.raw_point_indexes = np.arange(len(m.raw_uvz))
+        m.local.vessel.point_indexes = m.raw_point_indexes
+        m.spatial = RawSpatialIndex(m.raw_uvz, {})
+        assembler = ReviewGeometryAssembler(cfg)
+        seed = assembler._result(
+            r,
+            np.eye(2),
+            {
+                name: assembler._prior(r, name, axis, pos, sign)
+                for name, axis, pos, sign in SIDES
+            },
+        )
+        legacy = constrain_review_geometry(r, seed, cfg, {})
+        search = InteriorRimSearch(LocalRimEvidence(m, cfg))
+        report = search.search(c, p, {"R": r}, [c])
+        self.assertIsNone(
+            recovery_ab(r, c, legacy, seed, report, search, assembler, cfg, {})
+        )
+        self.assertGreater(
+            report["shadow_ab"]["members"]["unexplained_clipped_count"], 0
+        )
+        self.assertIn(
+            len(m.raw_uvz) - 1,
+            report["shadow_ab"]["members"]["unexplained_clipped_raw_indexes"],
+        )
+
+    def test_raw_search_preserves_physical_line_under_permutation_and_vertical_origin(
+        self,
+    ):
+        baseline, _ = self.run_search()
+        expected = next(
+            x
+            for x in baseline["candidates"]["V0"]["candidates"]
+            if x["qualified_for_recovery"]
+        )
+        m, r, c, p = fixture()
+        order = np.random.default_rng(31).permutation(len(m.raw_uvz))
+        m.raw_uvz = m.raw_uvz[order]
+        m.raw_uvz[:, 2] += 136.0
+        m.raw_point_indexes = m.raw_point_indexes[order]
+        m.spatial = RawSpatialIndex(m.raw_uvz, {})
+        result = InteriorRimSearch(LocalRimEvidence(m, resolve_config()[0])).search(
+            c, p, {"R": r}, [c]
+        )
+        mode = next(
+            x
+            for x in result["candidates"]["V0"]["candidates"]
+            if x["qualified_for_recovery"]
+        )
+        self.assertAlmostEqual(mode["rho"], expected["rho"], places=8)
+        # Floating point neighbourhood ties can select different returns after
+        # a Z origin change; the fitted physical line and observed span cannot.
+        self.assertGreater(len(mode["source_point_indexes"]), 0)
+        self.assertGreaterEqual(
+            mode["observed_section_coverage"],
+            resolve_config()[0]["boundary"]["min_edge_coverage"],
+        )
+        self.assertLessEqual(
+            abs(
+                mode["observed_section_coverage"]
+                - expected["observed_section_coverage"]
+            )
+            * np.linalg.norm(p[1] - p[0]),
+            mode["uncertainty_m"] + expected["uncertainty_m"],
+        )
+
     def test_own_raw_recovery_moves_real_solver_corners_without_relaxing_local_guard(
         self,
     ):

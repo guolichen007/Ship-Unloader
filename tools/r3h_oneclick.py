@@ -266,6 +266,42 @@ def main():
                         )
                     )
                 )
+    import html
+
+    links = []
+    for row in rows:
+        if row["status"] == "PASS":
+            result_dir = Path(row["worker"]["modes"][-1]["result_dir"])
+            review = result_dir / "船舱复核总览.html"
+            href = review.relative_to(args.output).as_posix()
+            label = "复核输出" if review.is_file() else "预览输出，未运行完整标定"
+            if not review.is_file():
+                href = (
+                    (result_dir / "01_geometry_only.png")
+                    .relative_to(args.output)
+                    .as_posix()
+                )
+            links.append(
+                '<li><a href="'
+                + html.escape(href, quote=True)
+                + '">'
+                + html.escape(Path(row["pcd"]).stem)
+                + "｜"
+                + label
+                + "</a></li>"
+            )
+        else:
+            links.append(
+                "<li>"
+                + html.escape(Path(row["pcd"]).stem)
+                + "｜运行失败，已记录并继续下一景</li>"
+            )
+    (args.output / "全部场景复核.html").write_text(
+        '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>全部场景船舱复核</title><h1>全部场景船舱复核</h1><p>钢边精度未认证，人工审核待签。<a href="运行总表.csv">运行性能总表</a></p><ul>'
+        + "".join(links)
+        + "</ul></html>",
+        encoding="utf-8",
+    )
     return 1 if failure else 0
 
 

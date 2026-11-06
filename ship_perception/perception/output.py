@@ -205,8 +205,41 @@ def _render_scene(payload, frame, path, *, fusion=False, grid=None):
         ax,
         review_objects(result),
     )
+    if path is None:
+        return figure, ax
     figure.savefig(path, dpi=150, bbox_inches="tight", pad_inches=0.15)
     plt.close(figure)
+
+
+def _render_xyz_pair(payload, frame, staged, grid, timing, resources):
+    """The two XYZ-only views share geometry and actual pixel layout."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    with matplotlib.rc_context(chinese_plot_style()):
+        figure = None
+        try:
+            with timing.stage("RENDER_01"), resource_stage(resources, "RENDER_01"):
+                figure, ax = _render_scene(payload, frame, None, grid=grid)
+                figure.savefig(
+                    staged / "01_geometry_only.png",
+                    dpi=150,
+                    bbox_inches="tight",
+                    pad_inches=0.15,
+                )
+            with timing.stage("RENDER_02"), resource_stage(resources, "RENDER_02"):
+                ax.set_title("强度判定已关闭：复用纯几何复核结果")
+                figure.savefig(
+                    staged / "02_intensity_fusion.png",
+                    dpi=150,
+                    bbox_inches="tight",
+                    pad_inches=0.15,
+                )
+        finally:
+            if figure is not None:
+                plt.close(figure)
 
 
 def save_output(payload, frame, output_dir, save_snapshot, timing):
@@ -244,20 +277,29 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
                     io_resources, "RENDER_PREPARE"
                 ):
                     display_grid = R1HeightGrid.from_points(frame.xyz, 0.5)
+                shared_xyz = (
+                    payload.get("production_geometry_mode") == "XYZ_ONLY"
+                    and "selected_opening_cells" in payload["geometry_only"]
+                )
+                if shared_xyz:
+                    _render_xyz_pair(
+                        payload, frame, staged, display_grid, timing, io_resources
+                    )
                 for fusion, filename in (
                     (False, "01_geometry_only.png"),
                     (True, "02_intensity_fusion.png"),
                 ):
-                    with timing.stage("RENDER_" + filename[:2]), resource_stage(
-                        io_resources, "RENDER_" + filename[:2]
-                    ):
-                        render(
-                            payload,
-                            frame,
-                            staged / filename,
-                            fusion=fusion,
-                            grid=display_grid,
-                        )
+                    if not shared_xyz:
+                        with timing.stage("RENDER_" + filename[:2]), resource_stage(
+                            io_resources, "RENDER_" + filename[:2]
+                        ):
+                            render(
+                                payload,
+                                frame,
+                                staged / filename,
+                                fusion=fusion,
+                                grid=display_grid,
+                            )
                     payload["intensity_fusion" if fusion else "geometry_only"][
                         "image_path"
                     ] = str(final / filename)
@@ -347,6 +389,26 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
                     compact = compact_hatches(clean)
                     _atomic_json(staged / "hatches_compact.json", compact)
                     write_dimensions_csv(staged / "船舱四角长宽_简表.csv", compact)
+                    if (
+                        clean["geometry_only"].get("opening_review_level")
+                        != "FAST_OPENING_REVIEW"
+                    ):
+                        from .r3j_review import write_bundle
+
+                        with timing.stage("CHINESE_REVIEW_BUNDLE"), resource_stage(
+                            io_resources, "CHINESE_REVIEW_BUNDLE"
+                        ):
+                            write_bundle(
+                                clean,
+                                frame,
+                                staged,
+                                display_grid,
+                                scene_label=Path(
+                                    clean["input"]
+                                    .get("provenance", {})
+                                    .get("path", "输入场景")
+                                ).stem,
+                            )
             (staged / "04_input_summary.txt").write_text(
                 "\n".join(
                     key.upper() + "=" + json.dumps(value, allow_nan=False)

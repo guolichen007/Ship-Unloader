@@ -128,6 +128,7 @@ def run_perception(
     opening_topology_v2 = opening_topology_v2 or opening_preview or local_rim_review
     if local_rim_review:
         effective["local_rim_review"] = "CELL_LOCAL_RAW_MULTISURFACE_V2"
+        effective["long_side_recovery"] = "SAME_VESSEL_OWN_INTERIOR_RAW_V1"
         effective["review_output_reserve_s"] = 60.0
     if opening_topology_v2:
         effective["opening_topology_v2"] = True
