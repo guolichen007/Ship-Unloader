@@ -23,7 +23,7 @@ def fixture(kind="wall"):
     wall = np.column_stack((ss.ravel(), np.full(ss.size, 2.0), zz.ravel()))
     points = np.vstack((deck, floor, wall))
     if kind == "sloped_exterior":
-        points[:len(deck), 2] = -.3 * points[:len(deck), 1]
+        points[: len(deck), 2] = -0.3 * points[: len(deck), 1]
     ids = np.arange(len(points))
     owned = ids
     if kind == "ridge":
@@ -78,12 +78,19 @@ def fixture(kind="wall"):
 
 class InteriorSearchTests(unittest.TestCase):
     def test_facade_is_recorded_independently_when_exterior_is_not_a_deck(self):
-        result,_ = self.run_search("sloped_exterior")
+        result, _ = self.run_search("sloped_exterior")
         modes = result["candidates"]["V0"]["candidates"]
-        self.assertTrue(any(m["independently_observed_face_sections"] >= 4 for m in modes))
+        self.assertTrue(
+            any(m["independently_observed_face_sections"] >= 4 for m in modes)
+        )
         self.assertFalse(any(m["qualified_for_recovery"] for m in modes))
-        self.assertTrue(any(row["vertical_face"]["qualified"] and row["deck_plane"] is None
-                            for m in modes for row in m["section_evidence"]))
+        self.assertTrue(
+            any(
+                row["vertical_face"]["qualified"] and row["deck_plane"] is None
+                for m in modes
+                for row in m["section_evidence"]
+            )
+        )
 
     def run_search(self, kind="wall"):
         m, region, cell, p = fixture(kind)

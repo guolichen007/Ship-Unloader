@@ -473,7 +473,9 @@ def section_role(
         outside_trusted_count=int(np.count_nonzero(outer & member)),
         other_cell_contamination=foreign,
         cargo_above_deck_face_only_risk=cargo_ridge,
-        cargo_above_deck_risk_state=("OBSERVED" if deck else "UNOBSERVABLE_WITHOUT_DECK"),
+        cargo_above_deck_risk_state=(
+            "OBSERVED" if deck else "UNOBSERVABLE_WITHOUT_DECK"
+        ),
         observed_face_s_interval_m=observed_interval,
         opening_attachment=attached,
         inner_rim_positive=positive,
