@@ -138,6 +138,7 @@ class RimTopHeightEstimator:
 
     def collect(self, result):
         sources = []
+        self.partial_sources = sources
         minimum = self.config["boundary"]["profile_min_points"]
         votes = self.config["boundary"]["profile_min_sections"]
         tolerance = self.config["geometry"]["plane_inlier_m"]

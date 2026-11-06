@@ -6,6 +6,7 @@ import numpy as np
 from ship_perception.r1_static.perimeter_deck import _gravity_hypotheses
 from .rim_top_height import RimTopHeightEstimator
 from .measurement import review_normal_cache
+from .budget import PerformanceBudgetExceeded
 
 SEMANTIC = "HATCH_INNER_RIM_TOP_ELEVATION"
 TIERS = (
@@ -84,6 +85,7 @@ class ReviewCornerHeight:
         self.audit = {}
         self._eligibility_cache = {}
         self._associated_rim_sources = {}
+        self._completed_corners = []
 
     def _normal_cache(self, context=False):
         return review_normal_cache(self.measurement, self.config, context)
@@ -279,13 +281,53 @@ class ReviewCornerHeight:
             deck_reference_z=None,
         )
 
+    def measure_for_review(self, result, plane_sources=(), *, allow_defer=False):
+        """Keep completed observations when the existing soft deadline expires."""
+        self._completed_corners = []
+        self.audit = {}
+        try:
+            return self.measure(result, plane_sources), False
+        except PerformanceBudgetExceeded as error:
+            if not allow_defer or str(error) != "PRECISION_DEFERRED_FOR_REVIEW_OUTPUT":
+                raise
+            completed = list(self._completed_corners)
+            count = len(completed)
+            for _ in range(count, 4):
+                completed.append(
+                    dict(
+                        self._empty(),
+                        reason="DEFERRED_PERFORMANCE",
+                        z_probe_attempted=True,
+                        height_measurement_complete=False,
+                    )
+                )
+            self.audit.update(
+                status="DEFERRED_PERFORMANCE",
+                reason=str(error),
+                completed_corner_count=count,
+                deferred_corner_indexes=list(range(count, 4)),
+                partial_raw_evidence_preserved=True,
+                geometry_modified=False,
+            )
+            return completed, True
+
     def measure(self, result, plane_sources=()):
         self._eligibility_cache.clear()
         self._associated_rim_sources = {}
+        self._completed_corners = []
         probe = RimTopHeightEstimator(
             self.measurement, self.config, self._plane_candidates
         )
-        sources = list(plane_sources) + probe.collect(result)
+        self.audit = dict(partial_rim_probe=probe.audit)
+        try:
+            sources = list(plane_sources) + probe.collect(result)
+        except PerformanceBudgetExceeded:
+            self.audit.update(
+                probe.audit,
+                role_qualified_sources=list(plane_sources)
+                + list(getattr(probe, "partial_sources", [])),
+            )
+            raise
         self.audit = dict(
             probe.audit,
             z_logic_dead_path_removed=True,
@@ -308,7 +350,14 @@ class ReviewCornerHeight:
             associated = OpeningRimSource(
                 self.measurement, self.config, context_fitter, self._context_nonvertical
             )
-            additional = associated.collect(result)
+            self.audit["opening_rim_association"] = associated.audit
+            try:
+                additional = associated.collect(result)
+            except PerformanceBudgetExceeded:
+                self.audit["role_qualified_sources"] = sources + list(
+                    getattr(associated, "partial_sources", [])
+                )
+                raise
             self._associated_rim_sources = {
                 id(source): tuple(source["source_point_indexes"])
                 for source in additional
@@ -320,7 +369,7 @@ class ReviewCornerHeight:
             self.measurement.local, "primary_cache", self.measurement.local
         )
         owned = primary.vessel.point_indexes
-        output = []
+        output = self._completed_corners
         for index, corner in enumerate(np.asarray(result["boundary_uv"])):
             row, local = self._empty(), []
             for source in sources:

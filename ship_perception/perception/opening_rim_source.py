@@ -466,6 +466,7 @@ class OpeningRimSource:
                 if patch["inside_drop"] and patch["outside_drop"]:
                     barriers[self.positions(patch["crest_ids"])] = True
         sources = []
+        self.partial_sources = sources
         for side, nodes in patches.items():
             seeds = []
             seen = set()

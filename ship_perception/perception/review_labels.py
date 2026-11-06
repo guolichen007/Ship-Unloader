@@ -31,7 +31,7 @@ def chinese_plot_style():
         for character in (
             "".join(FIGURE_TEXT.values())
             + "".join(STATUS_LABELS.values())
-            + "开口组舱数未定状态待核对角点长宽米未观测第严格矩形可解未决钢边认证疑似船舷人工确认坐标显示保留原始浮点精度厘米仅格式外侧栏"
+            + "开口组舱数未定状态待核对角点长宽米未观测第严格矩形可解未决钢边认证疑似船舷人工确认坐标显示保留原始浮点精度厘米仅格式外侧栏部分高度延期复测"
         )
         if ord(character) > 127
     }
@@ -101,6 +101,8 @@ def review_status(hatch):
     status = "严格矩形可解" if strict else "矩形未决"
     if hatch.get("rim_error_recovery", {}).get("candidates"):
         status += "｜疑似船舷，待人工确认"
+    if hatch.get("z_measurement_audit", {}).get("status") == "DEFERRED_PERFORMANCE":
+        status += "\n部分高度延期，待复测"
     return status + "｜钢边未认证"
 
 

@@ -663,9 +663,20 @@ def run_perception(
                     ]
                     height_estimator.audit = dict(status="DEFERRED_PERFORMANCE")
                 else:
-                    result["corner_heights"] = height_estimator.measure(
-                        result, plane_sources
+                    result["corner_heights"], height_deferred = (
+                        height_estimator.measure_for_review(
+                            result, plane_sources, allow_defer=local_rim_review
+                        )
                     )
+                    if height_deferred:
+                        precision_deferred = True
+                        failures.append(
+                            dict(
+                                stage="CORNER_HEIGHT_OUTPUT",
+                                code="PRECISION_DEFERRED_FOR_REVIEW_OUTPUT",
+                                opening_identity=result["opening_identity"],
+                            )
+                        )
                 if use_view:
                     _, groups, replication_audit = replication
                     for corner in result["corner_heights"]:
