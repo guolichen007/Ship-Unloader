@@ -15,7 +15,12 @@ from ship_perception.r1_static.intensity_evidence import IntensityEvidence, AUX_
 from ship_perception.r1_static.run import _atomic_json
 from .pipeline import _json_default
 from .runtime_metrics import resource_stage
-from .review_labels import FIGURE_TEXT, annotate_measurements, chinese_plot_style
+from .review_labels import (
+    FIGURE_TEXT,
+    annotate_measurements,
+    chinese_plot_style,
+    review_objects,
+)
 
 
 def _atomic_results_json(path, data):
@@ -112,7 +117,9 @@ def _render_scene(payload, frame, path, *, fusion=False, grid=None):
     grid = R1HeightGrid.from_points(frame.xyz, 0.5) if grid is None else grid
     step = max(1, int(np.ceil(max(grid.count.shape) / 1000)))
     display_aspect = grid.count.shape[0] / grid.count.shape[1]
-    figure, ax = plt.subplots(figsize=(20, max(6, min(12, 20 * display_aspect + 1))))
+    figure, ax = plt.subplots(
+        figsize=(20, max(6, min(12, 20 * display_aspect + 1))), dpi=150
+    )
     masked = np.ma.masked_where(~grid.occupancy, grid.median)
     image = ax.imshow(
         masked[::step, ::step],
@@ -138,13 +145,6 @@ def _render_scene(payload, frame, path, *, fusion=False, grid=None):
         footprint = np.asarray(hatch["boundary_xy"])
         ax.plot(
             *np.vstack((footprint, footprint[0])).T, color="#75ecff", lw=1.6, ls="--"
-        )
-        ax.text(
-            *footprint.mean(axis=0),
-            "开口待审",
-            color="#75ecff",
-            fontsize=9,
-            ha="center",
         )
     for unresolved in result.get("unresolved_rectangle_candidates", []):
         if unresolved["opening_identity"] in coarse_ids:
@@ -203,8 +203,7 @@ def _render_scene(payload, frame, path, *, fusion=False, grid=None):
     figure.tight_layout()
     annotate_measurements(
         ax,
-        result["hatches"],
-        draw_corner_points=payload["schema"] != "ship_perception.hatch_once.3",
+        review_objects(result),
     )
     figure.savefig(path, dpi=150, bbox_inches="tight", pad_inches=0.15)
     plt.close(figure)

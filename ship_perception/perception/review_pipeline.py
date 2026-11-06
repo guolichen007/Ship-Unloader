@@ -36,6 +36,7 @@ from .local_rim_evidence import (
     shadow_rectangle_ab,
     shadow_review_only_cell,
 )
+from .vessel_rim_recovery import recover_vessel_sides
 from .recall_snapshot import RecallSnapshot
 from .runtime_metrics import peak_rss_bytes
 from .review_geometry import ReviewGeometryAssembler, SIDES
@@ -621,6 +622,20 @@ def run_perception(
                         strict_hatches.append(promoted)
             hatches = strict_hatches
             checkpoint("RECTANGLE_REVIEW_READY", review_objects=hatches)
+        if local_rim_review and not opening_preview and not precision_deferred:
+            with stage("SAME_VESSEL_RAW_SIDE_RECOVERY"):
+                hatches, width_audits = recover_vessel_sides(
+                    selected_cells,
+                    hatches,
+                    candidate_by_id,
+                    region_by_id,
+                    local_rim,
+                    assembler,
+                    config,
+                    bridge,
+                )
+                item["same_vessel_width_consistency"] = width_audits
+                checkpoint("RAW_SIDE_RECOVERY_READY", review_objects=hatches)
         with stage("CORNER_HEIGHT_OUTPUT"):
             replication = (
                 replicated_corner_view(measurement)
