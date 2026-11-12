@@ -13,12 +13,15 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: 0
       - name: Record exact tested source
         env:
           EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          git rev-parse HEAD > ci-head.txt
+          mkdir -p "$RUNNER_TEMP/ship-review-ci-evidence"
+          git rev-parse HEAD | tee "$RUNNER_TEMP/ship-review-ci-evidence/ci-head.txt"
+          test -z "$(git status --porcelain)"
       - name: Install numerical and build dependencies
         run: |
           apt-get update
@@ -27,6 +30,8 @@ jobs:
         run: |
           python3 -m venv --system-site-packages .local/ros2-venv
           .local/ros2-venv/bin/python -m pip install -r requirements-ros.txt
+          .local/ros2-venv/bin/python -m pip freeze > "$RUNNER_TEMP/ship-review-ci-evidence/ci-pip-freeze.txt"
+          dpkg-query -W > "$RUNNER_TEMP/ship-review-ci-evidence/ci-dpkg-versions.txt"
       - name: Build C++ core and ROS2 Python package
         shell: bash
         run: |
@@ -45,18 +50,15 @@ jobs:
           python3 -s -m pytest -q ship_perception/tests/test_r3k_review_layers.py
           python3 -s ship_perception/tools/verify_v14_frozen.py
           python3 -s -c 'from ship_perception.perception.legacy_expert import verify_legacy_b2_core; print(verify_legacy_b2_core())'
-          python3 -m pip freeze > ci-pip-freeze.txt
-          dpkg-query -W > ci-dpkg-versions.txt
           colcon test --base-paths ship_perception --packages-select ship_perception --ctest-args -E '^v15_quick$'
           colcon test-result --all --verbose
+          test -z "$(git status --porcelain)"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2, verified upstream
         if: always()
         with:
           name: humble-test-results
           path: |
-            ci-head.txt
-            ci-pip-freeze.txt
-            ci-dpkg-versions.txt
+            ${{ runner.temp }}/ship-review-ci-evidence/
             log/
             build/ship_perception/Testing/
             build/ship_perception/test_results/
