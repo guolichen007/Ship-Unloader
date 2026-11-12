@@ -101,6 +101,7 @@ def worker(args):
             opening_preview=mode == "preview",
             local_rim_review=True,
             review_snapshot=args.snapshot if args.mode == "staged" else None,
+            review_process_deadline=start + 300.0,
             no_legacy_evidence=False,
             output_dir=folder,
             save_snapshot=False,
@@ -141,7 +142,12 @@ def worker(args):
                 pcd_decode_count=1,
                 modes=receipts,
                 total_wall_s=time.perf_counter() - start,
-                status="COMPLETED",
+                status=(
+                    "COMPLETED"
+                    if len(receipts) == len(modes)
+                    else "PREVIEW_COMPLETED_FULL_PENDING"
+                ),
+                deadline_scope="SHARED_PREVIEW_AND_FULL_PROCESS",
             ),
         )
     print("R3H_WORKER_STATUS=COMPLETED", flush=True)

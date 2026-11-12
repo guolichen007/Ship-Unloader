@@ -76,6 +76,17 @@ class ProgressOnly:
             self.callback()
 
 
+def review_precision_deadline(
+    start, watchdog_s, output_reserve_s, process_deadline=None
+):
+    deadline = start + watchdog_s
+    if process_deadline is not None:
+        if not np.isfinite(process_deadline):
+            raise ValueError("NONFINITE_REVIEW_PROCESS_DEADLINE")
+        deadline = min(deadline, process_deadline)
+    return deadline - output_reserve_s
+
+
 def run_perception(
     frame,
     progress=None,
@@ -88,6 +99,7 @@ def run_perception(
     opening_preview=False,
     local_rim_review=False,
     review_snapshot=None,
+    review_process_deadline=None,
 ):
     if mode not in ("bounded", "review-first"):
         raise ValueError("INVALID_REVIEW_MODE")
@@ -140,6 +152,16 @@ def run_perception(
         json.dumps(effective, sort_keys=True).encode()
     ).hexdigest()
     budget = PerformanceBudget(total_s=55.0) if mode == "bounded" else None
+    precision_deadline = (
+        review_precision_deadline(
+            start,
+            effective["hard_process_watchdog_s"],
+            effective["review_output_reserve_s"],
+            review_process_deadline,
+        )
+        if local_rim_review
+        else None
+    )
 
     def checkpoint(stage, **kw):
         if monitor:
@@ -234,6 +256,28 @@ def run_perception(
     failures = []
     measurement = None
     precision_deferred = False
+
+    def honor_precision_deadline(stage_name):
+        nonlocal precision_deferred
+        if (
+            local_rim_review
+            and not opening_preview
+            and not precision_deferred
+            and time.perf_counter() >= precision_deadline
+        ):
+            precision_deferred = True
+            failures.append(
+                dict(
+                    stage=stage_name,
+                    code="PRECISION_DEFERRED_FOR_REVIEW_OUTPUT",
+                    budget_scope=(
+                        "SHARED_PROCESS"
+                        if review_process_deadline is not None
+                        else "SINGLE_EXECUTE"
+                    ),
+                )
+            )
+
     selected_audit = None
     diagnostics = {}
     attempts = []
@@ -379,13 +423,6 @@ def run_perception(
             def measurement_progress():
                 tasks.flush(dict(measurement.counters))
 
-            precision_deadline = (
-                start
-                + effective["hard_process_watchdog_s"]
-                - effective["review_output_reserve_s"]
-                if local_rim_review
-                else None
-            )
             measurement.budget = budget or ProgressOnly(
                 measurement_progress, precision_deadline
             )
@@ -539,6 +576,7 @@ def run_perception(
                     )
                     checkpoint("BOUNDARY_MEASUREMENT", review_objects=hatches)
         local_rim_by_region = {}
+        honor_precision_deadline("LOCAL_RIM_NOMINATION")
         if local_rim_review and not opening_preview and not precision_deferred:
             with stage("LOCAL_RIM_NOMINATION"):
                 local_rim = LocalRimEvidence(measurement, config)
@@ -624,6 +662,7 @@ def run_perception(
                         strict_hatches.append(promoted)
             hatches = strict_hatches
             checkpoint("RECTANGLE_REVIEW_READY", review_objects=hatches)
+        honor_precision_deadline("SAME_VESSEL_RAW_SIDE_RECOVERY")
         if local_rim_review and not opening_preview and not precision_deferred:
             with stage("SAME_VESSEL_RAW_SIDE_RECOVERY"):
                 hatches, width_audits = recover_vessel_sides(
@@ -727,6 +766,7 @@ def run_perception(
                 cell.update(strict_rectangle_state=state, geometry=review)
                 if review is not None:
                     coarse_boxes.append(review)
+        honor_precision_deadline("EVIDENCE_GRADED_REVIEW_GEOMETRY")
         if local_rim_review and not opening_preview and not precision_deferred:
             with stage("EVIDENCE_GRADED_REVIEW_GEOMETRY"):
                 recover_review_geometries(
@@ -875,6 +915,11 @@ def run_perception(
         ),
         recall_snapshot=snapshot.audit,
         pipeline_health=dict(
+            precision_budget_scope=(
+                "SHARED_PROCESS"
+                if review_process_deadline is not None
+                else "SINGLE_EXECUTE"
+            ),
             precision_state=(
                 "DEFERRED_PERFORMANCE" if precision_deferred else "COMPLETED"
             ),

@@ -179,7 +179,7 @@ def final_support_sides(result, config):
 def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=None,
                    mode="bounded", operator_vessel_roi=None, monitor=None,
                    opening_topology_v2=False, opening_preview=False,
-                   local_rim_review=False, review_snapshot=None):
+                   local_rim_review=False, review_snapshot=None, review_process_deadline=None):
     if mode == "bounded":
         if opening_topology_v2 or opening_preview or local_rim_review or review_snapshot:
             raise ValueError("OPENING_TOPOLOGY_REQUIRES_REVIEW_FIRST")
@@ -191,7 +191,7 @@ def run_perception(frame, progress=None, legacy_evidence=True, berth_reference=N
     from .review_pipeline import run_perception as run_review
     return run_review(frame, progress, legacy_evidence, berth_reference,
                       mode, operator_vessel_roi, monitor, opening_topology_v2, opening_preview,
-                      local_rim_review, review_snapshot)
+                      local_rim_review, review_snapshot, review_process_deadline)
 
 
 def run_pre_v29_bounded(frame, progress=None, legacy_evidence=True, berth_reference=None):

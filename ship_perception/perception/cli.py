@@ -64,6 +64,8 @@ def execute(frame, args, progress):
                        opening_preview=getattr(args, "opening_preview", False),
                        local_rim_review=getattr(args, "local_rim_review", False),
                        review_snapshot=getattr(args, "review_snapshot", None))
+        if getattr(args, "review_process_deadline", None) is not None:
+            options["review_process_deadline"] = args.review_process_deadline
     from .output import save_output
 
     from .review_runtime import ReviewRunMonitor
