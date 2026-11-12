@@ -18,7 +18,6 @@ from .pipeline import (
 )
 from .runtime_patch import git_source_state
 from .context import SceneEvidenceContext, thaw
-from .discovery_frame import conditioned_discovery
 from .berth import load_berth_reference, select_berth_vessel
 from .operator_selection import select_operator_vessel
 from .selected_context import SelectedVesselRawContext
@@ -134,7 +133,6 @@ def run_perception(
         rectangle_numerical_scaled_length_tolerance=1e-8,
         soft_runtime_limit_s=120.0,
         hard_process_watchdog_s=300.0,
-        discovery_lattice="CURRENT_RAW_RIGID_FRAME_V1",
         provider_side_positions="EXACT_OBSERVED_FLOAT_NO_ABSOLUTE_ROUNDING",
     )
     if operator_vessel_roi:
@@ -224,7 +222,6 @@ def run_perception(
                 research,
                 physical_hash,
                 software_identity(),
-                discovery=conditioned_discovery,
             )
         )
         scene.validate_frame(frame)
