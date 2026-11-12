@@ -2,12 +2,23 @@ name: ROS2 Humble review tools
 on:
   push:
   pull_request:
+permissions:
+  contents: read
 jobs:
   humble:
     runs-on: ubuntu-22.04
-    container: ros:humble-ros-base-jammy
+    container: ros:humble-ros-base-jammy@sha256:d9f14e84747bea639a65e00cf871d2c68ae55385d2acf6239614de0cadb41dcc
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, verified upstream
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Record exact tested source
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git rev-parse HEAD > ci-head.txt
       - name: Install numerical and build dependencies
         run: |
           apt-get update
@@ -31,13 +42,21 @@ jobs:
           source .local/ros2-venv/bin/activate
           export PYTHONNOUSERSITE=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
           python3 -s -m unittest discover -s ship_perception/tests -p 'test_*.py'
+          python3 -s -m pytest -q ship_perception/tests/test_r3k_review_layers.py
+          python3 -s ship_perception/tools/verify_v14_frozen.py
+          python3 -s -c 'from ship_perception.perception.legacy_expert import verify_legacy_b2_core; print(verify_legacy_b2_core())'
+          python3 -m pip freeze > ci-pip-freeze.txt
+          dpkg-query -W > ci-dpkg-versions.txt
           colcon test --base-paths ship_perception --packages-select ship_perception --ctest-args -E '^v15_quick$'
           colcon test-result --all --verbose
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2, verified upstream
         if: always()
         with:
           name: humble-test-results
           path: |
+            ci-head.txt
+            ci-pip-freeze.txt
+            ci-dpkg-versions.txt
             log/
             build/ship_perception/Testing/
             build/ship_perception/test_results/
