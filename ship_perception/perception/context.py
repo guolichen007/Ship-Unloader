@@ -265,8 +265,9 @@ class SceneEvidenceContext:
     boundary_contexts: tuple
 
     @classmethod
-    def build(cls, frame, config, research, config_sha, software_sha):
-        scene, private = infer_scene_vessels(frame.xyz, config, research)
+    def build(cls, frame, config, research, config_sha, software_sha, discovery=None):
+        discover = infer_scene_vessels if discovery is None else discovery
+        scene, private = discover(frame.xyz, config, research)
         vessels = []
         for row in scene["vessel_hypotheses"]:
             ownership_bytes = np.asarray(
@@ -291,11 +292,14 @@ class SceneEvidenceContext:
             tuple(vessels),
             BoundaryMeasurementContext.build_all(
                 vessels,
-                frame.xyz,
-                {
-                    s["support_id"]: s["bbox_xy"]
-                    for s in scene.get("scene_support_candidates", [])
-                },
+                private.get("membership_xyz", frame.xyz),
+                private.get(
+                    "support_bounds",
+                    {
+                        s["support_id"]: s["bbox_xy"]
+                        for s in scene.get("scene_support_candidates", [])
+                    },
+                ),
                 private["grid"].cell_m if private.get("grid") is not None else None,
             ),
         )

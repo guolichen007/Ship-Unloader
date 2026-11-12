@@ -170,7 +170,12 @@ class VesselLocalEvidence:
             # boundaries, so provenance and mode values remain identical.
             nearby = [lines[i] for i in sorted(order[low:high])]
             output[name] = _side_modes(
-                nearby, axis, (box[1 - axis], box[3 - axis]), band, self.config
+                nearby,
+                axis,
+                (box[1 - axis], box[3 - axis]),
+                band,
+                self.config,
+                exact_positions=getattr(self, "exact_side_positions", False),
             )
         return output
 
