@@ -7,6 +7,11 @@ import json
 from pathlib import Path
 import numpy as np
 from .r3h_geometry import dimensions
+from .review_layer_output import (
+    draw_review_evidence,
+    write_review_layers,
+    review_evidence_text,
+)
 from .review_labels import (
     annotate_measurements,
     chinese_plot_style,
@@ -101,6 +106,9 @@ def render_comparison(
     )
     if previous is None:
         for obj in old:
+            if obj.get("baseline_boundary_xy") is not None:
+                obj["boundary_xy"] = obj["baseline_boundary_xy"]
+                continue
             before = (
                 obj.get("rim_error_recovery", {})
                 .get("shadow_ab", {})
@@ -129,7 +137,7 @@ def render_comparison(
                 "原始点云高度图",
                 "上一版船舱复核框",
                 "新增内沿候选及原始证据",
-                "本轮船舱标定结果",
+                "本轮复核建议（非认证）",
             ],
         ):
             panel.imshow(
@@ -144,6 +152,11 @@ def render_comparison(
                 title=scene_label + "｜" + title,
                 xlabel="输入坐标 X（米）",
                 ylabel="输入坐标 Y（米）",
+            )
+        for obj in old:
+            p = np.asarray(obj["boundary_xy"])
+            panels[3].plot(
+                *np.vstack((p, p[0])).T, color="#a1a7b3", lw=0.7, ls="--", alpha=0.65
             )
         for panel, objects, color in [
             (panels[1], old, "#ffbb33"),
@@ -170,6 +183,8 @@ def render_comparison(
                     )
         for cell in result.get("selected_opening_cells", []):
             rotation = axes[cell["vessel_id"]]
+            if draw_review_evidence(panels[2], cell, frame, rotation):
+                continue
             for entry in (
                 cell.get("rim_error_recovery", {}).get("candidates", {}).values()
             ):
@@ -215,9 +230,9 @@ def render_comparison(
         panels[2].legend(
             handles=[
                 Line2D([], [], color="#a1a7b3", label="旧版边界"),
-                Line2D([], [], color="#ff5c8a", ls="--", label="有立面原始支持的候选"),
+                Line2D([], [], color="#ff9060", label="独立留出断面支持点"),
                 Line2D(
-                    [], [], color="#33cfff", ls="--", label="仅高度过渡候选，未认证"
+                    [], [], color="#33cfff", ls="--", label="训练断面及估计候选，未认证"
                 ),
             ],
             loc="upper center",
@@ -243,6 +258,7 @@ def write_bundle(
     payload, frame, directory, grid, *, scene_label="输入场景", previous=None
 ):
     directory = Path(directory)
+    write_review_layers(payload, directory)
     changes = side_changes(payload)
     (directory / "逐边变动与原始证据.json").write_text(
         json.dumps(changes, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
@@ -284,6 +300,8 @@ def write_bundle(
                         display_number(mode["uncertainty_m"]),
                     )
                 )
+        if row.get("adopted_for_review"):
+            details = review_evidence_text(row)
         cards.append(
             "<article><h2>第{}舱｜长{}米 × 宽{}米</h2><p>{}</p><pre>{}</pre><p>{}</p><p>{}</p></article>".format(
                 number,
@@ -327,7 +345,7 @@ def write_bundle(
     document = (
         '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>船舱标定复核</title><style>body{font:16px/1.7 system-ui,sans-serif;margin:24px;background:#f4f6fa;color:#17263a}img{width:100%;height:auto}article{display:inline-block;vertical-align:top;background:white;padding:16px;margin:12px}h2{font-size:20px}pre{font:14px/1.8 monospace}a{color:#154b9c}</style><h1>'
         + html.escape(scene_label)
-        + '｜船舱标定复核结果</h1><p>全部钢边精度未认证，人工审核待签。严格矩形可解仅表示几何约束可解。候选修正未采用时保留旧版正式复核框。坐标两位小数不代表厘米级测量精度。</p><p><a href="hatches_compact.json">每舱原始四角及长宽</a> · <a href="船舱长宽与四角_中文.csv">长宽与坐标表</a> · <a href="逐边变动与原始证据.json">逐边原始证据与变动</a> · <a href="runtime_io_metrics.json">阶段性能报告</a></p><img src="新旧候选四栏对照.png" alt="原始高度、旧框、内沿候选及最终复核四栏">'
+        + '｜船舱标定复核结果</h1><p>主图为复核建议；全部钢边精度未认证，人工审核待签，禁止用于生产控制。原严格结果独立保留，严格矩形可解仅表示几何约束可解。坐标两位小数不代表厘米级测量精度。</p><p><a href="review_hatches_compact.json">本轮复核建议四角及长宽</a> · <a href="hatches_compact.json">原严格结果四角及长宽</a> · <a href="船舱长宽与四角_中文.csv">复核长宽与坐标表</a> · <a href="复核层逐边留出证据.json">本轮逐边训练及留出证据</a> · <a href="逐边变动与原始证据.json">原严格逐边证据</a> · <a href="runtime_io_metrics.json">阶段性能报告</a></p><img src="新旧候选四栏对照.png" alt="原始高度、旧框、内沿候选及最终复核四栏">'
         + "".join(cards)
         + "</html>"
     )

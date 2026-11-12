@@ -182,7 +182,19 @@ def _render_scene(payload, frame, path, *, fusion=False, grid=None):
             ls=":",
             alpha=0.6,
         )
-    title = FIGURE_TEXT["geometry_title"]
+    main_reviews = review_objects(result)
+    has_suggestion = any(row.get("adopted_for_review") for row in main_reviews)
+    if has_suggestion:
+        for line in ax.lines:
+            line.set(color="#a0a6b3", linewidth=0.7, linestyle="--", alpha=0.65)
+        for row in main_reviews:
+            p = np.asarray(row["boundary_xy"])
+            ax.plot(*np.vstack((p, p[0])).T, color="#ffbb33", lw=1.6)
+    title = (
+        "船舱复核建议（非认证）｜细虚线为原严格基线"
+        if has_suggestion
+        else FIGURE_TEXT["geometry_title"]
+    )
     if fusion:
         title = (
             FIGURE_TEXT["intensity_unavailable"]
@@ -203,7 +215,7 @@ def _render_scene(payload, frame, path, *, fusion=False, grid=None):
     figure.tight_layout()
     annotate_measurements(
         ax,
-        review_objects(result),
+        main_reviews,
     )
     if path is None:
         return figure, ax

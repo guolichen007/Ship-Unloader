@@ -89,11 +89,27 @@ def review_objects(result):
         obj = dict(strict.get(cell["primary_region_id"], cell["geometry"]))
         obj["strict_rectangle_state"] = cell["strict_rectangle_state"]
         obj["rim_error_recovery"] = cell.get("rim_error_recovery", {})
+        review = cell.get("review_geometry", {})
+        if review.get("adopted_for_review"):
+            obj.update(review)
+            obj["corner_heights"] = [
+                dict(z_m=point[2], z_state="UNOBSERVED")
+                for point in review["corners_xyz"]
+            ]
         objects.append(obj)
     return ordered_reviews(objects)
 
 
 def review_status(hatch):
+    if hatch.get("adopted_for_review"):
+        strict = (
+            "严格矩形未决"
+            if hatch.get("strict_rectangle_state") != "FEASIBLE"
+            else "严格结果另列"
+        )
+        return "复核估计｜{}级｜{}\n待人工确认｜非认证，禁止控制".format(
+            hatch.get("grade", "C"), strict
+        )
     state = hatch.get("strict_rectangle_state")
     strict = state == "FEASIBLE" or (
         state is None and "rectangle_constraint_conflict_count" in hatch

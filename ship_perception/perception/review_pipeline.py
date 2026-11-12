@@ -37,6 +37,7 @@ from .local_rim_evidence import (
     shadow_review_only_cell,
 )
 from .vessel_rim_recovery import recover_vessel_sides
+from .review_geometry_recovery import recover_review_geometries
 from .recall_snapshot import RecallSnapshot
 from .runtime_metrics import peak_rss_bytes
 from .review_geometry import ReviewGeometryAssembler, SIDES
@@ -726,6 +727,11 @@ def run_perception(
                 cell.update(strict_rectangle_state=state, geometry=review)
                 if review is not None:
                     coarse_boxes.append(review)
+        if local_rim_review and not opening_preview and not precision_deferred:
+            with stage("EVIDENCE_GRADED_REVIEW_GEOMETRY"):
+                recover_review_geometries(
+                    selected_cells, region_by_id, measurement, config, local_rim
+                )
         regions = [r.audit() for r in cache.opening_identities]
         for r in regions:
             for source, target in [

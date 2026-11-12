@@ -53,6 +53,24 @@ def verify_output(folder, expected_sha):
     seen = {h["opening_id"] for v in compact["vessels"] for h in v["hatches"]}
     if ids != seen:
         raise ValueError("CELL_GEOMETRY_EXPORT_MISMATCH")
+    native = json.loads((folder / "03_results.json").read_text(encoding="utf-8"))
+    if (
+        native.get("geometry_only", {}).get("opening_review_level")
+        == "PRECISION_RECTANGLE_REVIEW"
+    ):
+        review_path = folder / "review_hatches_compact.json"
+        if not review_path.is_file():
+            raise ValueError("MISSING_REVIEW_LAYER")
+        review = json.loads(review_path.read_text(encoding="utf-8"))
+        if {r["cell_id"] for r in review} != ids:
+            raise ValueError("REVIEW_LAYER_IDENTITY_MISMATCH")
+        for row in review:
+            if row["control_eligible"] or row["steel_certified"]:
+                raise ValueError("UNCERTIFIED_REVIEW_CANNOT_CONTROL")
+            if row["adopted_for_review"] and any(
+                p[2] is not None for p in row["corners_xyz"]
+            ):
+                raise ValueError("REVIEW_MOVED_XY_CANNOT_INHERIT_OLD_Z")
     return compact
 
 
@@ -259,6 +277,13 @@ def main():
                 from r3h_export_dimensions import print_compact
 
                 final = receipt["modes"][-1]["result_dir"]
+                review_path = Path(final) / "review_hatches_compact.json"
+                if review_path.is_file():
+                    print(
+                        "本轮复核建议（非认证，禁止用于控制）：" + str(review_path),
+                        flush=True,
+                    )
+                print("原严格几何结果：", flush=True)
                 print_compact(
                     json.loads(
                         (Path(final) / "hatches_compact.json").read_text(
