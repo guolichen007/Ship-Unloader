@@ -8,7 +8,7 @@ import numpy as np
 
 
 def pool_enabled():
-    value = os.environ.get("SHIP_REVIEW_EXACT_NORMAL_POOL", "0")
+    value = os.environ.get("SHIP_REVIEW_EXACT_NORMAL_POOL", "1")
     if value not in ("0", "1"):
         raise ValueError("SHIP_REVIEW_EXACT_NORMAL_POOL must be 0 or 1")
     return value == "1"

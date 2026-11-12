@@ -4,7 +4,7 @@ import os
 
 
 def normal_query_workers():
-    value = int(os.environ.get("SHIP_REVIEW_NORMAL_WORKERS", "1"))
+    value = int(os.environ.get("SHIP_REVIEW_NORMAL_WORKERS", "4"))
     if value < 1 or value > 4:
         raise ValueError("SHIP_REVIEW_NORMAL_WORKERS must be between 1 and 4")
     return value
