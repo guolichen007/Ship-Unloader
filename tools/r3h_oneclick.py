@@ -81,10 +81,13 @@ def worker(args):
     from ship_perception.perception.cli import execute
     from ship_perception.tools.stage_progress import StageProgress
     from ship_perception.perception.runtime_metrics import peak_rss_bytes
+    from ship_perception.perception.e2e_timing import ReviewTiming
 
     args.output.mkdir(parents=True, exist_ok=True)
     start = time.perf_counter()
+    read_start = time.perf_counter()
     frame = read_pcd(args.input, args.frame_id)
+    read_end = time.perf_counter()
     if frame.provenance["wire_sha256"] != args.expected_sha:
         raise ValueError("INPUT_CHANGED_DURING_RUN")
     modes = ("preview", "full") if args.mode == "staged" else (args.mode,)
@@ -92,6 +95,14 @@ def worker(args):
     decode = time.perf_counter() - start
     for mode in modes:
         folder = args.output / mode
+        observer = ReviewTiming(
+            start,
+            read_start,
+            read_end,
+            mode,
+            args.expected_sha,
+            args.input.stat().st_size,
+        )
         options = SimpleNamespace(
             pipeline="v2",
             berth_reference=None,
@@ -105,6 +116,7 @@ def worker(args):
             no_legacy_evidence=False,
             output_dir=folder,
             save_snapshot=False,
+            review_timing_observer=observer,
         )
         tick, cpu = time.perf_counter(), time.process_time()
         code = execute(frame, options, StageProgress())
@@ -112,6 +124,8 @@ def worker(args):
         if code or not result_files:
             raise ValueError("NATIVE_REVIEW_FAILED")
         result_dir = result_files[-1].parent
+        observer.published()
+        atomic_json(result_dir / "e2e_timing.json", observer.report())
         payload = json.loads(result_files[-1].read_text(encoding="utf-8"))
         compact = verify_output(result_dir, args.expected_sha, native=payload)
         report = dict(
@@ -127,6 +141,7 @@ def worker(args):
             stage_resources=payload.get("stage_resources", {}),
             visible_count=sum(len(v["hatches"]) for v in compact["vessels"]),
             runtime_source_sha256=compact["runtime_source_sha256"],
+            e2e_timing=observer.report(),
         )
         metrics = result_dir / "runtime_io_metrics.json"
         report["output_resources"] = (

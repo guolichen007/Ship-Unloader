@@ -74,6 +74,9 @@ def execute(frame, args, progress):
                           input_sha256=frame.provenance.get("wire_sha256",frame.sha256))) as monitor:
         if getattr(args,"pipeline","v2")=="v2":options['monitor']=monitor
         payload = run_perception(frame, progress, legacy_evidence=not args.no_legacy_evidence, **options)
+        observer = getattr(args, "review_timing_observer", None)
+        if observer is not None:
+            observer.geometry_ready(payload)
         monitor.checkpoint(stage="RENDER_AND_SAVE",review_objects=payload['geometry_only']['hatches'])
         directory = save_output(payload, frame, args.output_dir, args.save_snapshot, Timing(progress))
     progress.finish(True)
