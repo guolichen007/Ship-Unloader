@@ -107,7 +107,8 @@ def review_status(hatch):
             if hatch.get("strict_rectangle_state") != "FEASIBLE"
             else "严格结果另列"
         )
-        return "复核估计｜{}级｜{}\n待人工确认｜非认证，禁止控制".format(
+        return "{}｜{}级｜{}\n待人工确认｜非认证，禁止控制".format(
+            "多解待审" if hatch.get("state") == "REVIEW_AMBIGUOUS" else "复核估计",
             hatch.get("grade", "C"), strict
         )
     state = hatch.get("strict_rectangle_state")

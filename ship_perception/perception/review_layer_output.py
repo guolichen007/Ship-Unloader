@@ -101,10 +101,19 @@ def review_evidence_text(row):
     if not row.get("adopted_for_review"):
         return []
     details = ["复核估计采用独立物理断面留出验证；原严格结果另存；钢边精度未认证。"]
+    if row.get("state") == "REVIEW_AMBIGUOUS":
+        details.append(
+            "存在其他平行边解释或依赖邻舱消歧：当前框仅为待审建议，无法唯一确定真实内沿。"
+        )
     for side, entry in row.get("side_evidence", {}).items():
         selected = entry.get("review_selected_mode_id")
         for mode in entry["candidates"]:
             if mode["mode_id"] == selected:
+                ambiguity = entry.get("physical_ambiguity", {})
+                if not ambiguity.get("outside_platform_witness_sections", 0):
+                    details.append(
+                        "{}：缺少外侧平台见证，物理材质仍未确定。".format(side)
+                    )
                 details.append(
                     "{}：训练断面{}个，留出通过{}个；留出覆盖{:.0f}%；位置观测区间[{:.2f}, {:.2f}]米；{}级估计".format(
                         side,

@@ -8,6 +8,7 @@ from .opening_interior_support import spatial_interior_core
 from .review_side_evidence import heldout_side, SIDES
 from .r3h_geometry import dimensions
 from .review_numerics import roundoff_m
+from .review_ambiguity import classify_edge
 
 
 def rectangle(bounds):
@@ -272,6 +273,7 @@ def recover_review_geometries(cells, regions, measurement, config, local_rim=Non
                                 neighbor_best["position_uncertainty_m"],
                             )
                         )
+            own_best, own_alternatives = select_supported(e, config)
             best, alternatives = select_supported(e, config, neighbors)
             e["mutually_exclusive_alternatives"] = [m["mode_id"] for m in alternatives]
             e["arbitration"] = (
@@ -291,6 +293,7 @@ def recover_review_geometries(cells, regions, measurement, config, local_rim=Non
             gain = best["holdout_coverage"] - e["old_holdout_coverage"]
             if gain <= 0 or movement <= best["position_uncertainty_m"]:
                 continue
+            e["physical_ambiguity"] = classify_edge(e, best, own_best, own_alternatives)
             plan["selected"][side] = best
             e["review_selected_mode_id"] = best["mode_id"]
             e["mutually_exclusive_alternatives"] = [m["mode_id"] for m in alternatives]
@@ -347,7 +350,16 @@ def recover_review_geometries(cells, regions, measurement, config, local_rim=Non
             plan["original"] & inside(raw[:, :2], old) & ~inside(raw[:, :2], b)
         )
         layer.update(
-            state="REVIEW_ESTIMATED",
+            state=(
+                "REVIEW_AMBIGUOUS"
+                if any(
+                    e.get("physical_ambiguity", {}).get("state") == "REVIEW_AMBIGUOUS"
+                    for e in plan["evidence"].values()
+                )
+                else "REVIEW_ESTIMATED"
+            ),
+            material_role="NOT_IDENTIFIED_AS_STEEL",
+            selected_geometry_is_provisional=True,
             adopted_for_review=True,
             boundary_uv=uv.tolist(),
             boundary_xy=xy.tolist(),
