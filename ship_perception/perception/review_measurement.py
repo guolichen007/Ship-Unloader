@@ -1,7 +1,7 @@
 """Independent primary-Raw normal-face measurements, not steel certification."""
 
 import numpy as np
-from .measurement import BudgetedLocalSurfaceNormals
+from .measurement import review_normal_cache
 from .sections import physical_sections
 from .raw_face_refinement import measured_faces
 from .raw_mode_consensus import supported
@@ -94,12 +94,7 @@ def raw_face_measurements(
     ]
     if not nominated:
         return []
-    normals = getattr(measurement, "review_primary_normals", None)
-    if normals is None:
-        normals = BudgetedLocalSurfaceNormals(
-            primary.xyz, config, measurement.budget, measurement.counters
-        )
-        measurement.review_primary_normals = normals
+    normals, _ = review_normal_cache(measurement, config)
     edges = physical_sections(span, config["geometry"]["refine_voxel_m"], config)
     faces = measured_faces(
         normals,

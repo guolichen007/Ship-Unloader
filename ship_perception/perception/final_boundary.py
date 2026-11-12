@@ -10,7 +10,12 @@ import time
 import hashlib
 from contextlib import contextmanager
 
-from .measurement import RawSpatialIndex, RawSectionProfile, BudgetedLocalSurfaceNormals
+from .measurement import (
+    RawSpatialIndex,
+    RawSectionProfile,
+    BudgetedLocalSurfaceNormals,
+    review_normal_slot,
+)
 
 import numpy as np
 from scipy.stats import theilslopes
@@ -1292,8 +1297,18 @@ class FinalBoundaryRefiner:
                 )
                 if self.face_normals is None:
                     self.face_normals = (
-                        BudgetedLocalSurfaceNormals(
-                            self.xyz, self.config, self.budget, self.profiler
+                        (
+                            review_normal_slot(
+                                self.measurement_context,
+                                self.config,
+                                context=True,
+                                slot="local_surface_normals",
+                            )[0]
+                            if self.xyz
+                            is getattr(self.measurement_context, "raw_uvz", None)
+                            else BudgetedLocalSurfaceNormals(
+                                self.xyz, self.config, self.budget, self.profiler
+                            )
                         )
                         if self.measurement_context is not None
                         else LocalSurfaceNormals(self.xyz, self.config)

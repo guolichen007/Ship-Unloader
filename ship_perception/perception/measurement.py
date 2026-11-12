@@ -1,5 +1,6 @@
 """Exact raw-point indexing and once-per-section normal-coordinate profiles."""
 
+from .exact_normal_pool import exact_normal_instance
 from .normal_query import ExactQueryExecution, normal_query_workers
 from .precision_diagnostics import stage as precision_stage, side_completed
 
@@ -39,22 +40,36 @@ class BudgetedLocalSurfaceNormals(LocalSurfaceNormals):
                 self.budget.check()
 
 
-def review_normal_cache(measurement, config, context=False):
+def review_normal_slot(measurement, config, context=False, slot=None):
     """Share the exact input/canonical index contract across XY and Z probes."""
     primary = getattr(measurement.local, "primary_cache", measurement.local)
     points = measurement.raw_uvz if context else primary.xyz
     source = measurement.raw_point_indexes if context else primary.vessel.point_indexes
-    name = "review_context_normals" if context else "review_primary_normals"
+    name = slot or ("review_context_normals" if context else "review_primary_normals")
     normals = getattr(measurement, name, None)
     if normals is None:
-        normals = BudgetedLocalSurfaceNormals(
-            points, config, getattr(measurement, "budget", None), measurement.counters
+        normals = exact_normal_instance(
+            measurement,
+            points,
+            np.asarray(source),
+            config,
+            getattr(primary.vessel, "axes", None),
+            lambda: BudgetedLocalSurfaceNormals(
+                points,
+                config,
+                getattr(measurement, "budget", None),
+                measurement.counters,
+            ),
         )
         setattr(measurement, name, normals)
     if not hasattr(normals, "input_to_canonical"):
         normals.input_to_canonical = np.empty(len(points), dtype=np.int64)
         normals.input_to_canonical[normals.input_point_indexes] = np.arange(len(points))
     return normals, np.asarray(source)
+
+
+def review_normal_cache(measurement, config, context=False):
+    return review_normal_slot(measurement, config, context=context)
 
 
 def replicated_corner_view(measurement):
