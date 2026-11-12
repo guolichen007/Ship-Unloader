@@ -133,7 +133,6 @@ def run_perception(
         rectangle_numerical_scaled_length_tolerance=1e-8,
         soft_runtime_limit_s=120.0,
         hard_process_watchdog_s=300.0,
-        provider_side_positions="EXACT_OBSERVED_FLOAT_NO_ABSOLUTE_ROUNDING",
     )
     if operator_vessel_roi:
         effective["operator_roi_sha256"] = hashlib.sha256(
@@ -217,11 +216,7 @@ def run_perception(
             snapshot.value["scene"]
             if snapshot.value
             else SceneEvidenceContext.build(
-                frame,
-                config,
-                research,
-                physical_hash,
-                software_identity(),
+                frame, config, research, physical_hash, software_identity()
             )
         )
         scene.validate_frame(frame)
@@ -298,7 +293,6 @@ def run_perception(
         selected = SelectedVesselRawContext.build(frame, scene, selection, config)
         selected_audit = selected.audit()
         primary = VesselLocalEvidence.build(frame, vessel, config, selected.measurement)
-        primary.exact_side_positions = True
         cache = (
             primary
             if primary.context_xyz is primary.xyz
@@ -315,7 +309,6 @@ def run_perception(
             )
         )
         cache.primary_cache = primary
-        cache.exact_side_positions = True
         cache.input_frame = frame
         cache.s4_exterior = selected.exterior(frame, config)
         measurement = VesselMeasurementContext(cache)

@@ -56,9 +56,7 @@ def project_provider_observations(b2, vessel_id, axes, roi):
     return observed
 
 
-def bounded_side_modes(
-    observations, normal_axis, span, band, config, *, exact_positions=False
-):
+def bounded_side_modes(observations, normal_axis, span, band, config):
     """Survey measured rho modes across an opening band without B4's ±4 m anchor."""
     join = config["boundary"]["corner_join_m"]
     min_line = config["boundary"]["line_min_length_m"]
@@ -70,10 +68,7 @@ def bounded_side_modes(
         and band[0] <= row["rho"] <= band[1]
         and (min(span[1], row["along"][1]) - max(span[0], row["along"][0]) >= min_line)
     ]
-    positions = {
-        float(row["rho"]) if exact_positions else round(row["rho"], 2) for row in source
-    }
-    for rho in sorted(positions):
+    for rho in sorted({round(row["rho"], 2) for row in source}):
         nearby = [row for row in source if abs(row["rho"] - rho) <= join]
         levels = {}
         for scope in ("SAME_VESSEL", "CONTEXT_ONLY"):
