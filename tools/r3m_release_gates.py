@@ -1,6 +1,7 @@
 """Offline engineering gate aggregation. This is never a control authorization."""
 
 import argparse
+import csv
 import hashlib
 import json
 from pathlib import Path
@@ -25,6 +26,26 @@ REQUIRED = (
 )
 
 
+def human_review_errors(manifest, directory):
+    review = manifest.get("human_review", {})
+    path = Path(directory) / review.get("path", "")
+    expected = review.get("opening_geometry_sha256", {})
+    if not path.is_file() or not expected:
+        return ["HUMAN_REVIEW_TABLE_REQUIRED"]
+    with path.open(encoding="utf-8-sig", newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    keys = [row.get("开口ID") for row in rows]
+    reasons = []
+    if len(keys) != len(set(keys)) or set(keys) != set(expected):
+        reasons.append("HUMAN_REVIEW_IDENTITIES_MISMATCH")
+    for row in rows:
+        if row.get("二维结论") != "ACCEPT" or not row.get("审核人", "").strip():
+            reasons.append("HUMAN_REVIEW_UNSIGNED_OR_NOT_ACCEPTED")
+        if row.get("几何摘要") != expected.get(row.get("开口ID")):
+            reasons.append("HUMAN_REVIEW_GEOMETRY_CHANGED")
+    return sorted(set(reasons))
+
+
 def evaluate(manifest, directory):
     """Missing, changed, empty, or differently versioned evidence fails closed."""
     sha = manifest["source_sha"]
@@ -36,7 +57,13 @@ def evaluate(manifest, directory):
             reasons.append(item.get("status", "NOT_VERIFIED"))
         if item.get("source_sha") != sha:
             reasons.append("SOURCE_SHA_MISMATCH")
+        if name == "human_2d" and item.get("status") == "PASS":
+            reasons.extend(human_review_errors(manifest, directory))
         files = item.get("evidence", [])
+        if name == "human_2d" and item.get("status") == "PASS":
+            table = manifest.get("human_review", {}).get("path")
+            if table not in {e.get("path") for e in files}:
+                reasons.append("HUMAN_REVIEW_TABLE_NOT_HASHED")
         if not files:
             reasons.append("NO_EVIDENCE")
         for evidence in files:

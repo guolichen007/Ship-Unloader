@@ -1,4 +1,5 @@
 import copy
+import csv
 import hashlib
 import importlib.util
 import tempfile
@@ -59,6 +60,38 @@ class ReleaseGateContracts(unittest.TestCase):
                 source_sha="a" * 40,
                 gates={k: copy.deepcopy(gate) for k in self.gates.REQUIRED},
             )
+            table = Path(directory) / "synthetic-review.csv"
+
+            def write_review(decision):
+                with table.open("w", encoding="utf-8-sig", newline="") as stream:
+                    writer = csv.DictWriter(
+                        stream, fieldnames=["开口ID", "几何摘要", "二维结论", "审核人"]
+                    )
+                    writer.writeheader()
+                    writer.writerow(
+                        {
+                            "开口ID": "SYNTHETIC_UNIT_ONLY",
+                            "几何摘要": "test-geometry",
+                            "二维结论": decision,
+                            "审核人": "SYNTHETIC_UNIT_REVIEWER",
+                        }
+                    )
+
+            write_review("ACCEPT")
+            manifest["human_review"] = dict(
+                path=table.name,
+                opening_geometry_sha256={"SYNTHETIC_UNIT_ONLY": "test-geometry"},
+            )
+
+            def sign_table_digest():
+                manifest["gates"]["human_2d"]["evidence"] = [
+                    dict(
+                        path=table.name,
+                        sha256=hashlib.sha256(table.read_bytes()).hexdigest(),
+                    )
+                ]
+
+            sign_table_digest()
             r = self.gates.evaluate(manifest, directory)
             self.assertEqual(r["decision"], "GO_OFFLINE_REVIEW_APPLICATION_ONLY")
             self.assertFalse(r["device_control_allowed"])
@@ -67,6 +100,13 @@ class ReleaseGateContracts(unittest.TestCase):
                 self.gates.evaluate(manifest, directory)["decision"], "NO_GO"
             )
             manifest["gates"]["human_2d"]["status"] = "PASS"
+            write_review("PENDING")
+            sign_table_digest()
+            self.assertEqual(
+                self.gates.evaluate(manifest, directory)["decision"], "NO_GO"
+            )
+            write_review("ACCEPT")
+            sign_table_digest()
             p.write_bytes(b"changed receipt")
             self.assertEqual(
                 self.gates.evaluate(manifest, directory)["decision"], "NO_GO"
