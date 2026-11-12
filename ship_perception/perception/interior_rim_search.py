@@ -265,7 +265,7 @@ def raw_transition_nominations(points, indexes, span, search, config):
     )
 
 
-def transition_families(sections, length, config):
+def transition_families(sections, length, config, position_tolerance_m=None):
     rows = []
     for i, section in enumerate(sections):
         distinct = []
@@ -295,7 +295,12 @@ def transition_families(sections, length, config):
     s = np.array([r["station_m"] for r in rows])
     t = np.array([r["offset_m"] for r in rows])
     tolerance = np.maximum(
-        [r["uncertainty_m"] for r in rows], config["boundary"]["profile_max_residual_m"]
+        [r["uncertainty_m"] for r in rows],
+        (
+            config["boundary"]["profile_max_residual_m"]
+            if position_tolerance_m is None
+            else position_tolerance_m
+        ),
     )
     seeds = []
     for i, a in enumerate(rows):
