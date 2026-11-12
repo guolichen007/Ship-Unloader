@@ -1,5 +1,6 @@
 """Exact raw-point indexing and once-per-section normal-coordinate profiles."""
 
+from .normal_query import ExactQueryExecution, normal_query_workers
 from .precision_diagnostics import stage as precision_stage, side_completed
 
 from dataclasses import dataclass, field, replace
@@ -17,6 +18,9 @@ class BudgetedLocalSurfaceNormals(LocalSurfaceNormals):
     @precision_stage("normal")
     def __init__(self, xyz, config, budget, counters):
         super().__init__(xyz, config)
+        workers = normal_query_workers()
+        self.tree = ExactQueryExecution(self.tree, workers)
+        counters["normal_query_workers"] = workers
         self.input_point_indexes = np.lexsort((xyz[:, 2], xyz[:, 1], xyz[:, 0]))
         self.budget, self.counters = budget, counters
 
