@@ -4,6 +4,7 @@ import numpy as np
 from .interior_rim_search import raw_transition_nominations, transition_families
 from .local_rim_evidence import digest
 from .sections import physical_sections
+from .review_numerics import roundoff_m
 
 SIDES = {
     "V0": (1, 0, 1, [0, 1]),
@@ -72,7 +73,8 @@ def evaluate_section(section, slope, intercept, config, position_noise_m=None):
         <= config["geometry"]["plane_inlier_m"]
         for m in opposites
     )
-    passed = bool(residual <= sigma and not ridge)
+    numerical = roundoff_m(target, match["offset_m"])
+    passed = bool(residual <= sigma + numerical and not ridge)
     return dict(
         passed=passed,
         first_failure=(
@@ -80,7 +82,7 @@ def evaluate_section(section, slope, intercept, config, position_noise_m=None):
             if passed
             else (
                 "HOLDOUT_POSITION"
-                if residual > sigma
+                if residual > sigma + numerical
                 else "CARGO_RIDGE_OPPOSITE_POLARITY"
             )
         ),
@@ -190,9 +192,13 @@ def heldout_side(points, indexes, core, member, side, polygon, envelope, config)
             max((r["residual_m"] for r in good), default=b["profile_max_residual_m"]),
         )
         position = sign * (f["intercept_m"] + f["slope"] * length / 2)
+        attachment_roundoff = roundoff_m(points[core, :2], f["intercept_m"])
         inside = (
             sign * points[core, axis]
-            >= f["slope"] * (points[core, along] - lo) + f["intercept_m"] - sigma
+            >= f["slope"] * (points[core, along] - lo)
+            + f["intercept_m"]
+            - sigma
+            - attachment_roundoff
         )
         attachment = bool(
             len(points[core]) >= b["profile_min_points"] and np.all(inside)
@@ -252,6 +258,7 @@ def heldout_side(points, indexes, core, member, side, polygon, envelope, config)
             ],
             interval_semantic="OBSERVATION_AND_RECTANGLE_APPROXIMATION_NOT_SENSOR_CALIBRATED",
             opening_side_spatial_attachment=attachment,
+            attachment_numerical_roundoff_m=attachment_roundoff,
             steel_face_contact=False,
             first_failure=failures[0] if failures else "PASS",
             failure_gates=failures,

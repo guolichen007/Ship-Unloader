@@ -33,7 +33,7 @@ def file_sha(path):
     return h.hexdigest()
 
 
-def verify_output(folder, expected_sha):
+def verify_output(folder, expected_sha, native=None):
     required = (
         "opening_cells.json",
         "05_hatch_corners.json",
@@ -53,7 +53,8 @@ def verify_output(folder, expected_sha):
     seen = {h["opening_id"] for v in compact["vessels"] for h in v["hatches"]}
     if ids != seen:
         raise ValueError("CELL_GEOMETRY_EXPORT_MISMATCH")
-    native = json.loads((folder / "03_results.json").read_text(encoding="utf-8"))
+    if native is None:
+        native = json.loads((folder / "03_results.json").read_text(encoding="utf-8"))
     if (
         native.get("geometry_only", {}).get("opening_review_level")
         == "PRECISION_RECTANGLE_REVIEW"
@@ -110,8 +111,8 @@ def worker(args):
         if code or not result_files:
             raise ValueError("NATIVE_REVIEW_FAILED")
         result_dir = result_files[-1].parent
-        compact = verify_output(result_dir, args.expected_sha)
         payload = json.loads(result_files[-1].read_text(encoding="utf-8"))
+        compact = verify_output(result_dir, args.expected_sha, native=payload)
         report = dict(
             mode=mode,
             exit_code=code,

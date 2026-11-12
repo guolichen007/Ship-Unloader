@@ -148,9 +148,65 @@ def test_single_hatch_and_foreign_vessels_skip_joint_recovery():
     assert all("FAST_PATH" in c["review_geometry"]["reason"] for c in cells)
 
 
+def test_normal_fast_path_does_not_scan_raw_membership():
+    cfg, cells, regions, masks, local, measurement = fixture()
+    for cell in cells:
+        cell["width_recovery_requested_sides"] = []
+    with patch(
+        "ship_perception.perception.review_geometry_recovery.LocalRimEvidence",
+        side_effect=AssertionError("UNNECESSARY_RAW_INDEX"),
+    ), patch(
+        "ship_perception.perception.review_geometry_recovery.cell_members",
+        side_effect=AssertionError("UNNECESSARY_RAW_SCAN"),
+    ):
+        recover_review_geometries(cells, regions, None, cfg)
+    assert all("FAST_PATH" in c["review_geometry"]["reason"] for c in cells)
+
+
 def test_separator_conflict_cannot_be_removed_to_make_a_review_succeed():
     cfg, cells, regions, masks, local, measurement = fixture()
     cells[0]["separator_constraints"] = [dict(axis=1, sense="MIN", value=3.0)]
     run(cells, regions, masks, local, measurement, cfg)
     assert not cells[0]["review_geometry"]["adopted_for_review"]
     assert cells[0]["review_geometry"]["guards"]["separator_crossing"] == 1
+
+
+def test_review_attachment_at_tolerance_boundary_is_rigid_invariant():
+    cfg, cells, regions, masks, local, measurement = fixture()
+    run(cells, regions, masks, local, measurement, cfg)
+    baseline = {
+        c["cell_id"]: np.asarray(c["review_geometry"]["boundary_xy"]) for c in cells
+    }
+    for yaw, translation in (
+        (0.0, [31.0, -19.0]),
+        (0.7, [-90.0, 145.0]),
+        (-1.2, [500.0, -300.0]),
+    ):
+        cfg, cells, regions, masks, local, measurement = fixture()
+        q = np.array([[np.cos(yaw), -np.sin(yaw)], [np.sin(yaw), np.cos(yaw)]])
+        t = np.asarray(translation)
+        shift = t @ q
+        for cell in cells:
+            geometry = cell["geometry"]
+            xy = np.asarray(geometry["boundary_xy"]) @ q.T + t
+            geometry["boundary_xy"] = xy.tolist()
+            geometry["corners_xyz"] = [[x, y, 7.0] for x, y in xy]
+        for region in regions.values():
+            region.search_envelope = (
+                np.asarray(region.search_envelope) + np.tile(shift, 2)
+            ).tolist()
+        local.xyz[:, :2] += shift
+        points, ids = local.xyz, local.ids
+        local.index = SimpleNamespace(
+            query_indexes=lambda b: ids[
+                np.all((points[:, :2] >= b[:2]) & (points[:, :2] <= b[2:]), axis=1)
+            ]
+        )
+        measurement.local.vessel.axes = q.T
+        run(cells, regions, masks, local, measurement, cfg)
+        for cell in cells:
+            assert cell["review_geometry"]["adopted_for_review"]
+            inverse = (np.asarray(cell["review_geometry"]["boundary_xy"]) - t) @ q
+            np.testing.assert_allclose(
+                inverse, baseline[cell["cell_id"]], atol=1e-8, rtol=0
+            )

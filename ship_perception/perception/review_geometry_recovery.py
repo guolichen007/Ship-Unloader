@@ -1,6 +1,5 @@
 """Uncertified review proposals, separate from frozen identity and strict XY/Z."""
 
-import copy
 import numpy as np
 from scipy.optimize import least_squares
 from .local_rim_evidence import LocalRimEvidence, digest
@@ -8,6 +7,7 @@ from .interior_rim_search import cell_members
 from .opening_interior_support import spatial_interior_core
 from .review_side_evidence import heldout_side, SIDES
 from .r3h_geometry import dimensions
+from .review_numerics import roundoff_m
 
 
 def rectangle(bounds):
@@ -16,9 +16,10 @@ def rectangle(bounds):
 
 
 def inside(xy, bounds, tolerance=0.0):
+    numerical = roundoff_m(xy, bounds)
     return np.all(
-        (xy >= np.asarray(bounds[:2]) - tolerance)
-        & (xy <= np.asarray(bounds[2:]) + tolerance),
+        (xy >= np.asarray(bounds[:2]) - tolerance - numerical)
+        & (xy <= np.asarray(bounds[2:]) + tolerance + numerical),
         axis=1,
     )
 
@@ -138,27 +139,11 @@ def joint_bounds(cells, plans, config):
 
 
 def recover_review_geometries(cells, regions, measurement, config, local_rim=None):
-    local = (
-        local_rim if local_rim is not None else LocalRimEvidence(measurement, config)
-    )
-    axes = getattr(measurement.local, "primary_cache", measurement.local).vessel.axes
-    masks = {
-        c["cell_id"]: cell_members(c, regions, local.xyz, local.owned)[0] for c in cells
-    }
-    extents = {
-        k: np.r_[local.xyz[m, :2].min(0), local.xyz[m, :2].max(0)]
-        for k, m in masks.items()
-        if m is not None and np.any(m)
-    }
-    plans = {}
-    all_evidence = {}
+    eligible = set()
     for cell in cells:
         if cell.get("geometry") is None:
             continue
-        key = cell["cell_id"]
         old = cell["geometry"]
-        p = np.asarray(old["boundary_xy"]) @ axes.T
-        bounds = np.r_[p.min(0), p.max(0)]
         layer = dict(
             state="REVIEW_UNRESOLVED",
             boundary_xy=old["boundary_xy"],
@@ -188,6 +173,31 @@ def recover_review_geometries(cells, regions, measurement, config, local_rim=Non
         ):
             layer["reason"] = "FAST_PATH_IDENTITY_AND_EXISTING_LOCAL_REVIEW_RETAINED"
             continue
+        eligible.add(cell["cell_id"])
+    # Normal and single-opening scenes do not scan membership or build a new
+    # Raw index. All layers and gates above are still explicitly exported.
+    if not eligible:
+        return
+    local = (
+        local_rim if local_rim is not None else LocalRimEvidence(measurement, config)
+    )
+    axes = getattr(measurement.local, "primary_cache", measurement.local).vessel.axes
+    masks = {
+        c["cell_id"]: cell_members(c, regions, local.xyz, local.owned)[0] for c in cells
+    }
+    extents = {
+        k: np.r_[local.xyz[m, :2].min(0), local.xyz[m, :2].max(0)]
+        for k, m in masks.items()
+        if m is not None and np.any(m)
+    }
+    plans = {}
+    for cell in cells:
+        key = cell["cell_id"]
+        if key not in eligible:
+            continue
+        layer = cell["review_geometry"]
+        p = np.asarray(cell["geometry"]["boundary_xy"]) @ axes.T
+        bounds = np.r_[p.min(0), p.max(0)]
         original = masks[key]
         if original is None or key not in extents:
             layer["reason"] = "FROZEN_MEMBER_PROVENANCE_MISSING"
@@ -233,7 +243,6 @@ def recover_review_geometries(cells, regions, measurement, config, local_rim=Non
             s: heldout_side(raw, raw_ids, core, member, s, p, envelope, config)
             for s in SIDES
         }
-        all_evidence[key] = evidence
         plans[key] = dict(
             old_bounds=bounds,
             selected={},
@@ -327,6 +336,7 @@ def recover_review_geometries(cells, regions, measurement, config, local_rim=Non
             neighbor_capture=int(captured.sum()),
             separator_crossing=len(conflicts),
             empty_core_pass_forbidden=True,
+            numerical_roundoff_m=roundoff_m(raw[:, :2], b),
         )
         if np.any(lost) or np.any(captured) or conflicts:
             layer["reason"] = "SPATIAL_OR_NEIGHBOR_OR_SEPARATOR_GUARD"

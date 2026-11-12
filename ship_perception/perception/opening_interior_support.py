@@ -87,6 +87,8 @@ def spatial_interior_core(points, members, indexes, polygon, config):
         return mask, dict(audit, core_cell_count=len(core_tiles))
     mask[ids[np.isin(inv, core_tiles)]] = True
     mask &= signed_clearance(points[:, :2], polygon).min(1) >= step / 2
+    if not mask.any():
+        return mask, dict(audit, reason="NO_RAW_POINT_INSIDE_PROTECTED_TILES")
     anchor = np.median(points[mask, :2], axis=0)
     return mask, dict(
         audit,
