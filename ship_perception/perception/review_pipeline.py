@@ -22,6 +22,7 @@ from .berth import load_berth_reference, select_berth_vessel
 from .operator_selection import select_operator_vessel
 from .selected_context import SelectedVesselRawContext
 from .local_evidence import VesselLocalEvidence
+from .exact_density_evidence import ExactReviewEvidence
 from .measurement import VesselMeasurementContext, replicated_corner_view
 from .legacy_expert import (
     LegacyProposalExpert,
@@ -292,7 +293,10 @@ def run_perception(
         )
         selected = SelectedVesselRawContext.build(frame, scene, selection, config)
         selected_audit = selected.audit()
-        primary = VesselLocalEvidence.build(frame, vessel, config, selected.measurement)
+        frozen_primary = VesselLocalEvidence.build(
+            frame, vessel, config, selected.measurement
+        )
+        primary = ExactReviewEvidence.from_frozen(frozen_primary)
         cache = (
             primary
             if primary.context_xyz is primary.xyz
@@ -336,7 +340,7 @@ def run_perception(
                 proposals = ()
                 if legacy_evidence:
                     verify_legacy_b2_core()
-                    batch = LegacyProposalExpert().propose(primary, research)
+                    batch = LegacyProposalExpert().propose(frozen_primary, research)
                     proposals = batch.proposals
                     legacy_batches.append(
                         dict(
