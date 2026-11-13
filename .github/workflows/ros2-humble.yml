@@ -18,8 +18,10 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           mkdir -p "$RUNNER_TEMP/ship-review-ci-evidence"
+          echo "SHIP_CI_EVIDENCE=$RUNNER_TEMP/ship-review-ci-evidence" >> "$GITHUB_ENV"
           git rev-parse HEAD | tee "$RUNNER_TEMP/ship-review-ci-evidence/ci-head.txt"
           test -z "$(git status --porcelain)"
       - name: Install numerical and build dependencies
@@ -58,7 +60,7 @@ jobs:
         with:
           name: humble-test-results
           path: |
-            ${{ runner.temp }}/ship-review-ci-evidence/
+            ${{ env.SHIP_CI_EVIDENCE }}/
             log/
             build/ship_perception/Testing/
             build/ship_perception/test_results/
