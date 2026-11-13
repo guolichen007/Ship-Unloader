@@ -300,16 +300,18 @@ def run_perception(
         cache = (
             primary
             if primary.context_xyz is primary.xyz
-            else VesselLocalEvidence(
-                replace(
-                    vessel,
-                    point_indexes=selected.measurement.point_indexes,
-                    point_index_sha256=selected.measurement.point_index_sha256,
-                ),
-                primary.context_xyz,
-                config,
-                measurement_context=selected.measurement,
-                context_xyz=primary.context_xyz,
+            else ExactReviewEvidence.from_frozen(
+                VesselLocalEvidence(
+                    replace(
+                        vessel,
+                        point_indexes=selected.measurement.point_indexes,
+                        point_index_sha256=selected.measurement.point_index_sha256,
+                    ),
+                    primary.context_xyz,
+                    config,
+                    measurement_context=selected.measurement,
+                    context_xyz=primary.context_xyz,
+                )
             )
         )
         cache.primary_cache = primary

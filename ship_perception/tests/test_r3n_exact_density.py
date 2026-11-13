@@ -95,10 +95,21 @@ class ExactDensityContracts(unittest.TestCase):
         original = copy.deepcopy(old)
         review = ExactReviewEvidence.from_frozen(frozen)
         self.assertIs(review.grid("fine"), grid)
-        self.assertIsNot(review.structural_providers(), old)
+        self.assertIs(review.structural_providers(), old)
+        exact = review.side_candidate_providers()
+        self.assertIsNot(exact, old)
+        self.assertTrue(
+            all(r["evidence_view"] == "V2_EXACT_DENSITY_LOCAL_SIDE" for r in exact)
+        )
+        self.assertTrue(
+            set(r["provider_id"] for r in exact).isdisjoint(
+                r["provider_id"] for r in old
+            )
+        )
+        self.assertEqual(len(exact), len(old))
         self.assertIs(frozen.structural_providers(), old)
         self.assertEqual(old, original)
-        self.assertEqual(review.provider_build_count, 1)
+        self.assertIs(review.side_candidate_providers(), exact)
 
 
 if __name__ == "__main__":

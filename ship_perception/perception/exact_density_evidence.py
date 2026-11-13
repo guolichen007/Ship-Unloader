@@ -144,7 +144,7 @@ def exact_bev_provider(points, vessel, config, *, fine_grid):
 
 
 class ExactReviewEvidence(VesselLocalEvidence):
-    """Separate V2 evidence view; B2 continues to receive the frozen cache."""
+    """Exact local side view; historical B2/S4 topology retains its evidence."""
 
     @classmethod
     def from_frozen(cls, cache):
@@ -156,18 +156,41 @@ class ExactReviewEvidence(VesselLocalEvidence):
 
     def structural_providers(self):
         if self.providers is None:
-            frozen = self._frozen_cache.structural_providers()
+            self.providers = self._frozen_cache.structural_providers()
+        return self.providers
+
+    def side_candidate_providers(self):
+        primary = getattr(self, "primary_cache", self)
+        if primary is not self:
+            return primary.side_candidate_providers()
+        if not hasattr(self, "_exact_side_providers"):
+            frozen = self.structural_providers()
             vessel = thaw(self.vessel.public)
             vessel["local_axes"] = [[1, 0], [0, 1]]
             bev, _ = exact_bev_provider(
                 self.xyz, vessel, self.config, fine_grid=self.grid("fine")
             )
             for row in bev:
+                # Provider IDs are scoped to the evidence view. A new density
+                # fragment must never impersonate a frozen B2/S4 fragment.
+                for key in ("provider_id", "observation_id"):
+                    row[key] = row[key].replace(
+                        ":BEV_RECTILINEAR_PROVIDER:", ":V2_EXACT_DENSITY_BEV:"
+                    )
+                row["evidence_view"] = "V2_EXACT_DENSITY_LOCAL_SIDE"
                 row["coordinate_frame"] = "VESSEL_LOCAL_UV"
                 row["input_vessel_axes"] = self.vessel.axes.tolist()
                 row["point_index_sha256"] = self.vessel.point_index_sha256
-            self.providers = bev + [
+            self._exact_side_providers = bev + [
                 r for r in frozen if r["provider_type"] == "RAW3D_STRUCTURAL_PROVIDER"
             ]
-            self.provider_build_count += 1
-        return self.providers
+        return self._exact_side_providers
+
+    def side_candidates(self, box):
+        if not hasattr(self, "_exact_side_cache"):
+            view = VesselLocalEvidence(
+                **{f.name: getattr(self, f.name) for f in fields(self)}
+            )
+            view.providers = self.side_candidate_providers()
+            self._exact_side_cache = view
+        return self._exact_side_cache.side_candidates(box)

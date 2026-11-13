@@ -21,7 +21,10 @@ SIDES = (("U0", 0, 0, -1), ("U1", 0, 2, 1), ("V0", 1, 1, -1), ("V1", 1, 3, 1))
 def side_evidence_vector(cache, nomination):
     """One traversal per local side; competing bands are never averaged."""
     config = cache.config
-    providers = {p["provider_id"]: p for p in cache.structural_providers()}
+    side_providers = getattr(
+        cache, "side_candidate_providers", cache.structural_providers
+    )
+    providers = {p["provider_id"]: p for p in side_providers()}
     candidates = cache.side_candidates(nomination["bounds_axial"])
     sides = {}
     for name, axis, pos, sign in SIDES:
