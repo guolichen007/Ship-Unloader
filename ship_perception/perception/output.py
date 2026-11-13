@@ -4,6 +4,7 @@ import copy
 from datetime import datetime
 import hashlib
 import json
+import os
 from pathlib import Path
 import tempfile
 
@@ -13,13 +14,51 @@ from ship_perception.r1_static.height_grid import R1HeightGrid
 from ship_perception.r1_static.intensity_evidence import IntensityEvidence, AUX_WEIGHT
 from ship_perception.r1_static.run import _atomic_json
 from .pipeline import _json_default
-from .review_labels import FIGURE_TEXT, annotate_measurements, chinese_plot_style
+from .runtime_metrics import resource_stage
+from .review_labels import (
+    FIGURE_TEXT,
+    annotate_measurements,
+    chinese_plot_style,
+    review_objects,
+)
+
+
+def _atomic_results_json(path, data):
+    """Write the complete audit with the strict C encoder, without pretty padding.
+
+    Pretty json.dump iterates in Python over millions of diagnostic tokens.
+    This changes whitespace only; values, nonfinite rejection and atomicity
+    are the same. Small coordinate and failure documents remain readable.
+    """
+    path = Path(path)
+    encoded = (
+        json.dumps(
+            data, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+        ).encode("utf-8")
+        + b"\n"
+    )
+    _atomic_results_bytes(path, encoded)
+
+
+def _atomic_results_bytes(path, encoded):
+    """Publish bytes already normalized and schema-validated by save_output."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("wb") as stream:
+        stream.write(encoded)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
 
 
 def auxiliary_review(payload, frame, ownership_indexes):
     result = copy.deepcopy(payload["geometry_only"])
     stats = payload["intensity_status"]
     result.update(intensity_used=False, intensity_fusion_status=stats["status"])
+    if payload.get("production_geometry_mode") == "XYZ_ONLY":
+        result["intensity_fusion_status"] = "DISABLED_PRODUCTION_XYZ_ONLY"
+        return result
     if stats["status"] != "AVAILABLE":
         return result
     from ship_perception.r1_static.run import resolve_config
@@ -64,21 +103,23 @@ def auxiliary_review(payload, frame, ownership_indexes):
     return result
 
 
-def render(payload, frame, path, *, fusion=False):
+def render(payload, frame, path, *, fusion=False, grid=None):
     import matplotlib
 
     matplotlib.use("Agg")
     with matplotlib.rc_context(chinese_plot_style()):
-        _render_scene(payload, frame, path, fusion=fusion)
+        _render_scene(payload, frame, path, fusion=fusion, grid=grid)
 
 
-def _render_scene(payload, frame, path, *, fusion=False):
+def _render_scene(payload, frame, path, *, fusion=False, grid=None):
     import matplotlib.pyplot as plt
 
-    grid = R1HeightGrid.from_points(frame.xyz, 0.5)
+    grid = R1HeightGrid.from_points(frame.xyz, 0.5) if grid is None else grid
     step = max(1, int(np.ceil(max(grid.count.shape) / 1000)))
     display_aspect = grid.count.shape[0] / grid.count.shape[1]
-    figure, ax = plt.subplots(figsize=(20, max(6, min(12, 20 * display_aspect + 1))))
+    figure, ax = plt.subplots(
+        figsize=(20, max(6, min(12, 20 * display_aspect + 1))), dpi=150
+    )
     masked = np.ma.masked_where(~grid.occupancy, grid.median)
     image = ax.imshow(
         masked[::step, ::step],
@@ -98,10 +139,42 @@ def _render_scene(payload, frame, path, *, fusion=False):
     y_low, y_high = ax.get_ylim()
     ax.set_ylim(y_low - 0.1 * (y_high - y_low), y_high + 0.04 * (y_high - y_low))
     result = payload["intensity_fusion" if fusion else "geometry_only"]
+    coarse = result.get("coarse_opening_reviews", ())
+    coarse_ids = {row["opening_identity"] for row in coarse}
+    for hatch in coarse:
+        footprint = np.asarray(hatch["boundary_xy"])
+        ax.plot(
+            *np.vstack((footprint, footprint[0])).T, color="#75ecff", lw=1.6, ls="--"
+        )
+    for unresolved in result.get("unresolved_rectangle_candidates", []):
+        if unresolved["opening_identity"] in coarse_ids:
+            continue
+        footprint = np.asarray(unresolved["pre_solve_candidate"]["boundary_xy"])
+        ax.plot(
+            *np.vstack((footprint, footprint[0])).T, color="#f1a6ff", lw=1.3, ls=":"
+        )
+        ax.text(
+            *footprint.mean(axis=0),
+            "矩形未决",
+            color="#f1a6ff",
+            fontsize=9,
+            ha="center",
+        )
     for hatch in result["hatches"]:
         poly = np.asarray(hatch["boundary_xy"])
         coverage = np.asarray(hatch["review_coverage_boundary_xy"])
-        ax.plot(*np.vstack((poly, poly[0])).T, color="#ffbb33", lw=1.6)
+        if payload["schema"] == "ship_perception.hatch_once.3":
+            for index, side_id in enumerate(("V0", "U1", "V1", "U0")):
+                segment = np.array([poly[index], poly[(index + 1) % 4]])
+                measured = hatch["sides"][side_id]["final_source"] == "MEASURED_RAW"
+                ax.plot(
+                    *segment.T,
+                    color="#ffbb33",
+                    lw=1.6 if measured else 1.2,
+                    ls="-" if measured else "--",
+                )
+        else:
+            ax.plot(*np.vstack((poly, poly[0])).T, color="#ffbb33", lw=1.6)
         ax.plot(
             *np.vstack((coverage, coverage[0])).T,
             color="#ffbb33",
@@ -109,13 +182,27 @@ def _render_scene(payload, frame, path, *, fusion=False):
             ls=":",
             alpha=0.6,
         )
-    title = FIGURE_TEXT["geometry_title"]
+    main_reviews = review_objects(result)
+    has_suggestion = any(row.get("adopted_for_review") for row in main_reviews)
+    if has_suggestion:
+        for line in ax.lines:
+            line.set(color="#a0a6b3", linewidth=0.7, linestyle="--", alpha=0.65)
+        for row in main_reviews:
+            p = np.asarray(row["boundary_xy"])
+            ax.plot(*np.vstack((p, p[0])).T, color="#ffbb33", lw=1.6)
+    title = (
+        "船舱复核建议（非认证）｜细虚线为原严格基线"
+        if has_suggestion
+        else FIGURE_TEXT["geometry_title"]
+    )
     if fusion:
         title = (
             FIGURE_TEXT["intensity_unavailable"]
             if payload["intensity_status"]["status"] != "AVAILABLE"
             else FIGURE_TEXT["intensity_available"]
         )
+        if payload.get("production_geometry_mode") == "XYZ_ONLY":
+            title = "强度判定已关闭：复用纯几何复核结果"
     ax.set(title=title, xlabel=FIGURE_TEXT["xlabel"], ylabel=FIGURE_TEXT["ylabel"])
     ax.text(
         0.01,
@@ -126,16 +213,54 @@ def _render_scene(payload, frame, path, *, fusion=False):
         bbox=dict(facecolor="white", alpha=0.85),
     )
     figure.tight_layout()
-    annotate_measurements(ax, result["hatches"])
+    annotate_measurements(
+        ax,
+        main_reviews,
+    )
+    if path is None:
+        return figure, ax
     figure.savefig(path, dpi=150, bbox_inches="tight", pad_inches=0.15)
     plt.close(figure)
 
 
+def _render_xyz_pair(payload, frame, staged, grid, timing, resources):
+    """The two XYZ-only views share geometry and actual pixel layout."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    with matplotlib.rc_context(chinese_plot_style()):
+        figure = None
+        try:
+            with timing.stage("RENDER_01"), resource_stage(resources, "RENDER_01"):
+                figure, ax = _render_scene(payload, frame, None, grid=grid)
+                figure.savefig(
+                    staged / "01_geometry_only.png",
+                    dpi=150,
+                    bbox_inches="tight",
+                    pad_inches=0.15,
+                )
+            with timing.stage("RENDER_02"), resource_stage(resources, "RENDER_02"):
+                ax.set_title("强度判定已关闭：复用纯几何复核结果")
+                figure.savefig(
+                    staged / "02_intensity_fusion.png",
+                    dpi=150,
+                    bbox_inches="tight",
+                    pad_inches=0.15,
+                )
+        finally:
+            if figure is not None:
+                plt.close(figure)
+
+
 def save_output(payload, frame, output_dir, save_snapshot, timing):
+    io_resources = {}
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     final = output_dir / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     ownership = payload.pop("_ownership_indexes", {})
+    runtime_patch = payload.pop("_runtime_patch", None)
     payload["intensity_fusion"] = auxiliary_review(payload, frame, ownership)
     payload["intensity_status"]["used"] = payload["intensity_fusion"]["intensity_used"]
     with tempfile.TemporaryDirectory(
@@ -143,18 +268,50 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
     ) as temporary:
         staged = Path(temporary) / "result"
         staged.mkdir()
+        identity = payload.get("software_source_identity", {})
+        if identity.get("git_worktree_dirty") is True:
+            if runtime_patch is None:
+                from .runtime_patch import git_source_state
+
+                _, runtime_patch = git_source_state(Path(__file__).resolve().parents[2])
+            if runtime_patch is None or hashlib.sha256(
+                runtime_patch.encode("utf-8")
+            ).hexdigest() != identity.get("git_diff_sha256"):
+                raise ValueError("RUNTIME_PATCH_IDENTITY_MISMATCH")
+            (staged / "runtime_patch.diff").write_bytes(runtime_patch.encode("utf-8"))
         import os
 
         with tempfile.TemporaryDirectory(prefix="ship_hatch_mpl_") as mpl_cache:
             previous = os.environ.get("MPLCONFIGDIR")
             os.environ["MPLCONFIGDIR"] = mpl_cache
             try:
+                with timing.stage("RENDER_PREPARE"), resource_stage(
+                    io_resources, "RENDER_PREPARE"
+                ):
+                    display_grid = R1HeightGrid.from_points(frame.xyz, 0.5)
+                shared_xyz = (
+                    payload.get("production_geometry_mode") == "XYZ_ONLY"
+                    and "selected_opening_cells" in payload["geometry_only"]
+                )
+                if shared_xyz:
+                    _render_xyz_pair(
+                        payload, frame, staged, display_grid, timing, io_resources
+                    )
                 for fusion, filename in (
                     (False, "01_geometry_only.png"),
                     (True, "02_intensity_fusion.png"),
                 ):
-                    with timing.stage("RENDER_" + filename[:2]):
-                        render(payload, frame, staged / filename, fusion=fusion)
+                    if not shared_xyz:
+                        with timing.stage("RENDER_" + filename[:2]), resource_stage(
+                            io_resources, "RENDER_" + filename[:2]
+                        ):
+                            render(
+                                payload,
+                                frame,
+                                staged / filename,
+                                fusion=fusion,
+                                grid=display_grid,
+                            )
                     payload["intensity_fusion" if fusion else "geometry_only"][
                         "image_path"
                     ] = str(final / filename)
@@ -174,30 +331,96 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
                     metadata=json.dumps(payload["input"], allow_nan=False),
                 )
         with timing.stage("SAVE_RESULTS"):
+            if "performance_budget" in payload:
+                report = payload["performance_budget"]
+                elapsed = sum(
+                    value
+                    for key, value in timing.elapsed.items()
+                    if key.startswith("RENDER")
+                )
+                report["stages"].append(
+                    dict(
+                        stage="RENDER",
+                        elapsed_s=elapsed,
+                        budget_s=5.0,
+                        status=(
+                            "PERFORMANCE_BUDGET_EXCEEDED"
+                            if elapsed > 5.0
+                            else "WITHIN_BUDGET"
+                        ),
+                    )
+                )
+                report["total_elapsed_s"] += elapsed
+                report["total_budget_exceeded"] = (
+                    report["total_budget_s"] is not None
+                    and report["total_elapsed_s"] > report["total_budget_s"]
+                )
             payload["stage_elapsed"].update(timing.elapsed)
             if timing.progress is not None:
                 payload["stage_elapsed"].update(timing.progress.elapsed_stages)
-            clean = json.loads(
-                json.dumps(payload, default=_json_default, allow_nan=False)
-            )
+            with resource_stage(io_resources, "JSON_SERIALIZE"):
+                encoded = (
+                    json.dumps(
+                        payload,
+                        default=_json_default,
+                        ensure_ascii=False,
+                        allow_nan=False,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    + b"\n"
+                )
+            with resource_stage(io_resources, "JSON_NORMALIZE"):
+                clean = json.loads(encoded)
             from jsonschema import Draft202012Validator
 
             schema = (
                 Path(__file__).resolve().parents[1] / "config/hatch_once.schema.json"
             )
-            Draft202012Validator(json.loads(schema.read_text())).validate(clean)
-            _atomic_json(staged / "03_results.json", clean)
-            from .coordinates import corner_coordinates
+            with resource_stage(io_resources, "JSON_SCHEMA_VALIDATE"):
+                Draft202012Validator(json.loads(schema.read_text())).validate(clean)
+            with resource_stage(io_resources, "JSON_ATOMIC_WRITE"):
+                _atomic_results_bytes(staged / "03_results.json", encoded)
+            with resource_stage(io_resources, "GEOMETRY_EXPORT"):
+                from .coordinates import corner_coordinates
+                from .r3h_geometry import compact_hatches, write_dimensions_csv
 
-            _atomic_json(
-                staged / "05_hatch_corners.json",
-                corner_coordinates(
-                    clean,
-                    hashlib.sha256(
-                        (staged / "03_results.json").read_bytes()
-                    ).hexdigest(),
-                ),
-            )
+                _atomic_json(
+                    staged / "05_hatch_corners.json",
+                    corner_coordinates(
+                        clean,
+                        hashlib.sha256(
+                            (staged / "03_results.json").read_bytes()
+                        ).hexdigest(),
+                    ),
+                )
+                if "selected_opening_cells" in clean["geometry_only"]:
+                    _atomic_json(
+                        staged / "opening_cells.json",
+                        clean["geometry_only"]["selected_opening_cells"],
+                    )
+                    compact = compact_hatches(clean)
+                    _atomic_json(staged / "hatches_compact.json", compact)
+                    write_dimensions_csv(staged / "船舱四角长宽_简表.csv", compact)
+                    if (
+                        clean["geometry_only"].get("opening_review_level")
+                        != "FAST_OPENING_REVIEW"
+                    ):
+                        from .r3j_review import write_bundle
+
+                        with timing.stage("CHINESE_REVIEW_BUNDLE"), resource_stage(
+                            io_resources, "CHINESE_REVIEW_BUNDLE"
+                        ):
+                            write_bundle(
+                                clean,
+                                frame,
+                                staged,
+                                display_grid,
+                                scene_label=Path(
+                                    clean["input"]
+                                    .get("provenance", {})
+                                    .get("path", "输入场景")
+                                ).stem,
+                            )
             (staged / "04_input_summary.txt").write_text(
                 "\n".join(
                     key.upper() + "=" + json.dumps(value, allow_nan=False)
@@ -209,6 +432,17 @@ def save_output(payload, frame, output_dir, save_snapshot, timing):
                 )
                 + "\n",
                 encoding="utf-8",
+            )
+        if "selected_opening_cells" in clean["geometry_only"]:
+            _atomic_json(
+                staged / "runtime_io_metrics.json",
+                dict(
+                    input_sha256=payload.get("input_sha256"),
+                    runtime_source_sha256=payload.get("runtime_source_sha256"),
+                    stages=io_resources,
+                    json_serialization_count=1,
+                    metrics_scope="FINAL_RENDER_AND_MAIN_JSON;OWN_PUBLICATION_COST_EXCLUDED",
+                ),
             )
         staged.rename(final)
     return final

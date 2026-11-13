@@ -17,23 +17,68 @@ def parser(description):
     )
     command.add_argument("--save-snapshot", "--save_snapshot", action="store_true")
     command.add_argument(
+        "--berth-reference",
+        type=Path,
+        help="Surveyed site reference in the input frame; no ship priors",
+    )
+    command.add_argument(
+        "--pipeline",
+        choices=("v2", "v1-diagnostic"),
+        default="v2",
+        help="V2 production core or explicitly historical diagnostic comparison",
+    )
+    command.add_argument(
         "--no-legacy-evidence",
         action="store_true",
         help="Disable independent historical geometry comparison; local recall still runs",
     )
+    command.add_argument("--mode", choices=("review-first", "bounded"), default="bounded",
+                         help="Review first or bounded measurement; default changes only after Normal6 passes")
+    command.add_argument("--operator-vessel-roi", type=Path,
+                         help="Explicit operator vessel index scope; original input is retained")
+    command.add_argument("--opening-topology-v2", action="store_true",
+                         help="Use same-vessel opening cells in review-first mode")
+    command.add_argument("--opening-preview", action="store_true",
+                         help="Show opening cells without strict rectangle measurement")
+    command.add_argument("--local-rim-review", action="store_true",
+                         help="Attach cell-local Raw rim roles to opening review")
+    command.add_argument("--review-snapshot", type=Path,
+                         help="Validated reusable scene and local recall snapshot")
     return command
 
 
 def execute(frame, args, progress):
-    from .pipeline import run_perception, Timing
+    from .pipeline import Timing
+
+    if getattr(args, "pipeline", "v2") == "v1-diagnostic":
+        from .pipeline import run_perception
+
+        options = {}
+    else:
+        from .pipeline_v2 import run_perception
+
+        options = dict(berth_reference=getattr(args, "berth_reference", None),
+                       mode=getattr(args,"mode","bounded"),
+                       operator_vessel_roi=getattr(args,"operator_vessel_roi",None),
+                       opening_topology_v2=getattr(args, "opening_topology_v2", False),
+                       opening_preview=getattr(args, "opening_preview", False),
+                       local_rim_review=getattr(args, "local_rim_review", False),
+                       review_snapshot=getattr(args, "review_snapshot", None))
+        if getattr(args, "review_process_deadline", None) is not None:
+            options["review_process_deadline"] = args.review_process_deadline
     from .output import save_output
 
-    payload = run_perception(
-        frame, progress, legacy_evidence=not args.no_legacy_evidence
-    )
-    directory = save_output(
-        payload, frame, args.output_dir, args.save_snapshot, Timing(progress)
-    )
+    from .review_runtime import ReviewRunMonitor
+    from .pipeline import source_identity
+    with ReviewRunMonitor(args.output_dir,dict(source_identity=source_identity(),
+                          input_sha256=frame.provenance.get("wire_sha256",frame.sha256))) as monitor:
+        if getattr(args,"pipeline","v2")=="v2":options['monitor']=monitor
+        payload = run_perception(frame, progress, legacy_evidence=not args.no_legacy_evidence, **options)
+        observer = getattr(args, "review_timing_observer", None)
+        if observer is not None:
+            observer.geometry_ready(payload)
+        monitor.checkpoint(stage="RENDER_AND_SAVE",review_objects=payload['geometry_only']['hatches'])
+        directory = save_output(payload, frame, args.output_dir, args.save_snapshot, Timing(progress))
     progress.finish(True)
     print(
         "HATCH_REVIEW_COUNT=" + str(payload["geometry_only"]["hatch_count"]), flush=True
@@ -42,6 +87,10 @@ def execute(frame, args, progress):
         "HATCH_COUNT_STATUS=" + payload["geometry_only"]["hatch_count_status"],
         flush=True,
     )
+    geometry = payload["geometry_only"]
+    if "review_opening_count" in geometry:
+        print("OPENING_REVIEW_COUNT=" + str(geometry["review_opening_count"]), flush=True)
+        print("STRICT_RECTANGLE_COUNT=" + str(geometry["strict_rectangle_count"]), flush=True)
     print("INTENSITY_STATUS=" + payload["intensity_status"]["status"], flush=True)
     print(
         "UNRESOLVED_PROPOSAL_COUNT="

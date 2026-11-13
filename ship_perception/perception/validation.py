@@ -16,15 +16,37 @@ class ExteriorTopology:
     config: dict
     components: dict = field(default_factory=dict)
     level_evaluations: int = 0
+    unresolved_context: object = None
+    boundary_seeds_confirmed: bool = True
 
     @classmethod
-    def build(cls, frame, vessel, config):
+    def build(cls, frame, vessel, config, measurement_context=None):
         uvz = np.column_stack((frame.xyz[:, :2] @ vessel.axes.T, frame.xyz[:, 2]))
         grid = R1HeightGrid.from_points(uvz, config["geometry"]["coarse_voxel_m"])
         rows, cols = grid.cell_indices(uvz[vessel.point_indexes, :2])
         owned = np.zeros(grid.count.shape, dtype=bool)
         owned[rows, cols] = True
-        return cls(grid, owned, config)
+        unresolved = np.zeros(grid.count.shape, dtype=bool)
+        if measurement_context is not None:
+            if measurement_context.vessel_id != vessel.vessel_id:
+                raise ValueError("EXTERIOR_CONTEXT_VESSEL_MISMATCH")
+            # Uncertain attribution is not the same as permission to borrow
+            # measurements. In a multi-core support, unresolved siblings stay
+            # unknown even though neither core may use them as its own evidence.
+            indexes = (
+                np.concatenate(
+                    [
+                        source.point_indexes
+                        for source in measurement_context.unattributed_sources
+                    ]
+                )
+                if measurement_context.unattributed_sources
+                else np.array([], dtype=int)
+            )
+            rows, cols = grid.cell_indices(uvz[indexes, :2])
+            unresolved[rows, cols] = True
+            unresolved &= ~owned
+        return cls(grid, owned, config, unresolved_context=unresolved)
 
     def at_level(self, level):
         key = float(level)
@@ -39,7 +61,12 @@ class ExteriorTopology:
             boundary = np.zeros(low.shape, dtype=bool)
             boundary[[0, -1], :] = True
             boundary[:, [0, -1]] = True
-            exterior = low & (~self.owned | boundary)
+            known_outside = ~self.owned
+            if self.unresolved_context is not None:
+                known_outside = known_outside & ~self.unresolved_context
+            exterior = low & (
+                known_outside | (boundary if self.boundary_seeds_confirmed else False)
+            )
             external_ids = set(np.unique(labels[exterior]).tolist()) - {0}
             # Cache eviction changes recomputation only, never the measured
             # level or classification. Keep label rasters within 64 MiB.
@@ -74,6 +101,12 @@ class ExteriorTopology:
         component = int(ids[np.argmax(counts)])
         member = labels == component
         outside = int(np.count_nonzero(member & ~self.owned))
+        unresolved = (
+            int(np.count_nonzero(member & self.unresolved_context))
+            if self.unresolved_context is not None
+            else 0
+        )
+        known_outside = outside - unresolved
         total = int(member.sum())
         overlap = float(
             np.count_nonzero(inside & member)
@@ -83,20 +116,24 @@ class ExteriorTopology:
         touches = bool(np.any(member & boundary))
         if (
             connected
-            and outside / max(1, total) >= self.config["roi"]["min_enclosure_ratio"]
+            and known_outside / max(1, total)
+            >= self.config["roi"]["min_enclosure_ratio"]
             and overlap >= self.config["roi"]["min_enclosure_ratio"]
         ):
             status = "REJECT_EXTERIOR_LOW_REGION"
-        elif connected:
+        elif connected or unresolved:
             status = "UNRESOLVED_EXTERIOR_CONNECTIVITY"
         else:
             status = "ENCLOSED_OBSERVED_LOW_COMPONENT"
         return dict(
             status=status,
-            exterior_low_connected=connected,
+            exterior_low_connected=(connected if connected or not unresolved else None),
+            known_exterior_low_connected=connected,
             component_id=component,
             component_cells=total,
             external_owned_complement_cells=outside,
+            known_external_component_cells=known_outside,
+            unresolved_context_component_cells=unresolved,
             candidate_component_overlap=overlap,
             touches_scene_grid=touches,
             missing_cells_traversed=False,
@@ -154,8 +191,81 @@ def vessel_containment(grid, box, config, prepared=None):
     )
 
 
+def partial_context_review(cache, boundary_xy, containment, exterior):
+    """Keep a physically supported partial, without certifying its ownership.
+
+    The caller must still satisfy the existing raw three-side admission. This
+    check cannot rescue an outside centroid, known external low connection,
+    multi-core borrowed context, or missing measured corner support.
+    """
+    context = cache.measurement_context
+    if (
+        context is None
+        or len(context.sources) <= 1
+        or len(context.point_indexes) <= len(context.sources[0].point_indexes)
+        or not containment["centroid_inside_support"]
+        or containment["status"] == "REJECT_OUTSIDE_VESSEL"
+        or exterior.get("known_exterior_low_connected") is not False
+        or exterior.get("unresolved_context_component_cells", 0) <= 0
+    ):
+        return None
+    uv = np.asarray(boundary_xy) @ cache.vessel.axes.T
+    box = [*uv.min(0), *uv.max(0)]
+    final_core = vessel_containment(cache.grid("coarse"), box, cache.config)
+    if not final_core["centroid_inside_support"]:
+        return None
+    measured = vessel_containment(cache.context_grid("coarse"), box, cache.config)
+    if measured["status"] != "CONTAINED":
+        return None
+    return dict(
+        status="UNRESOLVED_BOUNDARY_OWNERSHIP_REVIEW",
+        measurement_containment=measured,
+        measurement_context=context.identity(),
+        final_core_containment=final_core,
+        owned_point_set_unchanged=True,
+        ownership_confirmed=False,
+        steel_edge_certified=False,
+    )
+
+
 def deck_ring(cache, candidate):
     lines = cache.structural_providers()
+    if getattr(cache, "_v21_deck_index_enabled", True):
+        if not hasattr(cache, "_v21_deck_line_index"):
+            indexes = {}
+            for axis in (0, 1):
+                order = sorted(
+                    (
+                        i
+                        for i, p in enumerate(lines)
+                        if p["rho_or_region"]["normal_axis"] == axis
+                    ),
+                    key=lambda i: (lines[i]["rho_or_region"]["rho"], i),
+                )
+                indexes[axis] = (
+                    np.array(order, dtype=int),
+                    np.array([lines[i]["rho_or_region"]["rho"] for i in order]),
+                )
+            cache._v21_deck_line_index = indexes
+        selected = set()
+        join = cache.config["boundary"]["corner_join_m"]
+        for axis, pos in [(0, 0), (0, 2), (1, 1), (1, 3)]:
+            order, coordinates = cache._v21_deck_line_index[axis]
+            # Conservative one-ULP padding leaves the historical absolute
+            # distance predicate in charge of exact boundary inclusion.
+            lo = np.searchsorted(
+                coordinates,
+                np.nextafter(candidate["bounds_axial"][pos] - join, -np.inf),
+                "left",
+            )
+            hi = np.searchsorted(
+                coordinates,
+                np.nextafter(candidate["bounds_axial"][pos] + join, np.inf),
+                "right",
+            )
+            selected.update(order[lo:hi].tolist())
+        lines = [lines[i] for i in sorted(selected)]
+    by_id = {p["provider_id"]: p for p in lines}
     seed = dict(seed_type="HEIGHT_REGION", anchor_axis=None)
     sides = _side_evidence(candidate["bounds_axial"], lines, cache.config, seed)
     for side, rise, support in zip(
@@ -164,9 +274,7 @@ def deck_ring(cache, candidate):
         candidate.get("side_support_cells", [[0, 0]] * 4),
     ):
         row = sides[side]
-        provider_rows = [
-            p for p in lines if p["provider_id"] in row["supporting_provider_ids"]
-        ]
+        provider_rows = [by_id[pid] for pid in row["supporting_provider_ids"]]
         kinds = {p["provider_type"] for p in provider_rows}
         row.update(
             same_vessel_support=bool(provider_rows),

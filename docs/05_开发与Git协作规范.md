@@ -1,11 +1,29 @@
 # 开发与 Git 协作规范
 
+> 2026-10-30 V2.9 开发检查点：Normal6 发现区域错误合并，按停止条件 C 暂停扩展；默认仍为 bounded，未验收、未推送。显式 review-first 输出 `.3`，默认 bounded 保留旧链 `.2`；旧版本契约说明保留为历史说明。review-first 不因旧 60/20 秒预算删除结果，保留独立 120/300 秒 watchdog，性能尚未通过。详见 [实施状态与限制](06_V29完整复核标定框开发检查点.md)。
+
 > 状态：FROZEN
 > 适用版本：当前现场复核基线；V1.4 历史事实单列
 > 最后更新：2026-10-15
 > Owner：Ship-Unloader Engineering
 
 ## 分支、提交、PR 与 main
+
+2026-10-30 用户明确扩大前轮停止后的范围，要求回跑全部新旧 PCD、多船先裁靠岸船、收集问题并兼顾泛化、精度和时间。本轮以 `0da183d1ffe9759609c2f6562586d3781c50b731` 建立 `codex/hatch-generalization-replay`，允许现有 V2 内的执行、归属、调度和性能修复；不据此解除物理阈值、GT 隔离、V1.4 或 B2 核心冻结。所有原始与派生产物保存在被忽略的 Work/Data 根，失败试验保留。当前全量真实回归失败，提交只作为开发检查点，不晋升现场基线；未推送、merge、tag 或删除分支。触及冻结 B2 的并行执行补丁单独形成可审查产物，待明确授权后才能安装，不以原型哈希一致代替授权。
+
+2026-10-29 追加用户授权明确解除前轮第31/38节停止门，以 `ba8ea81d7cd0b98aead8b5ec58ee322fe78b59d3` 为基准，仅允许稳定 S4 观测→SideFamily→TopologyGraph→现有 OpeningRegion、默认 V2 接线及冻结合同拆分。不修改上一轮 S4 估计器或物理阈值，不新增 Expert/Region 模型，不恢复四线枚举。通过 7-16 后只执行 08-01/8-22 非合并 smoke，随后停止；精度、其他真实专项和性能不扩展。原 56 文件参考和 V1.4 72 文件保持，B2 真正依赖单独保护。main、tag、推送与现场放行均未在本轮执行。
+
+2026-10-29 V2.6 用户任务授权从 `29d43a81ed2b75e45bac1cff07628e011fe8a8cf` 建立 `codex/hatch-v26-s4-causal-fix`，限定 S4 首分叉、逐段 plane、确定性 line 和连续 4θ 聚合修复。保留规范点序、Region-First、既有物理阈值及 V1.4 冻结。两个稳定门通过后，7-16 仍无完整区域身份，按 `STABLE_S4_BUT_REGION_GENERATION_FAILS` 停止；宽矩形枚举候选不算已存在的完整 OpeningRegion，不能据此按历史参考挑框。旧全文件 Legacy 校验产生的入口错误保留，不绕过、不重写冻结清单。只保存明确未通过的实验 checkpoint，不推送、merge、tag 或晋升现场基线。
+
+2026-10-29 V2.4 用户任务授权从 `7ea5c78da9ac5367933d6166e1c17046fc6b5122` 建立 `codex/hatch-v24-structural-region`，并在独立 `Ship-Unloader-Bisect` 工作树作 914f869..51410e3 法证。允许本轮 Region/Boundary 解耦与当前架构内结构线族重建；不直接 revert bad commit，不修改冻结源或物理阈值。7-16 未形成完整区域身份时按 Stop Gate 2 停止并等待审查；失败实现只能保存为明确未通过的开发 checkpoint，不晋升基线。main、tag、分支删除及生产放行均未授权。
+
+2026-10-28 V2.3 用户任务要求先完整保存 V2.2 暂停现场并允许推送 `codex/hatch-v22-paused-audit`；审计快照为 `469953a58d37ec1f0a948d36228a878b746a8e16`。随后从 `1a0c9d0` 创建 `codex/hatch-v23-conservative-recall`。真实六景拓扑与覆盖门通过前，不引入新的 wall/contact、Expert、阈值或精修性能优化。当前独立冻结链路重放在 7-16 仍失败，新增代码仅作离线审计 checkpoint，不作为新识别基线，不合入 main、不 tag、不删除旧分支。
+
+2026-10-28 V2.2 用户任务授权在 `cd13726` 上开发、验证并最终推送 `codex/hatch-v22-berth-region-precision`，仍禁止 merge main/tag。两个未提交的标量缓存实验先归档，再对三场景各作两版本三次冷进程 A/B；真实测试未证明稳定耗时改善，已恢复，不将无收益实验提交。后续区域优先搜索、协作调度、泊位参考和状态拆分按本轮明确任务实施，冻结源码、Raw 精度、物理门与 GT 隔离约束继续有效。
+
+2026-10-26 V2 任务仅授权推送 `codex/hatch-v2-multi-expert` 开发分支，明确不 merge main。真实单调回归或现场门失败时保留失败报告与独立历史，不把开发提交包装为生产放行，也不 force push、tag 或清理其他分支。
+
+2026-10-27～28 的 V2.1 任务授权从 `4cb9b17` 创建并验证、推送 `codex/hatch-v2-recall-perf-r1`，仍不 merge/tag/main。原任务的 A/B/C 为典型调查条件，曾据此推断的额外授权阻断已撤回；只凭名义结构放行的弱 D 草案未采用。共享精修器先测真实 Raw 侧证据、Probe 再读取缓存的实现必须保留物理门和完整来源，不能把单元测试通过或真实失败包装成放行。
 
 main 保存已收口工程基线；常规研发使用短期 `feature/* / fix/* / docs/* / codex/*`，一个任务一个分支。任务合入后删除开发分支，独立历史先归档。不得在 main 连续开发、force push main、重写正式 Tag 或丢失独立提交。未经用户明确授权不 merge/tag/删分支。本轮 2026-10-15 收口已获用户明确授权，仍先审计、备份与验证。
 

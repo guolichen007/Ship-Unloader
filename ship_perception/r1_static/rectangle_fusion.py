@@ -12,6 +12,8 @@ from .boundary_topology import (
     _observed_intervals,
     _interval_coverage,
     structural_axes,
+    structural_axis_estimate,
+    orientation_search_budget,
 )
 from .raw_topview_evidence import build_topview, raster_modes
 
@@ -215,17 +217,32 @@ def _opening_relation(grid, normal_axis, rho, along_span, interior_sign, config)
 
 
 def _candidate_rectangle(
-    u0, u1, v0, v1, axes, modes, grid, config, node_id, forbidden_axial,
+    u0,
+    u1,
+    v0,
+    v1,
+    axes,
+    modes,
+    grid,
+    config,
+    node_id,
+    forbidden_axial,
     forensic_trace=None,
 ):
     def account(reason, **metrics):
         if forensic_trace is not None:
             record = dict(
-                node_id=node_id, rho=[float(u0), float(u1), float(v0), float(v1)],
-                reject_reason=reason, observed_side_count=None, strong_side_count=None,
-                majority_supported_side_count=None, dual_return_side_count=None,
-                structural_side_count=None, canonical_side_count=None,
-                geometry_constrained_side_count=None)
+                node_id=node_id,
+                rho=[float(u0), float(u1), float(v0), float(v1)],
+                reject_reason=reason,
+                observed_side_count=None,
+                strong_side_count=None,
+                majority_supported_side_count=None,
+                dual_return_side_count=None,
+                structural_side_count=None,
+                canonical_side_count=None,
+                geometry_constrained_side_count=None,
+            )
             record.update(metrics)
             forensic_trace.setdefault("candidate_attempts", []).append(record)
 
@@ -320,14 +337,20 @@ def _candidate_rectangle(
     observed = sum(side["evidence_level"] != "UNRESOLVED" for side in sides)
     structural = sum(side["structural_coverage"] > 0 for side in sides)
     if observed < 3 or structural < 1:
-        account("INSUFFICIENT_OBSERVED_OR_STRUCTURAL_SIDES",
-                observed_side_count=observed, structural_side_count=structural)
+        account(
+            "INSUFFICIENT_OBSERVED_OR_STRUCTURAL_SIDES",
+            observed_side_count=observed,
+            structural_side_count=structural,
+        )
         return None
     weak = sum(side["evidence_level"] == "UNRESOLVED" for side in sides)
     if weak > config["boundary"]["max_inferred_edges"]:
-        account("TOO_MANY_GEOMETRY_CONSTRAINED_SIDES",
-                observed_side_count=observed, structural_side_count=structural,
-                geometry_constrained_side_count=weak)
+        account(
+            "TOO_MANY_GEOMETRY_CONSTRAINED_SIDES",
+            observed_side_count=observed,
+            structural_side_count=structural,
+            geometry_constrained_side_count=weak,
+        )
         return None
     for side in sides:
         if side["evidence_level"] == "UNRESOLVED":
@@ -361,10 +384,15 @@ def _candidate_rectangle(
         value >= config["roi"]["min_enclosure_ratio"] for value in side_strength
     )
     majority_supported = sum(value >= 0.5 for value in side_strength)
-    metrics = dict(observed_side_count=observed, strong_side_count=strong,
-                   majority_supported_side_count=majority_supported,
-                   dual_return_side_count=dual_return, structural_side_count=structural,
-                   canonical_side_count=canonical, geometry_constrained_side_count=weak)
+    metrics = dict(
+        observed_side_count=observed,
+        strong_side_count=strong,
+        majority_supported_side_count=majority_supported,
+        dual_return_side_count=dual_return,
+        structural_side_count=structural,
+        canonical_side_count=canonical,
+        geometry_constrained_side_count=weak,
+    )
     if strong < 4 or majority_supported < 3 or dual_return < 4:
         account("FINAL_FOUR_SIDE_ACCEPTANCE_GATE", **metrics)
         return None
@@ -439,17 +467,35 @@ def solve(points, segments, edges, height_regions, config, *, forensic_trace=Non
         for row in segments
         if row.get("reference_role") in ("INTERIOR_SURFACE", "ROLE_AMBIGUOUS_OVERFLOW")
     }
-    axes = structural_axes(
+    axis_estimate = structural_axis_estimate(
         [edge for edge in edges if edge.get("segment_id") not in forbidden],
         2 * config["boundary"]["merge_angle_deg"],
     )
+    axes = (
+        (np.asarray(axis_estimate["axis_a"]), np.asarray(axis_estimate["axis_b"]))
+        if axis_estimate["status"] == "AXIS_ESTIMATED"
+        else None
+    )
+    orientation_budgets = [
+        orientation_search_budget(
+            axis_estimate,
+            row["bbox_xy"],
+            config["roi"]["support_search_m"],
+            config["boundary"]["profile_half_width_m"],
+        )
+        for row in height_regions
+    ]
     if forensic_trace is not None:
         forensic_trace["height_region_input_count"] = len(height_regions)
         forensic_trace["global_structural_axes"] = (
-            [axis.tolist() for axis in axes] if axes is not None else None)
+            [axis.tolist() for axis in axes] if axes is not None else None
+        )
     if axes is None:
         return dict(
             status="STRUCTURAL_AXES_UNRESOLVED",
+            structural_axis=axis_estimate,
+            orientation_budgets=orientation_budgets,
+            ambiguous_search_envelopes_xy=[row["bbox_xy"] for row in height_regions],
             rectangles=[],
             raster_modes={0: [], 1: []},
         )
@@ -689,6 +735,8 @@ def solve(points, segments, edges, height_regions, config, *, forensic_trace=Non
         ),
         static_calibration_status="UNVERIFIED_NO_INDEPENDENT_INNER_EDGE_GOLDEN",
         axes=[axis.tolist() for axis in axes],
+        structural_axis=axis_estimate,
+        orientation_budgets=orientation_budgets,
         raw_topview_channels=list(
             ("median_z", "point_count", "vertical_span", "valid_mask")
         ),

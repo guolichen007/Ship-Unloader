@@ -146,18 +146,42 @@ def _fit_line(xy, config):
     if len(xy) < b["line_min_points"]:
         return None
     xy = np.asarray(xy)[point_order(xy)]
-    rng = np.random.default_rng(2026)
+    # Farthest-point seeds cover physical XY rather than random array slots.
+    # Keep the old finite pair budget; fit/refine uses every original point.
+    budget = min(128, len(xy) * 4)
+    capacity = max(2, int((1 + math.sqrt(1 + 8 * budget)) / 2))
+    seeds = [0]
+    distance = np.sum((xy - xy[0]) ** 2, axis=1)
+    while len(seeds) < min(capacity, len(xy)):
+        index = int(np.argmax(distance))
+        if distance[index] <= 0:
+            break
+        seeds.append(index)
+        distance = np.minimum(distance, np.sum((xy - xy[index]) ** 2, axis=1))
     best = np.zeros(len(xy), dtype=bool)
-    for _ in range(min(128, len(xy) * 4)):
-        a, c = xy[rng.choice(len(xy), 2, replace=False)]
+    best_rank = None
+    for first, second in ((a, b) for i, a in enumerate(seeds) for b in seeds[i + 1 :]):
+        a, c = xy[first], xy[second]
         direction = c - a
         length = np.linalg.norm(direction)
         if length < 1e-9:
             continue
         direction /= length
         mask = np.abs(np.cross(direction, xy - a)) <= b["line_inlier_m"]
-        if int(mask.sum()) > int(best.sum()):
+        residual = np.abs(np.cross(direction, xy[mask] - a))
+        projection = np.sort((xy[mask] - a) @ direction)
+        gaps = np.diff(projection)
+        support = float(gaps[gaps <= b["max_support_gap_m"]].sum())
+        rank = (
+            int(mask.sum()),
+            support,
+            -float(np.median(residual)),
+            -float(np.max(residual)),
+            tuple(-v for v in np.r_[a, c]),
+        )
+        if best_rank is None or rank > best_rank:
             best = mask
+            best_rank = rank
     if int(best.sum()) < b["line_min_points"]:
         return None
     fit = xy[best]

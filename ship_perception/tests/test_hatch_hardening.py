@@ -114,6 +114,31 @@ class PhysicalContracts(unittest.TestCase):
         self.assertFalse(stats["used"])
         self.assertEqual(admission_stats(None)["finite_count"], 0)
 
+    def test_unresolved_boundary_band_is_neither_known_exterior_nor_confirmed(self):
+        topology = self.topology()
+        u, v = topology.grid.centers()
+        # A B1 split cuts the measured hold, but does not delete its points.
+        unknown = topology.owned & (v < -0.5) & (v > -2)
+        topology.owned[unknown] = False
+        topology.unresolved_context = unknown
+        review = topology.review([8, -2, 22, 2], 0)
+        self.assertEqual(review["status"], "UNRESOLVED_EXTERIOR_CONNECTIVITY")
+        self.assertIsNone(review["exterior_low_connected"])
+        self.assertFalse(review["known_exterior_low_connected"])
+        self.assertGreater(review["unresolved_context_component_cells"], 0)
+        self.assertEqual(review["known_external_component_cells"], 0)
+        self.assertEqual(
+            topology.review([2, 6, 30, 10], 0)["status"], "REJECT_EXTERIOR_LOW_REGION"
+        )
+
+    def test_scene_boundary_still_seeds_exterior_even_for_unresolved_measurements(self):
+        topology = self.topology()
+        topology.unresolved_context = ~topology.owned
+        review = topology.review([2, 6, 30, 10], 0)
+        self.assertTrue(review["known_exterior_low_connected"])
+        self.assertEqual(review["status"], "UNRESOLVED_EXTERIOR_CONNECTIVITY")
+        self.assertFalse(review["missing_cells_traversed"])
+
 
 if __name__ == "__main__":
     unittest.main()

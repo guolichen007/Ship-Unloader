@@ -13,6 +13,117 @@ from ship_perception.tests.test_hatch_metamorphic import vessel_points
 
 
 class PipelineContracts(unittest.TestCase):
+    def test_split_core_keeps_raw_supported_boundary_context_as_partial(self):
+        from ship_perception.perception.final_boundary import FinalBoundaryRefiner
+
+        xyz, _ = vessel_points(1, spacing=0.12)
+        frame = PointCloudFrame(xyz, None, "map", 0, 0, "", ("x", "y", "z"), len(xyz))
+        masks = [((xyz[:, 1] >= 6) & (xyz[:, 1] < 11)), xyz[:, 1] < 6, xyz[:, 1] >= 11]
+        indexes = [np.flatnonzero(mask) for mask in masks]
+
+        def split_discovery(*args):
+            rows = []
+            for number, ids in enumerate(indexes):
+                points = xyz[ids]
+                rows.append(
+                    dict(
+                        vessel_hypothesis_id="V" + str(number),
+                        source_support_ids=["S0"],
+                        local_axes=np.eye(2).tolist(),
+                        bbox_xy=[*points[:, :2].min(0), *points[:, :2].max(0)],
+                        point_count=len(ids),
+                        classification_status=(
+                            "VESSEL_HYPOTHESIS" if number == 0 else "UNRESOLVED"
+                        ),
+                    )
+                )
+            return dict(vessel_hypotheses=rows), dict(
+                vessel_point_indexes={
+                    "V" + str(n): ids for n, ids in enumerate(indexes)
+                }
+            )
+
+        def comparison(*args):
+            low = xyz[xyz[:, 2] < -1, :2]
+            return [
+                dict(
+                    proposal_id="legacy:context",
+                    vessel_hypothesis_id="V0",
+                    bounds_axial=[*low.min(0), *low.max(0)],
+                    axes=np.eye(2).tolist(),
+                    proposal_source="SYNTHETIC_CONTEXT_COMPARISON",
+                    inherited_review_status="UNRESOLVED",
+                )
+            ], {}
+
+        original = FinalBoundaryRefiner.refine
+        for weak, bridge in ((False, False), (True, False), (False, True)):
+            current_frame = frame
+            if bridge:
+                connected = xyz.copy()
+                low_path = (
+                    (connected[:, 0] > 11)
+                    & (connected[:, 0] < 17)
+                    & (connected[:, 1] < 3.5)
+                )
+                connected[low_path, 2] = -4
+                current_frame = PointCloudFrame(
+                    connected, None, "map", 0, 0, "", ("x", "y", "z"), len(connected)
+                )
+
+            def refine(refiner, proposal, axes):
+                result = original(refiner, proposal, axes)
+                if weak and proposal["proposal_id"] == "legacy:context":
+                    for side in result["sides"].values():
+                        side["raw_subvoxel_section_count"] = 0
+                return result
+
+            with mock.patch(
+                "ship_perception.perception.context.infer_scene_vessels",
+                side_effect=split_discovery,
+            ) as b1, mock.patch(
+                "ship_perception.perception.pipeline._legacy_proposals",
+                side_effect=comparison,
+            ), mock.patch.object(
+                FinalBoundaryRefiner, "refine", new=refine
+            ):
+                result = run_perception(current_frame, legacy_evidence=True)
+            self.assertEqual(b1.call_count, 1)
+            kept = [
+                h
+                for h in result["geometry_only"]["hatches"]
+                if h["proposal_id"] == "legacy:context"
+            ]
+            if weak or bridge:
+                self.assertEqual(kept, [])
+                if bridge:
+                    deferred = [
+                        h
+                        for v in result["per_vessel_status"]
+                        for h in v["unresolved_candidates"]["samples"]
+                        if h.get("proposal_id") == "legacy:context"
+                    ]
+                    self.assertEqual(len(deferred), 1)
+                    self.assertGreaterEqual(deferred[0]["review_support_side_count"], 3)
+                    self.assertTrue(
+                        deferred[0]["exterior"]["known_exterior_low_connected"]
+                    )
+                continue
+            self.assertEqual(len(kept), 1)
+            hatch = kept[0]
+            self.assertEqual(hatch["status"], "PARTIAL_HATCH")
+            self.assertEqual(
+                hatch["containment"]["status"], "PARTIAL_BOUNDARY_AMBIGUOUS"
+            )
+            self.assertFalse(hatch["exterior"]["known_exterior_low_connected"])
+            self.assertFalse(hatch["boundary_context_review"]["ownership_confirmed"])
+            self.assertEqual(
+                hatch["boundary_context_review"]["measurement_containment"]["status"],
+                "CONTAINED",
+            )
+            self.assertIn("BOUNDARY_OWNERSHIP_UNRESOLVED", hatch["candidate_blockers"])
+            self.assertGreaterEqual(hatch["review_support_side_count"], 3)
+
     def test_invalid_final_polygon_is_local_uncertainty_not_a_frame_failure(self):
         from ship_perception.perception.final_boundary import FinalBoundaryRefiner
 

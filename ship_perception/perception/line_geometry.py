@@ -13,7 +13,8 @@ def guard_line_move(
     supported = sections >= config["boundary"]["profile_min_sections"] and independent
     proposed = rho + slope * (np.asarray(span) - reference)
     maximum_inward = float(np.max(sign * (proposed - before)))
-    if maximum_inward > config["boundary"]["corner_join_m"] and not supported:
+    maximum_move = float(np.max(abs(proposed - before)))
+    if maximum_move > config["boundary"]["corner_join_m"] and not supported:
         return before, 0.0, "KEEP_CONSERVATIVE_PREVIOUS_BOUNDARY", True
     return (
         rho,
@@ -64,7 +65,8 @@ def guarded_intersections(sides, guard_bounds, config):
             inward = float(np.max(sign * (values - guard_bounds[position])))
             side["side_max_endpoint_inward_move_m"] = inward
             if (
-                inward > config["boundary"]["corner_join_m"]
+                np.max(abs(values - guard_bounds[position]))
+                > config["boundary"]["corner_join_m"]
                 and not side["independent_geometry_support"]
             ):
                 side["boundary_uncertainty_m"] = max(

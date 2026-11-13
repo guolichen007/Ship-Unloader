@@ -51,13 +51,45 @@ class VesselLocalEvidence:
     input_frame_providers: object = None
     provider_build_count: int = 0
     grid_build_counts: dict = field(default_factory=dict)
+    measurement_context: object = None
+    context_xyz: object = None
+    context_grids: dict = field(default_factory=dict)
 
     @classmethod
-    def build(cls, frame, vessel, config):
+    def build(cls, frame, vessel, config, measurement_context=None):
         points = frame.xyz[vessel.point_indexes]
         uvz = np.column_stack((points[:, :2] @ vessel.axes.T, points[:, 2]))
         uvz.setflags(write=False)
-        return cls(vessel, uvz, config)
+        if measurement_context is None:
+            # Standalone raw-geometry consumers need only their own point set;
+            # borrowing requires the explicit frozen scene context from B1.
+            return cls(vessel, uvz, config, context_xyz=uvz)
+        if measurement_context.vessel_id != vessel.vessel_id:
+            raise ValueError("LOCAL_MEASUREMENT_CONTEXT_VESSEL_MISMATCH")
+        if measurement_context.point_index_sha256 == vessel.point_index_sha256:
+            context_uvz = uvz
+        else:
+            points = frame.xyz[measurement_context.point_indexes]
+            context_uvz = np.column_stack((points[:, :2] @ vessel.axes.T, points[:, 2]))
+            context_uvz.setflags(write=False)
+        return cls(
+            vessel,
+            uvz,
+            config,
+            measurement_context=measurement_context,
+            context_xyz=context_uvz,
+        )
+
+    def context_grid(self, name):
+        """Independent measurement occupancy, never a replacement owned mask."""
+        if self.context_xyz is self.xyz:
+            return self.grid(name)
+        if name not in self.context_grids:
+            key = "coarse_voxel_m" if name == "coarse" else "candidate_voxel_m"
+            self.context_grids[name] = R1HeightGrid.from_points(
+                self.context_xyz, self.config["geometry"][key]
+            )
+        return self.context_grids[name]
 
     def grid(self, name):
         if name not in self.grids:
@@ -89,38 +121,58 @@ class VesselLocalEvidence:
         return self.providers
 
     def side_candidates(self, box):
-        from ship_perception.r1_static.r2h_b5_corner_forensics import _side_modes
+        from .side_evidence import bounded_side_modes as _side_modes
 
-        lines = [
-            dict(
-                normal_axis=p["rho_or_region"]["normal_axis"],
-                rho=p["rho_or_region"]["rho"],
-                along=p["support_interval"],
-                provider_type=p["provider_type"],
-                provider_id=p["provider_id"],
-                source_vessel_id=self.vessel.vessel_id,
-                source_support_ids=p["source_support_ids"],
-                source_scope="SAME_VESSEL",
-                coverage=p["coverage"],
-            )
-            for p in self.structural_providers()
-        ]
+        if not hasattr(self, "_v21_side_lines"):
+            lines = [
+                dict(
+                    normal_axis=p["rho_or_region"]["normal_axis"],
+                    rho=p["rho_or_region"]["rho"],
+                    along=p["support_interval"],
+                    provider_type=p["provider_type"],
+                    provider_id=p["provider_id"],
+                    source_vessel_id=self.vessel.vessel_id,
+                    source_support_ids=p["source_support_ids"],
+                    source_scope="SAME_VESSEL",
+                    coverage=p["coverage"],
+                )
+                for p in self.structural_providers()
+            ]
+            indexes = {}
+            for axis in (0, 1):
+                order = np.array(
+                    sorted(
+                        (
+                            i
+                            for i, line in enumerate(lines)
+                            if line["normal_axis"] == axis
+                        ),
+                        key=lambda i: (lines[i]["rho"], i),
+                    ),
+                    dtype=int,
+                )
+                indexes[axis] = (order, np.asarray([lines[i]["rho"] for i in order]))
+            self._v21_side_lines = (lines, indexes)
+        lines, indexes = self._v21_side_lines
         search = self.config["roi"]["support_search_m"]
-        return {
-            name: _side_modes(
-                lines,
-                axis,
-                (box[1 - axis], box[3 - axis]),
-                (box[position] - search, box[position] + search),
-                self.config,
+        output = {}
+        for name, axis, position in (
+            ("U0", 0, 0),
+            ("U1", 0, 2),
+            ("V0", 1, 1),
+            ("V1", 1, 3),
+        ):
+            band = (box[position] - search, box[position] + search)
+            order, coordinates = indexes[axis]
+            low = np.searchsorted(coordinates, band[0], side="left")
+            high = np.searchsorted(coordinates, band[1], side="right")
+            # Keep historical provider ordering as well as exact inclusive
+            # boundaries, so provenance and mode values remain identical.
+            nearby = [lines[i] for i in sorted(order[low:high])]
+            output[name] = _side_modes(
+                nearby, axis, (box[1 - axis], box[3 - axis]), band, self.config
             )
-            for name, axis, position in (
-                ("U0", 0, 0),
-                ("U1", 0, 2),
-                ("V0", 1, 1),
-                ("V1", 1, 3),
-            )
-        }
+        return output
 
     def export_structural(self):
         """Transform cached measured lines for the independent legacy consumer."""

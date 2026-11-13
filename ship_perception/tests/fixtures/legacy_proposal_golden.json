@@ -1,0 +1,19 @@
+{
+  "base_sha": "51410e3f4f932fcbdcc7fc88b8f9979c60c2b954",
+  "usage": "SYNTHETIC_PROPOSAL_REGRESSION_ONLY_NOT_STEEL_GT",
+  "proposal_summary": [
+    {
+      "bounds_axial": [
+        8.0,
+        3.25,
+        20.0,
+        13.75
+      ],
+      "state": "HATCH_PROPOSAL",
+      "measured_strong_side_count": 4,
+      "role_conflicts": [
+        "STEEL_ROLE_NOT_INDEPENDENTLY_VERIFIED"
+      ]
+    }
+  ]
+}

@@ -27,9 +27,10 @@ def _unit(vector):
     return np.asarray(vector, dtype=float) / length if length > 1e-9 else None
 
 
-def structural_axes(edges, max_angle_deg):
-    """Estimate two orthogonal axes with equal maximum vote per Height node."""
+def structural_axis_estimate(edges, max_angle_deg):
+    """Continuous robust 4-theta consensus with per-node vote normalization."""
     by_node = defaultdict(list)
+    vote_length_cap_m = 10.0  # Existing per-edge vote length cap, unchanged.
     for edge in edges:
         a = np.asarray(edge["a_raw"][:2], dtype=float)
         b = np.asarray(edge["b_raw"][:2], dtype=float)
@@ -37,41 +38,108 @@ def structural_axes(edges, max_angle_deg):
         if direction is None:
             continue
         angle = math.atan2(direction[1], direction[0])
-        weight = min(float(edge["observed_support_length"]), 10.0)
+        weight = min(float(edge["observed_support_length"]), vote_length_cap_m)
         by_node[edge["node_id"]].append((angle, weight))
     votes = []
     for rows in by_node.values():
         total = sum(weight for _, weight in rows)
         if total <= 0:
             continue
-        votes.extend((angle, weight / total) for angle, weight in rows)
-    if not votes:
-        return None
-    tolerance = math.radians(max_angle_deg)
-
-    def separation(a, b):
-        return abs((a - b + math.pi / 4) % (math.pi / 2) - math.pi / 4)
-
-    center = max(
-        (angle for angle, _ in votes),
-        key=lambda angle: sum(
-            weight
-            for candidate, weight in votes
-            if separation(angle, candidate) <= tolerance
-        ),
+        # Normalize within each node, then continuously express its available
+        # support. The maximum node vote remains one; a disappearing last edge
+        # no longer contributes a full node vote right up to zero support.
+        reliability = total / (total + vote_length_cap_m)
+        votes.extend((angle, weight / total * reliability) for angle, weight in rows)
+    ambiguous = dict(
+        status="AXIS_AMBIGUOUS",
+        axis_a=None,
+        axis_b=None,
+        axis_uncertainty_deg=None,
+        angular_concentration=0.0,
+        support_weight=0.0,
     )
-    inliers = [
-        (angle, weight)
-        for angle, weight in votes
-        if separation(angle, center) <= tolerance
-    ]
-    if sum(weight for _, weight in inliers) < 0.5 * sum(weight for _, weight in votes):
-        return None
-    phase = sum(weight * np.exp(4j * angle) for angle, weight in inliers)
-    angle = float(np.angle(phase) / 4)
+    if not votes:
+        return ambiguous
+    # Sorting physical votes fixes summation order without selecting a winner.
+    votes = sorted(votes)
+    phi = np.array([4 * a for a, _ in votes])
+    base = np.array([w for _, w in votes])
+    phase = np.sum(base * np.exp(1j * phi))
+    if abs(phase) <= np.finfo(float).eps * base.sum():
+        return ambiguous
+    center = float(np.angle(phase))
+    scale = 4 * math.radians(max_angle_deg)
+    for _ in range(64):
+        residual = np.angle(np.exp(1j * (phi - center)))
+        weights = base / (1 + (residual / scale) ** 2)
+        phase = np.sum(weights * np.exp(1j * phi))
+        step = float(np.angle(np.exp(1j * (np.angle(phase) - center))))
+        center += step / 2
+        if abs(step) <= np.sqrt(np.finfo(float).eps):
+            break
+    residual = np.angle(np.exp(1j * (phi - center)))
+    weights = base / (1 + (residual / scale) ** 2)
+    robust_concentration = float(
+        abs(np.sum(weights * np.exp(1j * phi))) / weights.sum()
+    )
+    # Robust reweighting must not hide incompatible raw directions.
+    concentration = float(abs(np.sum(base * np.exp(1j * phi))) / base.sum())
+    support = float(weights.sum() / base.sum())
+    effective = float(weights.sum() ** 2 / np.sum(weights**2))
+    uncertainty = math.degrees(
+        math.sqrt(float(np.sum(weights * residual**2) / weights.sum()) / effective) / 4
+    )
+    diagnostic = dict(
+        axis_uncertainty_deg=uncertainty,
+        angular_concentration=concentration,
+        robust_angular_concentration=robust_concentration,
+        support_weight=support,
+    )
+    if concentration < math.cos(scale) or support < 0.5:
+        return dict(ambiguous, **diagnostic)
+    angle = center / 4
     axis_a = np.array([math.cos(angle), math.sin(angle)])
     axis_b = np.array([-axis_a[1], axis_a[0]])
-    return axis_a, axis_b
+    return dict(
+        status="AXIS_ESTIMATED",
+        axis_a=axis_a.tolist(),
+        axis_b=axis_b.tolist(),
+        **diagnostic,
+    )
+
+
+def orientation_search_budget(estimate, bounds, search_margin_m, profile_half_width_m):
+    """Convert angular uncertainty to the current region's physical lever arm."""
+    lever = float(np.linalg.norm(np.asarray(bounds[2:]) - bounds[:2]) / 2)
+    uncertainty = estimate.get("axis_uncertainty_deg")
+    lateral = (
+        (lever * math.sin(math.radians(uncertainty)))
+        if uncertainty is not None
+        else None
+    )
+    return dict(
+        orientation_uncertainty_deg=uncertainty,
+        effective_lever_arm_m=lever,
+        predicted_lateral_error_m=lateral,
+        available_search_margin_m=search_margin_m,
+        available_profile_half_width_m=profile_half_width_m,
+        required_search_margin_m=(
+            max(search_margin_m, lateral) if lateral is not None else None
+        ),
+        precision_orientation_status=(
+            "UNRESOLVED_ORIENTATION_BUDGET"
+            if lateral is None or lateral > profile_half_width_m
+            else "WITHIN_PROFILE_BAND"
+        ),
+    )
+
+
+def structural_axes(edges, max_angle_deg):
+    """Compatibility tuple view of the continuous robust axis estimate."""
+    estimate = structural_axis_estimate(edges, max_angle_deg)
+    if estimate["status"] != "AXIS_ESTIMATED":
+        return None
+    return np.asarray(estimate["axis_a"]), np.asarray(estimate["axis_b"])
 
 
 def _observations(segments):

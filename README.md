@@ -1,10 +1,37 @@
 # Ship-Unloader
 
+> V2.15R3 Shadow IR 检查点：在现有 Candidate Union 中扩展无损观测与 persistent basin lineage，完整 Height/Local 解释不再因 S4 替换、corroboration 或 compound 资格标记而从影子表示中消失。Ubuntu22 七场 IR/生产不变性门通过；当前正式识别行为仍保持 `6f447648`，4-22 的既有 solver 失败保留。按本轮任务在 IR 回执后停止，未开始新的 Selection 修复。职责见 [无损 IR 合同](docs/00_系统架构与技术路线.md)，范围与门见 [测试说明](docs/04_测试与验收说明.md)。
+
+> 2026-11-02 测边归属检查点：Raw 台阶须连接到当前开口的冻结内部支持，未归属观测保留诊断；现有侧边 ROI 内的完整立面可提供独立复核测量，同一立面的角色佐证不改写原 Raw 测线。方向资格按真实支持跨度判断，缺口仍不算实测。十个原始输入保持身份及 S4，08-08 外扩面积约 26.19%→14.16%，4-16 最大外扩约 0.461 m→0.256 m。629 项 Python 测试零普通失败、真实 B2 Golden12 及冻结检查通过；6-8、8-22 位置门和整体泛化、性能仍未通过，默认仍为 bounded。详见 [当前能力与限制](docs/07_V211证据顺序与完整复核几何.md)。
+
+> 2026-11-02 上沿归属与区域资格检查点：当前开口的上沿来源保留原始点、低侧连接及独立接触见证；局部高度归属不扩张 Core、不移动 XY。较高高度区域的传递连接不能把缺少共同开口证据的低层区域确认成同一个舱，8-17 的整船包围框已退回未决搜索组。Normal6 九框及全部 XY、S4、Raw 测边保留；616 项 Python 测试零普通失败，12 份真实 B2 提案 Golden 与冻结检查通过。6-8、8-22 等位置退化和完整泛化仍未通过，详见 [能力、实景证据与限制](docs/07_V211证据顺序与完整复核几何.md)。
+
+> 2026-11-01 方向与测量追溯检查点：保守边只约束覆盖，单一端壁不能无条件旋转整条长舱；保留方向前检查既有覆盖约束的可行性，当前 Raw 矛盾仍交给联合求解。配对测量新增原始内外端点、采样间隙和归属记录，不改变测量坐标，不将端点高度作为角点 Z。597 项 Python 测试零普通失败；Normal6 保持九框，117 个配对断面与原 PCD 复算精确一致。7-16 位置门恢复，6-8、8-22 等仍有超门；同船上沿归属、完整精度与泛化尚未通过，详见 [当前检查点](docs/07_V211证据顺序与完整复核几何.md)。
+
+> 2026-11-01 局部测量传递检查点：复核边附近的当前 Raw 上沿平面可独立传给 Z，局部支持不足以覆盖整边时仍保留原几何；跨 separator 的查询不借用高度。六场完整回跑保持九框、全部 XY 与 S4 不变，Z 为 2 个实测、3 个估计、1 个歧义、30 个缺测。580 项 Python 测试零普通失败，位置退化及完整泛化仍未解决，详见 [实景验证与未通过试验](docs/07_V211证据顺序与完整复核几何.md)。
+
+> 2026-11-01 局部 Z 修复：直接观测的上沿不再要求远端四断面齐全，Raw 平面点数与有效法向支持分别校验，XY 邻接与竖直残差使用各自既有参数。六场 Z 组件重放恢复 2 个实测、2 个估计高度，另有 1 个歧义、31 个缺测；08-01 完整回跑保留双舱且 XY 逐值不变。整体识别、精度与性能仍未验收通过，详见 [验证范围与限制](docs/07_V211证据顺序与完整复核几何.md)。
+
+> 2026-11-01 后续检查点：保留低占比上沿候选，并用完整 3D 邻域法向排除立面的水平切片。570 项 Python 测试零普通失败（10 跳过、5 既有 expectedFailure），实景 Z 仍未通过。Vessel-First 试验使 08-01 从双舱变为跨舱单框，已按停止门封存并撤回接线；未切换默认链，后续阶段未执行。详见 [停止原因与验证范围](docs/07_V211证据顺序与完整复核几何.md)。
+
+> 2026-11-01 Z 入口修复检查点：角点高度探测已与矩形边认证 flag 解耦，使用当前选中船的原始索引与侧边上表面证据；甲板参考与舱口上沿 Z 分开。六场 Z 组件重放保持全部原 XY 不变，但 36 个实景角点仍为 UNOBSERVED，不能声明 Z 标定通过。全量 Python 测试 568 项，零普通失败，10 项跳过、5 项既有 expectedFailure；后续 Vessel-First、侧边角色、方向共识及最终输出收敛尚未完成。详见 [检查点范围](docs/07_V211证据顺序与完整复核几何.md)。
+
+> 2026-10-31 V2.11 矩形复核阶段：既有 Normal6 拓扑冻结，显式 review-first 的最终框改由五参数矩形联合求解，原 Raw 测线与模型边分别保存。拓扑、严格矩形性、位置、Z 和钢边认证分别验收；Raw 技术说明只解释差异，不能覆盖原位置门 FAIL。人工效果待审查，Z 缺测保持 null，钢边、独立精度和性能未认证。默认仍为 bounded；review-first 输出 `.3`，旧 bounded 链保留 `.2`，独立 120/300 秒 watchdog 保留。实现及验证边界见 [V2.11 说明](docs/07_V211证据顺序与完整复核几何.md)；[V2.9 暂停记录](docs/06_V29完整复核标定框开发检查点.md)作为历史保留。
+
 双激光雷达卸船机船舱识别与船体稳定跟踪系统。
 
-当前现场入口是 **Ubuntu 22.04 / ROS2 Humble 的单帧开舱候选与人工复核工具**。读取 PCD 或 `/ship_scan/map` 后，使用同一条几何链输出边界、逐边证据、不确定性和两张复核图。结果不用于自动控制；V1.4 船体跟踪源码继续冻结保留，尚未与此入口联动。
+本分支是 **V2 区域召回与完整复核几何开发版**，目标环境为 Ubuntu 22.04 / ROS2 Humble。保留 Region-First、稳定 S4、开口身份与独立逐边测量。V2.11 将现有同船 Height/BEV/Raw3D/S4 局部证据编译前置到身份确认之前，保留完整复核框、实际测量区间及缺测延伸的保守状态；不恢复旧全局四线搜索。当前仅完成 Normal6 复核能力验收及另外八场非回归检查，没有重做全量 18+5 或现场验收。扩展检查仍见局部漏覆盖、重叠结构框和慢场景，不代表所有输入识别成功。main、B2 核心及 V1.4 冻结源保持不变。开发支线按用户授权推送，不能替代现场基线或用于自动控制。
 
 ## 两个现场入口
+
+人工审查批量入口（显式 review-first，保留算法默认 bounded）：
+
+```bash
+bash scripts/run_ship_hatch_review.sh --pcd /data/map.pcd --output-dir /data/review
+bash scripts/run_ship_hatch_review.sh --manifest /data/review_batch.json --output-dir /data/review
+```
+
+同一入口也支持 `--pcd-dir /data/pcd`。结果含带 XYZ 的原始标定图、`index.html` 审查索引及原云/派生裁剪独立矩阵；未决、缺测与超时分别保留。依赖准备、清单格式和靠岸船 ROI 见 [Ubuntu 一键审查](docs/02_ROS2现场一键识别运行说明.md)。
 
 首次安装依赖见 [ROS2 现场说明](docs/02_ROS2现场一键识别运行说明.md)。在仓库根目录运行：
 
@@ -19,7 +46,21 @@ source .local/ros2-venv/bin/activate
 ./scripts/run_ship_hatch_once.sh --save-snapshot
 ```
 
-脚本名、参数和日志使用英文，输出图的说明使用中文。`x/y/z` 必需，`intensity` 可选。缺失或近似恒定的强度明确回退几何，第二张图标记“强度不可用：复用几何识别结果”，不重复运行整套几何复核。
+脚本名、参数和日志使用英文，输出图的说明使用中文。`x/y/z` 必需，支持 ASCII、binary 与无损 binary_compressed PCD。V2 的 intensity 始终只记录状态，不建立强度 scorer，不执行第二套融合几何；第二张图标记“强度判定已关闭：复用纯几何复核结果”。
+
+## 靠岸作业船
+
+多船场景需要同一输入坐标系中的现场码头参考：修改 `config/site/berth_reference.yaml` 的码头直线、朝水方向与作业范围后启用，或传入经测量的外部配置。配置不得包含船尺寸、舱数或舱角坐标。离线坐标系可用 `--frame-id map` 显式指定。
+
+```bash
+./scripts/run_ship_hatch_pcd.sh --pcd /data/map.pcd --frame-id map \
+  --berth-reference /data/site/berth_reference.yaml
+./scripts/run_ship_hatch_once.sh --berth-reference /data/site/berth_reference.yaml
+```
+
+仓库模板默认关闭。自动码头检测需要可信的 `observer_xy`，不会把 map 原点当作雷达位置。无可靠参考且有多艘船时返回 `MULTI_VESSEL_BERTH_AMBIGUOUS`，不猜选、不合船；仍输出整幅场景和诊断。只有一个已分辨船体时允许未认证的单船复核，不据此声称靠岸选船已通过现场验收。
+
+离线复核允许按操作员确认的靠岸船工作区或原始点索引先裁剪，再运行相同入口。派生 PCD 须保留原坐标、XYZ/intensity 值、原文件哈希和点索引映射；这不是自动泊位识别的现场认证。裁剪准备时间与读取、识别、绘图和保存的时间分别记录。
 
 地图采集默认 `--topic /ship_scan/map --qos auto --timeout-sec 30`。AUTO 读取实际发布者 QoS；TransientLocal 地图支持晚加入订阅。Volatile 地图需要发布者再次发布，日志会说明等待原因。多个发布者、错误消息类型或超时生成独立失败诊断。
 
@@ -42,21 +83,34 @@ output/YYYYMMDD_HHMMSS_microseconds/
 
 终端逐阶段显示 `START / RUNNING / DONE / FAILED`、阶段耗时与总耗时，长阶段每 15 秒报告仍在运行。正式目录只在五份产物全部写完后发布；失败另存 `failure_*/failure.json`。
 
-`05_hatch_corners.json` 单列整幅场景中所有最终复核对象的四角坐标，使用原始输入 frame 的 XY、单位米；每角含 `x_m`、`y_m`、相交边名称及不确定性。它与全局图使用同一份最终几何，不补造 Z，也不把 `UNRESOLVED` 包围组当作单个已确认船舱。
+`05_hatch_corners.json` 单列整幅场景中所有最终复核对象的四角坐标，使用 `ship_perception.hatch_corners.2`，坐标为原始输入 frame 的 XYZ、单位米。XY 来自最终四线交点；Z 按用户选择，独立测量局部围板/甲板上沿，含 `z_status`、`z_uncertainty_m` 与 Raw 来源。无唯一局部上沿或相邻边支撑不足时，`z_m=null`、`z_status=UNOBSERVED`，不补值。它与两张全局图共用同一份坐标，也不把 `UNRESOLVED` 包围组当作单个已确认船舱。
 
-两张全船图均在角点附近标注 `P1～P4` 的输入 XY 坐标，并在每舱中央显示“长 / 宽”。JSON 的 `C0～C3` 依次对应图中 `P1～P4`，`dimensions` 同时保存长、宽及四条边的实长。长度为两条 U 向边实长的平均，宽度为两条 V 向边实长的平均；不使用旋转后的 XY 包围框尺寸。显示保留三位小数只是数值格式，不代表毫米级精度认证。
+两张全船图均在角点附近标注 `P1～P4` 的输入 XYZ 坐标（Z 缺测明确写“未观测”），并在每舱中央显示“长 / 宽”。JSON 的 `C0～C3` 依次对应图中 `P1～P4`，`dimensions` 同时保存长、宽及四条边的实长。长度为两条 U 向边实长的平均，宽度为两条 V 向边实长的平均；不使用旋转后的 XY 包围框尺寸。显示保留三位小数只是数值格式，不代表毫米级精度认证。
 
 琥珀实线为最佳复核边界，点线为不确定性覆盖范围。`PARTIAL_HATCH`、`UNRESOLVED_VESSEL_REVIEW` 不能当作已确认船舱；矩形约束和缺测推断不能当作实测钢边。完整原始场景保留在背景中，避免漏检区域被绘图裁掉。
 
 ## 当前技术路线与边界
 
-- 主链为输入检查 → 一次 B1 船体归属 → 冻结证据上下文 → 逐船 UVZ 召回 → 船外低区与包围验证 → 四边 Raw XYZ 精修 → 角点重建与防内裁。
-- 全局 Height/R2F/R2G 保留为可关闭的比较证据，不能限制逐船候选是否存在。`--no-legacy-evidence` 用于独立链验证；禁用后不代表所有真实船已完成召回验收。
-- 不通过固定水面 Z、船型尺寸或指定舱数补框。外部连通检查只经过实测低格，空白不充当通道。三边或裁剪不明时保留局部未决证据。
-- 强度仍为 `AUX_WEIGHT=0.05` 的辅助；没有双雷达源标识时校准状态为 `UNKNOWN`，不靠强度判钢。
+`geometry_only.opening_regions` 单列当前区域身份、保守边界、搜索范围和逐边测量状态，与最终 `hatches` 分开。缺少三条实测边、精修失败或预算中断不会清空区域注册表；扩大搜索范围本身也不能证明片段已经合成一个完整舱口。结构线族只提供同船搜索证据，不复制最终边 rho，不把缺测段当作负证据。
+
+默认区域编译消费稳定 S4 的原始 profile/face 观测，经 SideFamily、实际高度内区连续性和 CONNECT/SPLIT/AMBIGUOUS 关系建立身份，不输入旧 R2F 矩形。相邻或重叠 bbox 不构成合并依据；可信分隔优先保留独立身份，证据不足保留 compound 搜索组。四侧 `side_topology_support` 与 `boundary_measurements` 分开，未观测不表示不存在。`s4_topology_bridge` 保存来源、网格、侧族和全部关系供复核。
+
+- V2 主链为一次 B1 → 靠岸船选择 → 原始索引工作区 → Legacy / Height Basin / Structural Line / Local Enclosure / Loaded Hold / Large Sand Hold 候选联合与 post-B2 局部证据 → 名义候选编译 → 统一验证 → 廉价 Raw 探测和逐区域调查 → 一个共享四边精修器。Layout Recovery / Multi Hold 仅搜索和排序，不创造边。
+- Legacy 冻结 B2 候选及原始证据，旧 R2F/R2G/B4/B5 只保留在 `--pipeline v1-diagnostic` 历史诊断路径，不在 V2 中重复执行整套最终精修。历史旧路径的召回效果尚未全部迁入 V2，见验收说明。
+- `UNKNOWN_CONTEXT` 不作为强船外种子；缺少高度、一边缺测、装载高度不明和布局不一致不作为硬拒绝。只对明确物理矛盾拒绝；证据不足的候选保存为未决记录。
+- 最终 Raw 不降采样，保持原有 0.05 m 分辨率。共享排序空间索引、剖面、边模式、逐相位 Raw 测量与按需法向；冻结 Legacy provider 自身的法向资格计算仍保留。
+- 精修阶段设 20 秒协作式预算，核心预留绘图时间；超时保留已完成结果和全部原始提案。预算超限逐项记录，不代表识别成功或所有场景已经达到耗时目标。
 - 没有独立钢内沿 Golden，不能声明厘米级精度、商业泛化或现场自动作业通过。未开舱船需人工确认范围，当前没有自动开闭舱分类。
 
-当前 Normal6 召回门尚未通过。开发回归与正式验收、Windows 与 Ubuntu、Synthetic 与 SITE 的结论分别记录，见 [测试与验收](docs/04_测试与验收说明.md)。旧 C++ V1.5 Quick 的已知失败继续保留，Python 工具运行成功不覆盖该验收事实。
+当前 Normal6 与 V2 单调回归门均未通过。程序退出成功、复核对象数量和较快耗时不能代替完整开口覆盖与水面误检复核。开发回归与正式验收、Windows 与 Ubuntu、Synthetic 与 SITE 分别记录，见 [测试与验收](docs/04_测试与验收说明.md)。旧 C++ V1.5 Quick 的既有失败继续保留。
+
+历史离线拓扑审计入口如下；它从当前 Raw 重算 `prepare_geometry / review_points`，输出区域及逐边证据，并报告原完整旧链参考的预期变化。虚线图为保守候选区域，四角 Z 缺测保持 `null`。默认 V2 使用上述侧族/拓扑图编译，不重放这套昂贵组合搜索，也不把它作为提速方案。
+
+```bash
+OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+python3 -m ship_perception.tools.recompute_legacy_topology \
+  --pcd /data/input.pcd --output-dir /data/review/topology
+```
 
 ## ROS2 安装入口
 
@@ -94,3 +148,60 @@ Ship-Unloader-Work/              # builds, logs and validation; never pushed
 ```
 
 正式历史跟踪 Tag `baseline-v1.4-ubuntu20-20260919` 保留。`archive/*` 只用于追溯；开发、合入和历史保全遵守[开发与 Git 协作规范](docs/05_开发与Git协作规范.md)。
+
+## R3-H 实验复核入口
+
+R3-H 从本地 R3-F 候选和身份合同继续开发。局部逐边输出记录 Raw 甲板、立面、连续回波、污染和多模式来源。当前所有几何结果需要人工审查，钢边精度未认证。
+
+Windows 使用 Python 环境中的数值依赖后运行以下命令。第一个参数可为单个 PCD 或目录。
+
+~~~bat
+scripts\run_R3H_windows.bat "C:\data\pcd" "C:\data\review"
+~~~
+
+Ubuntu 使用项目数值环境运行以下命令。
+
+~~~bash
+bash scripts/run_R3H_ubuntu.sh /data/pcd /data/review
+~~~
+
+默认在每个输入的同一子进程里解码一次，先导出预览，再用校验快照续跑精修。独立运行可追加 --mode preview 或 --mode full，冷进程三轮计时可追加 --rounds 3。输入 SHA、配置、源码或坐标合同变化会重建快照。
+
+每次原生输出发布 opening_cells.json、05_hatch_corners.json、hatches_compact.json 和船舱四角长宽_简表.csv。尺寸来自原始 XY 的对边平均边长，缺测 Z 为 null。运行总表.csv/json 记录每场退出码、失败原因、日志目录、CPU、进程峰值内存和墙钟。表内 PASS 表示程序与输出合同完成，人工识别质量另行评估。超时或缺少必需文件返回非零退出码，批次继续下一场。
+
+## R3-I：局部 Raw 证据与受保护求解
+
+R3-I 继承上述入口。默认 staged 先发布预览再恢复快照；`--mode full` 是独立冷完整流程，`--mode preview` 只发布预览。性能回执分别统计两种完整命令、首次预览和快照续跑，不能把阶段耗时当作冷启动提速。
+
+只有 staged 在两个阶段之间保存并读取召回快照。独立 full 与 preview 不写入未使用的续跑缓存，仍导出全部必需证据、图片和四角结果。
+
+局部证据在矩形求解前生成。每个物理断面分别保留多个水平表面；真实立面支持使用完整三维邻域法向，薄切片低残差不能单独证明立面。只有同船甲板、立面与冻结开口成员归属相容，才形成测量候选。相互独立的断面不足、覆盖不足或多模式竞争时保留原复核边。结构延续且甲板未确认不再等同于已识别船壳。
+
+同一开口的 Legacy 与候选矩形共用原隔板和覆盖约束。只有 Raw 残差确有改善、严格约束可行、角点移动受保护且未丢失原开口成员，才采用新解；所有拒绝理由与原始点索引摘要保留。SLSQP 覆盖约束在法向跨过垂直方向时维数保持固定。几何可行、局部测量和钢边认证分别记录，真实钢内沿精度仍待独立标注，缺测 Z 保持 null。
+
+Legacy 不可行时仍会尝试有合格新边的 B 方案，以当前受隔板保护的复核多边形作移动与成员覆盖锚点；可行的矩形不能以牺牲实测 Raw 残差换取通过。仅复核 Cell 只有在完整新边证据实际通过 A/B 后才进入严格结果，其全部既有候选成员均受保留保护；单纯旧框可行、别名成员来源缺失或跨船来源都不能晋级。
+
+每份复核另存 `runtime_io_metrics.json`，记录绘图、主 JSON 编码、规范化、schema 校验、原子写入与四角导出资源；编码后的主 JSON 复用同一份已校验字节，完整证据不删减。快照校验/加载、局部查询和断面共识单独记录。`worker_receipt.json` 的 `published_perf_counter` 可与同机外部调度器的启动时刻对应，计量首次可用输出。
+
+首差诊断工具只用于离线回放，追踪开销不能混入性能验收：
+
+~~~bash
+python tools/trace_raw_section_equivariance.py capture --pcd /data/reference.pcd --output /review/before
+python tools/trace_raw_section_equivariance.py capture --pcd /data/transformed.pcd --output /review/after --source-index-map /review/source_finite_indexes.npy
+python tools/trace_raw_section_equivariance.py compare --before /review/before/raw_profile_trace.json --after /review/after/raw_profile_trace.json --transform /review/transform.json --output /review/first_difference.json
+~~~
+
+变换元数据只描述回放的刚体变换，不包含人工舱边。工具按同轴、同极性最近测站报告轴、源有限点索引、测站和 Raw 分侧统计的首差；测站发生移动会明确报告，不能假定其等价。完整 B1/Raw 等变性尚未认证，不能据局部单测宣布厘米级标定通过。
+
+
+## R3-J：同船侧边走廊与错误长边恢复（实验）
+
+从 R3-I 提交 `f2da47efc94be081c821b0e00c19a91add8974b8` 继续，沿用上述 Windows / Ubuntu 一键入口，不修改生产 main、冻结源及物理验收阈值。同船长边关系异常只触发本舱 Raw 搜索，不以两个宽度投票，也不强制等宽。单舱跳过跨舱约束；不同船的先验相互隔离。
+
+新流程从有来源的舱内锚点向外检测多尺度高度过渡，保存完整断面、原始索引、甲板及三维立面支持。缺少可信舱内物理归属时仍保存实际候选，但只允许搜索和人工复核。完整独立物理链可进入单独的错误边 A/B；原有局部 `corner_join_m` 安全门不放宽。可信成员全部保护，被裁去的不确定成员必须逐点具有本次实际观测到的外侧甲板或立面见证，否则拒绝。隔板和严格矩形约束仍可否决新候选，不能为得到成功框而删约束。
+
+完整运行新增 `新旧候选四栏对照.png`、`逐边变动与原始证据.json`、`船舱长宽与四角_中文.csv`、`船舱复核总览.html`；批次目录增加 `全部场景复核.html`。机器 JSON 原有字段和原始浮点坐标保留，缺测 Z 仍为 null。中文图显示两位小数、长宽和紧凑四角 XYZ；实际像素边界避让失败时扩大图片外侧坐标栏，不添加角点圆点、箭头或引线。改变字体及字号不改变几何。
+
+“严格矩形可解”仅代表几何约束可解，“疑似船舷、候选修正未采用”会保留旧版正式复核框。全部钢内沿精度仍未认证；真实精度必须经过独立真值和人工审核。程序完成及候选数量不代替精度验收。
+
+精修软截止同样覆盖角点高度阶段：当前已完成的真实高度和原始支持保留，尚未完成的角点为 null 并标注“高度延期，待复测”。部分原始候选仍保存，几何框不因高度延期丢失。240 秒软截止及 300 秒看门狗均不放宽，其他异常仍按失败记录。

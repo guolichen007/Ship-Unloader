@@ -72,7 +72,8 @@ class CornerExportTests(unittest.TestCase):
                 [point["display_label"] for point in new["corners"]],
                 ["P1", "P2", "P3", "P4"],
             )
-            self.assertTrue(all("z_m" not in p for p in new["corners"]))
+            self.assertTrue(all(p["z_m"] is None for p in new["corners"]))
+            self.assertTrue(all(p["z_status"] == "UNOBSERVED" for p in new["corners"]))
         self.assertIsNone(result["hatches"][1]["individual_hatch_count"])
         self.assertEqual(
             result["hatches"][1]["candidate_type"], "UNRESOLVED_OPENING_GROUP"
@@ -133,16 +134,21 @@ class CornerExportTests(unittest.TestCase):
             destination = save_output(
                 copy.deepcopy(source), frame, directory, False, Timing(None)
             )
-            self.assertEqual(
-                {p.name for p in destination.iterdir()},
-                {
-                    "01_geometry_only.png",
-                    "02_intensity_fusion.png",
-                    "03_results.json",
-                    "04_input_summary.txt",
-                    "05_hatch_corners.json",
-                },
-            )
+            expected = {
+                "01_geometry_only.png",
+                "02_intensity_fusion.png",
+                "03_results.json",
+                "04_input_summary.txt",
+                "05_hatch_corners.json",
+            }
+            identity = source["software_source_identity"]
+            if identity["git_worktree_dirty"]:
+                expected.add("runtime_patch.diff")
+                patch_bytes = (destination / "runtime_patch.diff").read_bytes()
+                self.assertEqual(
+                    hashlib.sha256(patch_bytes).hexdigest(), identity["git_diff_sha256"]
+                )
+            self.assertEqual({p.name for p in destination.iterdir()}, expected)
             full = (destination / "03_results.json").read_bytes()
             corners = json.loads((destination / "05_hatch_corners.json").read_text())
             self.assertEqual(

@@ -1,0 +1,314 @@
+{
+  "schema": "ship_perception.legacy_proposal_golden.1",
+  "base_sha": "51410e3f4f932fcbdcc7fc88b8f9979c60c2b954",
+  "verified_implementation_sha": "daac75d",
+  "scope": "PROPOSALS_AND_EVIDENCE_NOT_STEEL_EDGES",
+  "scenes": [
+    {
+      "scene": "08-01",
+      "wire_sha256": "ea736584c7d3815fec90a2bb6d7f1fd615c016452afaba083a75a4057c1cffb2",
+      "semantic_sha256": "d266e36b17a6c9a374ecdc783c4c1bcc0a7814d9d4735a528080701045d9f69c",
+      "point_count": 526037,
+      "vessels": [
+        {
+          "vessel_id": "V0000",
+          "proposal_sha256": "2dbf20b6265ad95b6f83bd0c3ee9c57a198d6174dc1be4fe2a82c82ee05f7eb4",
+          "proposal_count": 55
+        },
+        {
+          "vessel_id": "V0001",
+          "proposal_sha256": "73f1d66b2fd25ea79e4c64d324fd7c7e4fe9c58e2196e8030c5e501b0dcc78c5",
+          "proposal_count": 82
+        },
+        {
+          "vessel_id": "V0002",
+          "proposal_sha256": "7e7bf3cc8a96e521c05d9b75f77f861eb40f1805be6b7292e345811d98501ab8",
+          "proposal_count": 0
+        }
+      ]
+    },
+    {
+      "scene": "08-08",
+      "wire_sha256": "28ab75a172a6e0d270e822cb66225c7fe09e8fbe8ecc39513cbeb3608d129c2f",
+      "semantic_sha256": "509d36b0a09908b5d7ec5890ced38912f37fa491c54a2d6769ec2afa076a0d92",
+      "point_count": 163582,
+      "vessels": [
+        {
+          "vessel_id": "V0000",
+          "proposal_sha256": "1c664fe4ac7784cc6208b8b9ceb708fb70cf7c0df7419e47b4b85aebf8e144d7",
+          "proposal_count": 33
+        },
+        {
+          "vessel_id": "V0001",
+          "proposal_sha256": "b802e48c35f8e4a2ba3fbf0958fb7af40bee1ed327394c62a8f4d7c1630a22f5",
+          "proposal_count": 72
+        }
+      ]
+    },
+    {
+      "scene": "4-16",
+      "wire_sha256": "92bc204d6563a685bdfe12937dd86cc7afaf5f16219a28c9945035703dea5ec1",
+      "semantic_sha256": "555b4857f35248bfc744b7cb12b66aa3c64d598db96b7207ccaa6cca475b44e6",
+      "point_count": 702793,
+      "vessels": [
+        {
+          "vessel_id": "V0000",
+          "proposal_sha256": "6fcb404dc9b2b935d252836b2ee62f77a86b5ca95ba822e465b8c9234347bac2",
+          "proposal_count": 22
+        },
+        {
+          "vessel_id": "V0001",
+          "proposal_sha256": "fc696943f620e377c8c17778395cb28c9a4ccacc4ca4f664aef6fe526a2fe8d8",
+          "proposal_count": 57
+        },
+        {
+          "vessel_id": "V0002",
+          "proposal_sha256": "fc95106c8c76f21a009c0030db6c87d86c63a8dbdfd720af9decbf7bb2026878",
+          "proposal_count": 51
+        }
+      ]
+    },
+    {
+      "scene": "6-8",
+      "wire_sha256": "a63a2a12b161bea552269f21110164490d669b77afbd4e2de0e6bb766bef9b6f",
+      "semantic_sha256": "18f5b28b70dc18f1024a223ebfd643ecd097f5b6ec2e15bb3ea78800412ca72e",
+      "point_count": 701989,
+      "vessels": [
+        {
+          "vessel_id": "V0000",
+          "proposal_sha256": "cab7b57b58d3796918c51da5a4854691b034b126968e64a94d177c9aa4e6529f",
+          "proposal_count": 4
+        },
+        {
+          "vessel_id": "V0001",
+          "proposal_sha256": "4130fa05ceb29ba7f3c6361ddb6afa3dd4054593fd3041371adb9cc039bb33e1",
+          "proposal_count": 91
+        },
+        {
+          "vessel_id": "V0002",
+          "proposal_sha256": "af58f76e8e69171552766d53e0e8a3a8c43fc1526f0acf012006ab146ac77c22",
+          "proposal_count": 7
+        },
+        {
+          "vessel_id": "V0003",
+          "proposal_sha256": "7e0acac234577f9848cc89101d19f47beda984ee36f6510ef2ea4ffa1130c34d",
+          "proposal_count": 0
+        }
+      ]
+    },
+    {
+      "scene": "7-16",
+      "wire_sha256": "3c7c08de7526f1a5e9777a481df69dcd3ed5c401d3f3f92a98faf70d8f7b647e",
+      "semantic_sha256": "cc3a2550bc3b75a21e0b1d02fffa67f9d71d4859a1fd7735f013bde84ce97f2a",
+      "point_count": 780777,
+      "vessels": [
+        {
+          "vessel_id": "V0000",
+          "proposal_sha256": "bbfe86024a2a491011b31da37290861451f8e7974d1067e64c121726904f144d",
+          "proposal_count": 180
+        }
+      ]
+    },
+    {
+      "scene": "8-22",
+      "wire_sha256": "5dbe0aec890a976552f60c596d1a11682dcd712f4c22f9a3ecefc73bbf1bff98",
+      "semantic_sha256": "269bc4d62927501fd081da1326f61733ee9574a32dd12aa94771499c49e42cb7",
+      "point_count": 1027532,
+      "vessels": [
+        {
+          "vessel_id": "V0000",
+          "proposal_sha256": "9a50ee5164a65345c29153d843434311f27fa8d7bc6c67d03ec1acb241aa4aff",
+          "proposal_count": 68
+        },
+        {
+          "vessel_id": "V0001",
+          "proposal_sha256": "c395f41b67f9becc0a78eb046755c28389080f38c1070d9d9ff3e5c68ae6f2e4",
+          "proposal_count": 106
+        },
+        {
+          "vessel_id": "V0002",
+          "proposal_sha256": "6e902a12930cffe5c8b33df0be8a5b1a728899996a84716bf82d176a9269228e",
+          "proposal_count": 59
+        }
+      ]
+    },
+    {
+      "scene": "10-21",
+      "wire_sha256": "d090fa67feba3a1416ea24f70d470c4cc64f67986d05c56e2f501c9920f22484",
+      "semantic_sha256": "25a56fd58b41b93aa3bc37d06b208953a67ef9ed467f7361c01d520f588d5d1a",
+      "point_count": 1179589,
+      "vessels": [
+        {
+          "vessel_id": "V0000",
+          "proposal_sha256": "37be1789151c5dc0d1f04b2549e3680e287f382dfb9250849171431863d94b7b",
+          "proposal_count": 342
+        },
+        {
+          "vessel_id": "V0001",
+          "proposal_sha256": "b5edba0b5d52f7cd72f0260b4d06ea65e101a6d74d49774e0a8d03eaefdb1b1d",
+          "proposal_count": 0
+        },
+        {
+          "vessel_id": "V0002",
+          "proposal_sha256": "67cae42b2a4b1f8c79379f2ff3c5918d8a55fcf87ef5ffb7e22c47c443f4585d",
+          "proposal_count": 0
+        }
+      ]
+    },
+    {
+      "scene": "10-22",
+      "wire_sha256": "b882362f09328f20a47fb0b2caf881addf64df3b189b0ba358dbaf2d6af65a0d",
+      "semantic_sha256": "9dbf82a42b57509ff84d84dc9edfa52c564575411c080f9401580d6358684f3e",
+      "point_count": 1274667,
+      "vessels": [
+        {
+          "vessel_id": "V0000",
+          "proposal_sha256": "ea4e7c53325db2efeca8db698a344a7cf6aae9b203b9e501b60d4f156b715c60",
+          "proposal_count": 344
+        },
+        {
+          "vessel_id": "V0001",
+          "proposal_sha256": "aa79cab669e21036598c605af553711d41f04b0748e557ef134db5f00a929397",
+          "proposal_count": 0
+        },
+        {
+          "vessel_id": "V0002",
+          "proposal_sha256": "88ed579b69998214e9fb9fcea5cc942ccaea8c68787919b1290db932ef388cb6",
+          "proposal_count": 1
+        },
+        {
+          "vessel_id": "V0003",
+          "proposal_sha256": "fe5315e455d49445df3436772afe9336e6c8bdf9efec6d25a2d9685bd7c2fdf5",
+          "proposal_count": 0
+        },
+        {
+          "vessel_id": "V0004",
+          "proposal_sha256": "a1566c5ff5653b667829b8dc6701ea2939cda6af9260d97029c05226d65c5214",
+          "proposal_count": 0
+        },
+        {
+          "vessel_id": "V0005",
+          "proposal_sha256": "c71170a2b84effdcedf2f30447425ccfdac5ffefecaa8c65b12bdcb1acf57824",
+          "proposal_count": 0
+        },
+        {
+          "vessel_id": "V0006",
+          "proposal_sha256": "59f7442e581d93427f8557e00fe9473cbf2db0d5ea340160f39f4f335733e1a1",
+          "proposal_count": 0
+        },
+        {
+          "vessel_id": "V0007",
+          "proposal_sha256": "6ac1098e02de243ec487477bf9946d716fe10a4f6a11eb8afbc636538a1002e6",
+          "proposal_count": 0
+        },
+        {
+          "vessel_id": "V0008",
+          "proposal_sha256": "2c264315b7f9cde25dac25f86e596e65bfcdaddb19b82e3c1cfec703f5fb01ad",
+          "proposal_count": 0
+        },
+        {
+          "vessel_id": "V0009",
+          "proposal_sha256": "89a3927d49008cb74edcebf0b19e75f39205cade4e99c7d6b3001d89e7b34342",
+          "proposal_count": 0
+        },
+        {
+          "vessel_id": "V0010",
+          "proposal_sha256": "e134fcd6b6a96f0660821e03c73f05f728779281457745e5313a001efa4b236e",
+          "proposal_count": 0
+        }
+      ]
+    },
+    {
+      "scene": "new-two-vessel",
+      "wire_sha256": "8b973d74847294ce135aab1cba97d76db9fbe5a2c32c9f2bfe4860ccd80602a2",
+      "semantic_sha256": "1651ebe895762b488102c1de45aa94d2f3f9abc35a3a3b9c1df0ceae129334c9",
+      "point_count": 3011460,
+      "vessels": [
+        {
+          "vessel_id": "V0000",
+          "proposal_sha256": "70f8d97f71f94a7439071b320ead5ac278874deed5de902fed317ebd5bc6284b",
+          "proposal_count": 38
+        },
+        {
+          "vessel_id": "V0001",
+          "proposal_sha256": "96cad5adb53a7efd674a7a39038266f767bd681b6c3c3646f30f3465ad9ac563",
+          "proposal_count": 57
+        },
+        {
+          "vessel_id": "V0002",
+          "proposal_sha256": "33fdd2b836357338c3ab281b61898cb726f56de6915bde2fb7a0b90cc6f2e356",
+          "proposal_count": 120
+        }
+      ]
+    },
+    {
+      "scene": "final_map_5_29_2d_005",
+      "wire_sha256": "3ea43b342fb3fee5792bb9bb7b85a97827c55117f139b3f505cf14c49f90c5a8",
+      "semantic_sha256": "701edc8ad5625fd010b87a8f0c447aa58ce5fc3f2bcb5b8b9d846532b8931e6d",
+      "point_count": 1192146,
+      "vessels": [
+        {
+          "vessel_id": "V0000",
+          "proposal_sha256": "0e3be27bdb31bea7d0f24ca5d9d3ad6a3a2d536eb71dbc804d611ccaf8254a18",
+          "proposal_count": 10
+        },
+        {
+          "vessel_id": "V0001",
+          "proposal_sha256": "a5d1f28883594069e1b48cfdf96ea41e0b5e4a16d8743c2002d17ab2afa6d878",
+          "proposal_count": 67
+        },
+        {
+          "vessel_id": "V0002",
+          "proposal_sha256": "4d84047a8768f01ab7fdbfdd45ee09e4d745cdc0fd8b6f0b3c9ac83ae438d945",
+          "proposal_count": 30
+        },
+        {
+          "vessel_id": "V0003",
+          "proposal_sha256": "44cded0edb6aaa96fb3279fc381060754cca3d01f7e6dc68e72eace6bf4b2bb4",
+          "proposal_count": 41
+        },
+        {
+          "vessel_id": "V0004",
+          "proposal_sha256": "2c6ae32666203912378e5055a1996c867c7b5969d608d9488463a117aa2f2f85",
+          "proposal_count": 8
+        }
+      ]
+    },
+    {
+      "scene": "final_map_7_2_005",
+      "wire_sha256": "1b2294589ad682e459aa77acd443103943c951c1d3e487b391eb5090c73c8036",
+      "semantic_sha256": "54da6ea14bd4ddc5984bae3014cd512a22307fa303b33c5a96ad24297e40370d",
+      "point_count": 640240,
+      "vessels": [
+        {
+          "vessel_id": "V0000",
+          "proposal_sha256": "0d1f81b247541ccdca6f78450a795026e410f6432856e3c7d1c0e206c0545455",
+          "proposal_count": 42
+        },
+        {
+          "vessel_id": "V0001",
+          "proposal_sha256": "ffb6c27fb8fb1c7d99ba3c4ac307586da0430c506207a5ca42dbdd7e823ee21d",
+          "proposal_count": 10
+        }
+      ]
+    },
+    {
+      "scene": "final_8_17_005",
+      "wire_sha256": "0c5ff3186a01093e1b01e035e3ad415b1b1bd906e09bf11c50e1ef76b8986210",
+      "semantic_sha256": "e8aa7df4963205f919ab3fcacebbb18f6866bf59164afe2b9435d6d56f6fa5ba",
+      "point_count": 870738,
+      "vessels": [
+        {
+          "vessel_id": "V0000",
+          "proposal_sha256": "379de969a924e08b0a69f87addbb887179d2b303b67118d0551b456885e8d34e",
+          "proposal_count": 6
+        },
+        {
+          "vessel_id": "V0001",
+          "proposal_sha256": "7069f8cd6191343e75ef789ed0378c8597250435084107cb69405d0001d92338",
+          "proposal_count": 156
+        }
+      ]
+    }
+  ]
+}
