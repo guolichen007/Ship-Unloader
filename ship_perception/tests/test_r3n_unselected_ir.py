@@ -2,6 +2,7 @@
 
 import json
 import unittest
+import tempfile
 import numpy as np
 
 from ship_perception.io.frame import PointCloudFrame
@@ -102,14 +103,22 @@ class UnselectedRawIRContracts(unittest.TestCase):
 
     def test_offline_pipeline_retains_ir_without_creating_main_frames(self):
         from ship_perception.perception.review_pipeline import run_perception
+        from ship_perception.perception.review_runtime import ReviewRunMonitor
 
         points = scene_points()
         frame = PointCloudFrame(
             points, None, "synthetic", 0, 0, "", ("x", "y", "z"), len(points)
         )
-        result = run_perception(
-            frame, mode="review-first", opening_topology_v2=True, local_rim_review=True
-        )
+        with tempfile.TemporaryDirectory() as directory:
+            monitor = ReviewRunMonitor(directory)
+            result = run_perception(
+                frame,
+                mode="review-first",
+                opening_topology_v2=True,
+                local_rim_review=True,
+                monitor=monitor,
+            )
+            self.assertIn("unselected_vessel_id", monitor.state["cache_state"])
         self.assertIsNone(result["berth_selection"]["active_vessel_id"])
         self.assertEqual(result["geometry_only"]["selected_opening_cells"], [])
         self.assertEqual(result["geometry_only"]["review_opening_count"], 0)

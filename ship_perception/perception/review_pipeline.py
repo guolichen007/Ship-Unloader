@@ -828,7 +828,8 @@ def run_perception(
                 config,
                 research,
                 checkpoint=lambda ident: checkpoint(
-                    "UNSELECTED_VESSEL_RAW_IR", vessel_id=ident
+                    "UNSELECTED_VESSEL_RAW_IR",
+                    cache_state=dict(unselected_vessel_id=ident),
                 ),
             )
         for item in by_vessel:
