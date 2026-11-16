@@ -6,7 +6,7 @@
 
 仅在显式 `review-first`、开启开口拓扑且 `active_vessel_id=null` 时，复用现有局部高度、Raw3D/BEV 证据和独立身份机制，按每个 B1 自有原始索引保存 IR 提名。无新增检测专家、阈值、跨船宽度先验或外部真值输入。不同物体不能借点。候选键包含输入摘要、船体索引摘要和实际成员索引摘要，不能只按候选排列匹配。
 
-IR 记录进入既有 `unresolved_candidates` 和 `unresolved_review_proposals`，保持 `UNRESOLVED_VESSEL_SELECTION`。其包围范围是搜索提名，不是标定框；不生成正式 XYZ、不进入主可见框，`steel_certified=false`、`control_eligible=false`。弱提名及失败理由保留，失败后继续其他物体。正常已选船舶走原路径，生产默认 `bounded` 不执行此离线补充。
+IR 独立候选进入 `unresolved_candidates`，弱高度提名单列于 `unselected_raw_nominations`，保持 `UNRESOLVED_VESSEL_SELECTION`。不占用已选船舶未精修复核框的 `unresolved_review_proposals` 字段，不改变既有 schema。其包围范围是搜索提名，不是标定框；不生成正式 XYZ、不进入主可见框，`steel_certified=false`、`control_eligible=false`。弱提名及失败理由保留，失败后继续其他物体。正常已选船舶走原路径，生产默认 `bounded` 不执行此离线补充。
 
 程序构造的反证覆盖：真舱加岸水干扰的两个局部候选；只有岸水与单立墙时零候选；双船各自候选且原始索引不交叉。集成测试检查泊位仍未决、主框仍为空、B1 只运行一次。旧 water 文件实际含一个真舱及背景，保留原报告并更正测试语义；不靠删除真舱让负例通过。
 

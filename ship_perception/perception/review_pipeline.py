@@ -839,7 +839,7 @@ def run_perception(
             item.update(
                 status=record["status"],
                 unresolved_candidates=bounded(record["candidates"]),
-                unresolved_review_proposals=bounded(record["nominations"]),
+                unselected_raw_nominations=bounded(record["nominations"]),
                 raw_ir_scope=dict(
                     input_sha256=record["input_sha256"],
                     vessel_point_index_sha256=record["vessel_point_index_sha256"],

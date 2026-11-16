@@ -3,6 +3,7 @@
 import json
 import unittest
 import tempfile
+from pathlib import Path
 import numpy as np
 
 from ship_perception.io.frame import PointCloudFrame
@@ -131,6 +132,32 @@ class UnselectedRawIRContracts(unittest.TestCase):
         )
         self.assertIn("UNSELECTED_VESSEL_RAW_IR", result["stage_elapsed"])
         self.assertEqual(result["pipeline_health"]["b1_execution_count"], 1)
+        from jsonschema import Draft202012Validator
+        from ship_perception.perception.pipeline import _json_default
+
+        schema = Path(__file__).resolve().parents[1] / "config/hatch_once.schema.json"
+        published = {k: v for k, v in result.items() if not k.startswith("_")}
+        published = json.loads(
+            json.dumps(published, default=_json_default, allow_nan=False)
+        )
+        contract = json.loads(schema.read_text(encoding="utf8"))
+        # The CLI adds publication metadata to the complete result. This unit
+        # exercises the per-vessel output contract supplied by this stage.
+        validator = Draft202012Validator(contract["properties"]["per_vessel_status"])
+        errors = list(validator.iter_errors(published["per_vessel_status"]))
+        self.assertEqual([e.message for e in errors], [])
+        self.assertTrue(
+            any(
+                v["unselected_raw_nominations"]["total_count"]
+                for v in result["per_vessel_status"]
+            )
+        )
+        self.assertTrue(
+            all(
+                v["unresolved_review_proposals"]["total_count"] == 0
+                for v in result["per_vessel_status"]
+            )
+        )
 
     def test_bounded_mode_does_not_enter_the_offline_ir_path(self):
         from unittest.mock import patch
