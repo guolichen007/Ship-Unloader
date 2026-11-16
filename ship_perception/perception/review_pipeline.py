@@ -23,6 +23,7 @@ from .operator_selection import select_operator_vessel
 from .selected_context import SelectedVesselRawContext
 from .local_evidence import VesselLocalEvidence
 from .exact_density_evidence import ExactReviewEvidence
+from .unselected_review_ir import unselected_opening_ir
 from .measurement import VesselMeasurementContext, replicated_corner_view
 from .legacy_expert import (
     LegacyProposalExpert,
@@ -815,6 +816,49 @@ def run_perception(
             ],
             aggregate_summary=dict(group_count=len(hatches), hatch_count=len(hatches)),
         )
+    if (
+        mode == "review-first"
+        and opening_topology_v2
+        and selection["active_vessel_id"] is None
+    ):
+        with stage("UNSELECTED_VESSEL_RAW_IR"):
+            unselected = unselected_opening_ir(
+                frame,
+                scene,
+                config,
+                research,
+                checkpoint=lambda ident: checkpoint(
+                    "UNSELECTED_VESSEL_RAW_IR", vessel_id=ident
+                ),
+            )
+        for item in by_vessel:
+            record = unselected.get(item["vessel_hypothesis_id"])
+            if record is None:
+                continue
+            item.update(
+                status=record["status"],
+                unresolved_candidates=bounded(record["candidates"]),
+                unresolved_review_proposals=bounded(record["nominations"]),
+                raw_ir_scope=dict(
+                    input_sha256=record["input_sha256"],
+                    vessel_point_index_sha256=record["vessel_point_index_sha256"],
+                    selection_status=selection["status"],
+                    local_evidence_only=True,
+                    main_review_visible=False,
+                    steel_certified=False,
+                    control_eligible=False,
+                    failure_reason=record.get("reason"),
+                ),
+            )
+            if record["status"] == "LOCAL_RAW_IR_FAILED":
+                failures.append(
+                    dict(
+                        stage="UNSELECTED_VESSEL_RAW_IR",
+                        code=record["status"],
+                        vessel_id=record["vessel_id"],
+                        reason=record.get("reason"),
+                    )
+                )
     cell_output = {}
     if opening_topology_v2:
         by_opening = {row["opening_identity"]: row for row in hatches + coarse_boxes}
