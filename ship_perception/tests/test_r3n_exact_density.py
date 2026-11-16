@@ -122,10 +122,8 @@ class ExactDensityContracts(unittest.TestCase):
         self.assertTrue(
             all(r["evidence_view"] == "V2_EXACT_DENSITY_LOCAL_SIDE" for r in exact)
         )
-        self.assertTrue(
-            set(r["provider_id"] for r in exact).isdisjoint(
-                r["provider_id"] for r in old
-            )
+        self.assertEqual(
+            [r["provider_id"] for r in exact], [r["provider_id"] for r in old]
         )
         self.assertEqual(len(exact), len(old))
         self.assertIs(frozen.structural_providers(), old)

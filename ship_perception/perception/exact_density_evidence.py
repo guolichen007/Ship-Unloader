@@ -204,12 +204,9 @@ class ExactReviewEvidence(VesselLocalEvidence):
                 self.xyz, vessel, self.config, fine_grid=self.grid("fine")
             )
             for row in bev:
-                # Provider IDs are scoped to the evidence view. A new density
-                # fragment must never impersonate a frozen B2/S4 fragment.
-                for key in ("provider_id", "observation_id"):
-                    row[key] = row[key].replace(
-                        ":BEV_RECTILINEAR_PROVIDER:", ":V2_EXACT_DENSITY_BEV:"
-                    )
+                # Preserve the legacy compatibility IDs used by existing role
+                # arbitration. Audit identity also includes this explicit view,
+                # the Raw index hash and measured geometry; never an ID alone.
                 row["evidence_view"] = "V2_EXACT_DENSITY_LOCAL_SIDE"
                 row["coordinate_frame"] = "VESSEL_LOCAL_UV"
                 row["input_vessel_axes"] = self.vessel.axes.tolist()

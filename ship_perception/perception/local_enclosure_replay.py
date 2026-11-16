@@ -79,6 +79,9 @@ def side_evidence_vector(cache, nomination):
             raw3d_coverage=max((r["primary_raw3d"] for r in chosen), default=0.0),
             bev_coverage=max((r["primary_bev"] for r in chosen), default=0.0),
             provider_ids=ids,
+            provider_evidence_views=sorted(
+                {providers[pid].get("evidence_view", "FROZEN_B2_S4") for pid in ids}
+            ),
             verified_face_provider_ids=[
                 pid
                 for pid in ids
