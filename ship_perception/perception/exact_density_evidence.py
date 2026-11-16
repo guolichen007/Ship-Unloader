@@ -2,6 +2,8 @@
 
 import math
 from dataclasses import fields
+from decimal import Decimal, localcontext
+from functools import lru_cache
 
 import numpy as np
 from scipy import ndimage
@@ -16,17 +18,48 @@ from .context import thaw
 from .local_evidence import VesselLocalEvidence
 
 
-def exact_density_transition(left, right, minimum_points):
-    """Compare |log(1+a)-log(1+b)| >= log(2) without a libm boundary tie.
+@lru_cache(maxsize=4096)
+def canonical_log1p_count(count):
+    """Correctly rounded binary64 log of an integer count plus one.
 
-    Counts are measured integers. Adding one and comparing the ratio exactly
-    preserves the existing inclusive threshold, including equality. int64
-    avoids overflow in the grid's int32 count representation.
+    Decimal.ln is correctly rounded. Its adjacent decimal values bound the
+    exact result; accept a binary64 value only when both interval endpoints
+    round to the same value. This pure integer function caches no Raw data.
+    """
+    if count == 0:
+        return 0.0
+    for precision in (50, 100, 200, 400):
+        with localcontext() as context:
+            context.prec = precision
+            value = Decimal(count + 1).ln()
+            lower = float(context.next_minus(value))
+            upper = float(context.next_plus(value))
+            if lower == upper:
+                return lower
+    raise ValueError("DENSITY_LOG_ROUNDING_UNRESOLVED")
+
+
+def exact_density_transition(left, right, minimum_points):
+    """Reproduce the original binary64 log expression under a portable contract.
+
+    An algebraic inclusive real-ratio test is not equivalent at count ties:
+    the original program rounds each log before subtracting. Preserve that
+    computation using certified log rounding, rather than a platform libm.
+    Away from equality, int32 counts separate the ratio from two by far more
+    than binary64 roundoff; only exact integer-ratio ties need logarithms.
     """
     left = np.asarray(left, dtype=np.int64)
     right = np.asarray(right, dtype=np.int64)
     high, low = np.maximum(left, right), np.minimum(left, right)
-    return (low > 0) & (high >= minimum_points) & (high + 1 >= 2 * (low + 1))
+    valid = (low > 0) & (high >= minimum_points)
+    result = high + 1 > 2 * (low + 1)
+    ties = valid & (high + 1 == 2 * (low + 1))
+    threshold = canonical_log1p_count(1)
+    for count in np.unique(low[ties]):
+        count = int(count)
+        delta = canonical_log1p_count(2 * count + 1) - canonical_log1p_count(count)
+        result[ties & (low == count)] = delta >= threshold
+    return result & valid
 
 
 def exact_raster_modes(grid, config):

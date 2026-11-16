@@ -2,6 +2,7 @@
 
 import math
 import copy
+from decimal import Decimal, localcontext
 from types import SimpleNamespace
 import unittest
 
@@ -9,6 +10,7 @@ import numpy as np
 
 from ship_perception.perception.exact_density_evidence import (
     ExactReviewEvidence,
+    canonical_log1p_count,
     exact_bev_provider,
     exact_density_transition,
     exact_raster_modes,
@@ -20,18 +22,37 @@ from ship_perception.r1_static.run import resolve_config
 
 
 class ExactDensityContracts(unittest.TestCase):
-    def test_inclusive_measured_ratio_ties_and_one_count_neighbors(self):
+    def test_ratio_ties_preserve_the_original_binary64_expression(self):
         low = np.arange(1, 10000, dtype=np.int32)
         equal = 2 * low + 1
+        with localcontext() as context:
+            context.prec = 200
+            threshold = float(Decimal(2).ln())
+            expected = np.array(
+                [
+                    float(Decimal(int(b) + 1).ln()) - float(Decimal(int(a) + 1).ln())
+                    >= threshold
+                    for a, b in zip(low, equal)
+                ]
+            )
         for a, b in ((low, equal), (equal, low)):
-            self.assertTrue(exact_density_transition(a, b, 1).all())
+            np.testing.assert_array_equal(exact_density_transition(a, b, 1), expected)
         self.assertFalse(exact_density_transition(low, equal - 1, 1).any())
         self.assertTrue(exact_density_transition(low, equal + 1, 1).all())
+
+    def test_certified_binary64_logs_match_an_independent_high_precision_reference(
+        self,
+    ):
+        for count in (0, 1, 2, 3, 6, 17, 4095, 2**30 - 1, 2**31 - 1):
+            with localcontext() as context:
+                context.prec = 200
+                expected = float(Decimal(count + 1).ln())
+            self.assertEqual(canonical_log1p_count(count).hex(), expected.hex())
 
     def test_no_new_evidence_from_empty_or_insufficiently_sampled_cells(self):
         np.testing.assert_array_equal(
             exact_density_transition([0, 1, 2, 2], [100, 3, 5, 6], 5),
-            [False, False, True, True],
+            [False, False, False, True],
         )
 
     def test_off_boundary_agrees_with_logarithmic_physical_definition(self):
