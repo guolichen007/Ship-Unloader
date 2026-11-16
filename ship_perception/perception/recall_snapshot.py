@@ -90,7 +90,13 @@ class RecallSnapshot:
         try:
             with zipfile.ZipFile(name,"w",compression=zipfile.ZIP_DEFLATED,compresslevel=1) as archive:
                 count=[0]
+                primitive_types=(int,float,str,bool)
+                fast_scalars=os.environ.get("SHIP_REVIEW_SNAPSHOT_FAST_SCALARS","1")!="0"
                 def encode(item):
+                    if fast_scalars and (item is None or type(item) in primitive_types):
+                        if type(item) is float and not np.isfinite(item):
+                            return dict(__snapshot_kind__="float",value=str(item))
+                        return item
                     if isinstance(item,np.ndarray):
                         if item.dtype.hasobject:
                             raise ValueError("SNAPSHOT_OBJECT_ARRAY")
