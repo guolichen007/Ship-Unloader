@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>人工船舱标定</title>
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header><h1>人工船舱标定</h1><span>离线复核 · 无设备控制资格 · 钢边未认证</span></header>
+<main>
+<section class="workspace" aria-label="点云地图">
+ <div class="toolbar">
+  <label>图层 <select id="layer"><option value="height">高度</option><option value="density">密度</option><option value="mask">有效点</option></select></label>
+  <button id="draw" aria-pressed="true">圈选</button><button id="pan" aria-pressed="false">平移</button><button id="reset">重置视图</button>
+  <label><input id="showAuto" type="checkbox" checked>原自动框</label>
+  <label><input id="showRough" type="checkbox" checked>人工粗框</label>
+  <label><input id="showCandidate" type="checkbox" checked>候选框</label>
+ </div>
+ <div id="viewport" tabindex="0" aria-label="地图画布。拖动圈选，滚轮缩放，Esc 取消。">
+  <canvas id="map" aria-hidden="true"></canvas>
+  <svg id="overlay" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+ </div>
+</section>
+<aside>
+ <label class="field">目标<select id="target"><option value="">新建船舱</option></select></label>
+ <label class="field">旋转角度（度）<input id="angle" type="number" min="-180" max="180" step="0.25" value="0"></label>
+ <output id="geometry"></output>
+ <div class="actions"><button id="match" class="primary" disabled>验证圈选</button><button id="cancel">取消</button></div>
+ <div id="status" role="status" aria-live="polite">正在加载地图</div>
+ <div id="evidence"></div>
+ <div class="actions"><button id="accept" disabled>确认候选</button><button id="manual" disabled>仅保存粗框</button><button id="undo" disabled>撤销</button><button id="export" disabled>导出</button></div>
+</aside>
+</main>
+</body>
+</html>
