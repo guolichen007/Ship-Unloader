@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 596" role="img" aria-labelledby="title desc">
+  <title id="title">十一景船舱开口复核总览</title>
+  <desc id="desc">十一幅匿名场景中共十九条二维开口边界。每景独立旋转并缩放，未显示点云或实际坐标。</desc>
+  <rect width="960" height="596" rx="16" fill="#f1f5f9"/>
+  <g fill="#0f172a" font-family="Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+    <text x="24" y="38" font-size="24" font-weight="600">船舱开口复核总览</text>
+    <text x="24" y="63" font-size="14" fill="#475569">11 景 · 19 个开口 · 钢边精度待独立验证</text>
+    <g transform="translate(24 82)">
+      <rect width="296" height="109" rx="10" fill="#fff" stroke="#cbd5e1"/>
+      <text x="15" y="23" font-size="14">场景 01 · 2 舱</text>
+      <polygon points="25,92 139,92 139,44 25,44" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+      <polygon points="145,92 271,92 271,44 145,44" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(332 82)">
+      <rect width="296" height="109" rx="10" fill="#fff" stroke="#cbd5e1"/>
+      <text x="15" y="23" font-size="14">场景 02 · 1 舱</text>
+      <polygon points="25,95 271,95 271,41 25,41" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(640 82)">
+      <rect width="296" height="109" rx="10" fill="#fff" stroke="#cbd5e1"/>
+      <text x="15" y="23" font-size="14">场景 03 · 3 舱</text>
+      <polygon points="112,89 187,89 187,47 112,47" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+      <polygon points="25,92 100,89 100,47 25,47" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+      <polygon points="193,92 271,89 271,44 193,47" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(24 203)">
+      <rect width="296" height="109" rx="10" fill="#fff" stroke="#cbd5e1"/>
+      <text x="15" y="23" font-size="14">场景 04 · 1 舱</text>
+      <polygon points="25,95 271,95 271,41 25,41" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(332 203)">
+      <rect width="296" height="109" rx="10" fill="#fff" stroke="#cbd5e1"/>
+      <text x="15" y="23" font-size="14">场景 05 · 2 舱</text>
+      <polygon points="160,89 271,89 271,50 160,50" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+      <polygon points="25,86 157,86 157,47 25,47" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(640 203)">
+      <rect width="296" height="109" rx="10" fill="#fff" stroke="#cbd5e1"/>
+      <text x="15" y="23" font-size="14">场景 06 · 1 舱</text>
+      <polygon points="25,92 271,92 271,44 25,44" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(24 324)">
+      <rect width="296" height="109" rx="10" fill="#fff" stroke="#cbd5e1"/>
+      <text x="15" y="23" font-size="14">场景 07 · 2 舱</text>
+      <polygon points="25,89 148,89 148,47 25,47" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+      <polygon points="154,89 271,89 271,47 157,47" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(332 324)">
+      <rect width="296" height="109" rx="10" fill="#fff" stroke="#cbd5e1"/>
+      <text x="15" y="23" font-size="14">场景 08 · 2 舱</text>
+      <polygon points="160,92 271,92 271,44 160,44" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+      <polygon points="25,92 154,92 154,44 25,44" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(640 324)">
+      <rect width="296" height="109" rx="10" fill="#fff" stroke="#cbd5e1"/>
+      <text x="15" y="23" font-size="14">场景 09 · 2 舱</text>
+      <polygon points="157,92 271,92 271,44 157,44" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+      <polygon points="25,92 151,92 151,44 25,44" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(24 445)">
+      <rect width="296" height="109" rx="10" fill="#fff" stroke="#cbd5e1"/>
+      <text x="15" y="23" font-size="14">场景 10 · 1 舱</text>
+      <polygon points="25,95 271,95 271,41 25,41" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(332 445)">
+      <rect width="296" height="109" rx="10" fill="#fff" stroke="#cbd5e1"/>
+      <text x="15" y="23" font-size="14">场景 11 · 2 舱</text>
+      <polygon points="25,92 151,92 151,44 25,44" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+      <polygon points="157,92 271,92 271,44 157,44" fill="#ccfbf1" stroke="#0f766e" stroke-width="2" stroke-linejoin="round"/>
+    </g>
+  </g>
+</svg>

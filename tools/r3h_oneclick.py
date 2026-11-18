@@ -2,14 +2,18 @@
 
 import argparse
 import csv
+from datetime import datetime, timezone
 import hashlib
+import html
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import time
 from types import SimpleNamespace
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -95,6 +99,7 @@ def worker(args):
     decode = time.perf_counter() - start
     for mode in modes:
         folder = args.output / mode
+        folder.mkdir()
         observer = ReviewTiming(
             start,
             read_start,
@@ -120,13 +125,14 @@ def worker(args):
         )
         tick, cpu = time.perf_counter(), time.process_time()
         code = execute(frame, options, StageProgress())
-        result_files = sorted(folder.glob("*/03_results.json"))
-        if code or not result_files:
+        result_files = list(folder.glob("*/03_results.json"))
+        if code or len(result_files) != 1:
             raise ValueError("NATIVE_REVIEW_FAILED")
-        result_dir = result_files[-1].parent
+        result_file, = result_files
+        result_dir = result_file.parent
         observer.published()
         atomic_json(result_dir / "e2e_timing.json", observer.report())
-        payload = json.loads(result_files[-1].read_text(encoding="utf-8"))
+        payload = json.loads(result_file.read_text(encoding="utf-8"))
         compact = verify_output(result_dir, args.expected_sha, native=payload)
         report = dict(
             mode=mode,
@@ -169,6 +175,31 @@ def worker(args):
     return 0
 
 
+def read_receipt(folder, mode):
+    try:
+        receipt = json.loads((folder / "worker_receipt.json").read_text(encoding="utf-8"))
+        if not isinstance(receipt, dict):
+            return {}, None
+        if receipt.get("status") != "COMPLETED":
+            return receipt, None
+        expected = ["preview", "full"] if mode == "staged" else [mode]
+        modes = receipt["modes"]
+        if [entry["mode"] for entry in modes] != expected:
+            return receipt, None
+        for entry in modes:
+            result_dir = Path(entry["result_dir"]).resolve()
+            if (
+                entry["exit_code"] != 0
+                or result_dir.parent != folder / entry["mode"]
+                or not (result_dir / "hatches_compact.json").is_file()
+                or not (result_dir / "01_geometry_only.png").is_file()
+            ):
+                return receipt, None
+        return receipt, result_dir
+    except (OSError, KeyError, TypeError, ValueError):
+        return {}, None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path)
@@ -192,6 +223,27 @@ def main():
     if not files or any(not p.is_file() or p.suffix.lower() != ".pcd" for p in files):
         parser.error("Input must be a PCD file or a nonempty PCD directory")
     args.output.mkdir(parents=True, exist_ok=True)
+    prefix = datetime.now(timezone.utc).strftime("run_%Y%m%dT%H%M%SZ_")
+    run_dir = Path(tempfile.mkdtemp(prefix=prefix, dir=args.output))
+    state = dict(run_id=run_dir.name, status="RUNNING", result_count=0, index=None)
+    state_path = run_dir / "运行状态.json"
+    atomic_json(state_path, state)
+    print(f"RUN_ID={run_dir.name}\nRUN_OUTPUT_DIR={run_dir}", flush=True)
+    rows = []
+    try:
+        code = run_batch(args, files, run_dir, rows)
+    except KeyboardInterrupt:
+        code = 130
+    status = {0: "COMPLETED", 130: "INTERRUPTED"}.get(code, "FAILED")
+    write_tables(run_dir, rows)
+    index = write_index(run_dir, rows, status)
+    state.update(status=status, result_count=len(rows), index=index.name, exit_code=code)
+    atomic_json(state_path, state)
+    print(f"RUN_STATUS={status}\nREVIEW_INDEX={index}", flush=True)
+    return code
+
+
+def run_batch(args, files, run_dir, rows):
     env = dict(
         os.environ,
         OPENBLAS_NUM_THREADS="1",
@@ -199,17 +251,15 @@ def main():
         OMP_NUM_THREADS="1",
         PYTHONIOENCODING="utf-8",
     )
-    rows = []
-    failure = False
     for source in files:
         digest = file_sha(source)
         for repeat in range(1, args.rounds + 1):
             folder = (
-                args.output
+                run_dir
                 / (source.stem + "_" + digest[:12])
                 / ("round_" + str(repeat))
             )
-            folder.mkdir(parents=True, exist_ok=True)
+            folder.mkdir(parents=True)
             snapshot = folder / "recall.snapshot"
             cmd = [
                 sys.executable,
@@ -227,7 +277,6 @@ def main():
                 str(snapshot),
             ]
             tick = time.perf_counter()
-            reason = None
             with (folder / "run.stdout.log").open("wb") as stdout, (
                 folder / "run.stderr.log"
             ).open("wb") as stderr:
@@ -241,25 +290,22 @@ def main():
                         timeout=300,
                     )
                     code = result.returncode
+                    reason = "NATIVE_OR_OUTPUT_CONTRACT_FAILED" if code else None
                 except subprocess.TimeoutExpired:
-                    code = 124
-            receipt_path = folder / "worker_receipt.json"
-            receipt = (
-                json.loads(receipt_path.read_text(encoding="utf-8"))
-                if receipt_path.is_file()
-                else {}
-            )
-            status = (
-                "PASS" if code == 0 and receipt.get("status") == "COMPLETED" else "FAIL"
-            )
-            if status == "FAIL":
-                reason = (
-                    "WATCHDOG_300S"
-                    if code == 124
-                    else "NATIVE_OR_OUTPUT_CONTRACT_FAILED"
-                )
-                failure = True
+                    code, reason = 124, "WATCHDOG_300S"
+                except KeyboardInterrupt:
+                    code, reason = 130, "INTERRUPTED"
+                except OSError as error:
+                    stderr.write(str(error).encode("utf-8", errors="replace"))
+                    code, reason = 1, "WORKER_START_FAILED"
+            receipt, result_dir = read_receipt(folder, args.mode)
+            if code == 0 and result_dir is None:
+                code, reason = 1, "WORKER_RECEIPT_INVALID"
+            status = "FAIL" if code else "PASS"
+            if reason == "INTERRUPTED":
+                status = "INTERRUPTED"
             row = dict(
+                run_id=run_dir.name,
                 pcd=str(source),
                 input_sha256=digest,
                 round=repeat,
@@ -268,38 +314,22 @@ def main():
                 failure_reason=reason,
                 cli_wall_s=time.perf_counter() - tick,
                 folder=str(folder),
+                result_dir=str(result_dir) if status == "PASS" else None,
                 command=cmd,
                 worker=receipt,
             )
             rows.append(row)
-            atomic_json(args.output / "运行总表.json", rows)
-            fields = (
-                "pcd",
-                "input_sha256",
-                "round",
-                "status",
-                "exit_code",
-                "failure_reason",
-                "cli_wall_s",
-                "folder",
-            )
-            with (args.output / "运行总表.csv").open(
-                "w", encoding="utf-8-sig", newline=""
-            ) as stream:
-                writer = csv.DictWriter(
-                    stream, fieldnames=fields, extrasaction="ignore"
-                )
-                writer.writeheader()
-                writer.writerows(rows)
+            write_tables(run_dir, rows)
             print(
                 "PCD=" + str(source) + " STATUS=" + status + " EXIT_CODE=" + str(code),
                 flush=True,
             )
+            if status == "INTERRUPTED":
+                return 130
             if status == "PASS":
                 from r3h_export_dimensions import print_compact
 
-                final = receipt["modes"][-1]["result_dir"]
-                review_path = Path(final) / "review_hatches_compact.json"
+                review_path = result_dir / "review_hatches_compact.json"
                 if review_path.is_file():
                     print(
                         "本轮复核建议（非认证，禁止用于控制）：" + str(review_path),
@@ -308,31 +338,49 @@ def main():
                 print("原严格几何结果：", flush=True)
                 print_compact(
                     json.loads(
-                        (Path(final) / "hatches_compact.json").read_text(
+                        (result_dir / "hatches_compact.json").read_text(
                             encoding="utf-8"
                         )
                     )
                 )
-    import html
+    return int(any(row["status"] != "PASS" for row in rows))
 
+
+def write_tables(run_dir, rows):
+    atomic_json(run_dir / "运行总表.json", rows)
+    fields = (
+        "run_id", "pcd", "input_sha256", "round", "status", "exit_code",
+        "failure_reason", "cli_wall_s", "folder", "result_dir",
+    )
+    csv_path = run_dir / "运行总表.csv"
+    tmp = csv_path.with_suffix(".csv.tmp")
+    with tmp.open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    tmp.replace(csv_path)
+
+
+def write_index(run_dir, rows, status):
     links = []
     for row in rows:
         if row["status"] == "PASS":
-            result_dir = Path(row["worker"]["modes"][-1]["result_dir"])
+            result_dir = Path(row["result_dir"])
             review = result_dir / "船舱复核总览.html"
-            href = review.relative_to(args.output).as_posix()
+            href = review.relative_to(run_dir).as_posix()
             label = "复核输出" if review.is_file() else "预览输出，未运行完整标定"
             if not review.is_file():
                 href = (
                     (result_dir / "01_geometry_only.png")
-                    .relative_to(args.output)
+                    .relative_to(run_dir)
                     .as_posix()
                 )
             links.append(
                 '<li><a href="'
-                + html.escape(href, quote=True)
+                + html.escape(quote(href), quote=True)
                 + '">'
                 + html.escape(Path(row["pcd"]).stem)
+                + "｜第" + str(row["round"]) + "轮"
                 + "｜"
                 + label
                 + "</a></li>"
@@ -341,15 +389,23 @@ def main():
             links.append(
                 "<li>"
                 + html.escape(Path(row["pcd"]).stem)
-                + "｜运行失败，已记录并继续下一景</li>"
+                + "｜第" + str(row["round"]) + "轮｜"
+                + html.escape(row["failure_reason"]) + "</li>"
             )
-    (args.output / "全部场景复核.html").write_text(
-        '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>全部场景船舱复核</title><h1>全部场景船舱复核</h1><p>钢边精度未认证，人工审核待签。<a href="运行总表.csv">运行性能总表</a></p><ul>'
+    labels = dict(COMPLETED="已完成", FAILED="有失败场景", INTERRUPTED="已中断")
+    index = run_dir / "全部场景复核.html"
+    tmp = index.with_suffix(".html.tmp")
+    tmp.write_text(
+        '<!doctype html><html lang="zh-CN"><meta charset="utf-8">'
+        '<title>全部场景船舱复核</title><h1>全部场景船舱复核</h1>'
+        f'<p>{run_dir.name}｜{labels[status]}。钢边精度未认证，人工审核待签。'
+        '<a href="运行总表.csv">运行性能总表</a></p><ul>'
         + "".join(links)
         + "</ul></html>",
         encoding="utf-8",
     )
-    return 1 if failure else 0
+    tmp.replace(index)
+    return index
 
 
 if __name__ == "__main__":

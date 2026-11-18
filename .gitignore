@@ -13,6 +13,41 @@
 /output/
 /log/
 /install/
+# 本地数据、环境与运行证据也可能写在子目录
+local-data/
+output/
+outputs/
+validation/
+evidence/
+run_[0-9]*T[0-9]*Z_*/
+20[0-9][0-9][0-9][0-9][0-9][0-9]_[0-9]*/
+.venv/
+*.log
+*.snapshot
+*.npz
+*.[pP][cC][dD]
+*.[pP][lL][yY]
+*.[pP][cC][dD].gz
+*.[pP][lL][yY].gz
+*.[lL][aA][sS]
+*.[lL][aA][zZ]
+*.e57
+*.bag
+*.db3
+*.mcap
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.bundle
+运行总表.*
+运行状态.json
+全部场景复核.html
+worker_receipt.json
+review_hatches_compact.json
+03_results.json
+# 已审查的合成测试夹具
+!/ship_perception/tests/fixtures/local_xyz.pcd
 # 文档：默认忽略根 md，仅放行 README/CLAUDE/AGENTS
 /*.md
 !/README.md

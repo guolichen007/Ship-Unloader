@@ -1,82 +1,19 @@
 # 开发与 Git 协作规范
 
-> 2026-10-30 V2.9 开发检查点：Normal6 发现区域错误合并，按停止条件 C 暂停扩展；默认仍为 bounded，未验收、未推送。显式 review-first 输出 `.3`，默认 bounded 保留旧链 `.2`；旧版本契约说明保留为历史说明。review-first 不因旧 60/20 秒预算删除结果，保留独立 120/300 秒 watchdog，性能尚未通过。详见 [实施状态与限制](06_V29完整复核标定框开发检查点.md)。
+## 开工与边界
 
-> 状态：FROZEN
-> 适用版本：当前现场复核基线；V1.4 历史事实单列
-> 最后更新：2026-10-15
-> Owner：Ship-Unloader Engineering
+- 阅读 [AGENTS.md](../AGENTS.md)、[README](../README.md)、[CLAUDE.md](../CLAUDE.md) 和 [技术规范](README.md)。核对分支、精确基线和工作树，保留用户改动。按 AGENTS 模板报告开工状态和交付结果。
+- 保持冻结源、物理阈值和验收门。禁止运行时读取封存真值。缺测高度、歧义和失败应原样报告。离线人工复核结果无设备控制资格。
+- 源码、命令和机器字段使用英文，提交和开发文档使用中文。核心 Python 保持 3.8 语法兼容。ROS2 使用隔离依赖环境，保护历史 Ubuntu20 冻结环境。
 
-## 分支、提交、PR 与 main
+## 提交与主线
 
-2026-11-16 用户明确授权将固定的离线人工复核能力快进整合到 main，并整理技术 README、文档和安装运行入口。该授权是离线工程集成，不是现场精度或设备控制放行：刚体等变、旋转合舱、完整 Quick、性能及独立人工审核的未通过状态继续保留，不修改算法、冻结源或验收门，不代填人工通过，不自动创建版本标签。客户数据和运行产物仍只保留本地，原工作树未提交文件不得覆盖。
+- 在独立工作树实施单一任务。提交标题采用 `<type>(<scope>): <中文简述>`，正文记录基线、变更、验证以及风险。
+- 主线只接受经验证的快进更新。用户明确授权直接推送时，先核对远端基线和祖先关系，备份旧 HEAD，再执行普通 push；核对远端 HEAD 和同 SHA CI。保护规则拒绝时保留改动并报告。
+- PR 应说明范围、测试、证据、限制和回滚。未经明确授权不得合并、打标签或删除分支。清理分支前保全独立历史与正式标签，并重新核对远端引用。禁止强推 main。
 
-2026-10-30 用户明确扩大前轮停止后的范围，要求回跑全部新旧 PCD、多船先裁靠岸船、收集问题并兼顾泛化、精度和时间。本轮以 `0da183d1ffe9759609c2f6562586d3781c50b731` 建立 `codex/hatch-generalization-replay`，允许现有 V2 内的执行、归属、调度和性能修复；不据此解除物理阈值、GT 隔离、V1.4 或 B2 核心冻结。所有原始与派生产物保存在被忽略的 Work/Data 根，失败试验保留。当前全量真实回归失败，提交只作为开发检查点，不晋升现场基线；未推送、merge、tag 或删除分支。触及冻结 B2 的并行执行补丁单独形成可审查产物，待明确授权后才能安装，不以原型哈希一致代替授权。
+## 验证与数据
 
-2026-10-29 追加用户授权明确解除前轮第31/38节停止门，以 `ba8ea81d7cd0b98aead8b5ec58ee322fe78b59d3` 为基准，仅允许稳定 S4 观测→SideFamily→TopologyGraph→现有 OpeningRegion、默认 V2 接线及冻结合同拆分。不修改上一轮 S4 估计器或物理阈值，不新增 Expert/Region 模型，不恢复四线枚举。通过 7-16 后只执行 08-01/8-22 非合并 smoke，随后停止；精度、其他真实专项和性能不扩展。原 56 文件参考和 V1.4 72 文件保持，B2 真正依赖单独保护。main、tag、推送与现场放行均未在本轮执行。
-
-2026-10-29 V2.6 用户任务授权从 `29d43a81ed2b75e45bac1cff07628e011fe8a8cf` 建立 `codex/hatch-v26-s4-causal-fix`，限定 S4 首分叉、逐段 plane、确定性 line 和连续 4θ 聚合修复。保留规范点序、Region-First、既有物理阈值及 V1.4 冻结。两个稳定门通过后，7-16 仍无完整区域身份，按 `STABLE_S4_BUT_REGION_GENERATION_FAILS` 停止；宽矩形枚举候选不算已存在的完整 OpeningRegion，不能据此按历史参考挑框。旧全文件 Legacy 校验产生的入口错误保留，不绕过、不重写冻结清单。只保存明确未通过的实验 checkpoint，不推送、merge、tag 或晋升现场基线。
-
-2026-10-29 V2.4 用户任务授权从 `7ea5c78da9ac5367933d6166e1c17046fc6b5122` 建立 `codex/hatch-v24-structural-region`，并在独立 `Ship-Unloader-Bisect` 工作树作 914f869..51410e3 法证。允许本轮 Region/Boundary 解耦与当前架构内结构线族重建；不直接 revert bad commit，不修改冻结源或物理阈值。7-16 未形成完整区域身份时按 Stop Gate 2 停止并等待审查；失败实现只能保存为明确未通过的开发 checkpoint，不晋升基线。main、tag、分支删除及生产放行均未授权。
-
-2026-10-28 V2.3 用户任务要求先完整保存 V2.2 暂停现场并允许推送 `codex/hatch-v22-paused-audit`；审计快照为 `469953a58d37ec1f0a948d36228a878b746a8e16`。随后从 `1a0c9d0` 创建 `codex/hatch-v23-conservative-recall`。真实六景拓扑与覆盖门通过前，不引入新的 wall/contact、Expert、阈值或精修性能优化。当前独立冻结链路重放在 7-16 仍失败，新增代码仅作离线审计 checkpoint，不作为新识别基线，不合入 main、不 tag、不删除旧分支。
-
-2026-10-28 V2.2 用户任务授权在 `cd13726` 上开发、验证并最终推送 `codex/hatch-v22-berth-region-precision`，仍禁止 merge main/tag。两个未提交的标量缓存实验先归档，再对三场景各作两版本三次冷进程 A/B；真实测试未证明稳定耗时改善，已恢复，不将无收益实验提交。后续区域优先搜索、协作调度、泊位参考和状态拆分按本轮明确任务实施，冻结源码、Raw 精度、物理门与 GT 隔离约束继续有效。
-
-2026-10-26 V2 任务仅授权推送 `codex/hatch-v2-multi-expert` 开发分支，明确不 merge main。真实单调回归或现场门失败时保留失败报告与独立历史，不把开发提交包装为生产放行，也不 force push、tag 或清理其他分支。
-
-2026-10-27～28 的 V2.1 任务授权从 `4cb9b17` 创建并验证、推送 `codex/hatch-v2-recall-perf-r1`，仍不 merge/tag/main。原任务的 A/B/C 为典型调查条件，曾据此推断的额外授权阻断已撤回；只凭名义结构放行的弱 D 草案未采用。共享精修器先测真实 Raw 侧证据、Probe 再读取缓存的实现必须保留物理门和完整来源，不能把单元测试通过或真实失败包装成放行。
-
-main 保存已收口工程基线；常规研发使用短期 `feature/* / fix/* / docs/* / codex/*`，一个任务一个分支。任务合入后删除开发分支，独立历史先归档。不得在 main 连续开发、force push main、重写正式 Tag 或丢失独立提交。未经用户明确授权不 merge/tag/删分支。本轮 2026-10-15 收口已获用户明确授权，仍先审计、备份与验证。
-
-提交统一 `<type>(<scope>): <中文简述>`，type 为 feat/fix/refactor/test/docs/chore/perf/build/ci/revert。历史中英文类型不重写。正文包含背景、变更、验证、风险与 BASE_SHA；GitHub 面向人的描述中文，代码、命令、协议字段和分支名英文。一个逻辑一个 commit，不混合目录治理和算法调参、大规模格式化和功能改动、V1.4 frozen 和新识别开发。冻结文档整合单独 docs commit。
-
-PR 至少有目标、BASE_SHA/HEAD_SHA、IN_SCOPE/OUT_OF_SCOPE、架构/数据影响、文件、验证/回归、限制、风险、回滚和证据。描述面向未看聊天的审查者，并与最终实现一致。架构变化先评审；Ubuntu 未验证明确写“待 Ubuntu20 独立验证”。SITE_PENDING 不包装成现场通过。main 工程收口不等于正式 release，产品放行仍满足[验收规范](04_测试与验收说明.md)。
-
-建议 main 保护：PR、required checks、会话解决、禁止 force push/删除，可选线性历史、独立审批、过期审批失效。代理不擅改 ruleset；保护拒绝时保留分支并报告，不绕过。正式合入通常要求审查、Ubuntu20 clean build、适用阶段与旧 Gate、证据归档、无未解释失败。本轮是用户授权的当前工程基线快进，不把已知失败或缺失验证改为 PASS。
-
-Issue 写中文现象、复现、期望/实际、证据、首个失败点、根因判断与责任建议。不要用模糊 update/misc/WIP/final 代替任务说明。
-
-## 分支清理与历史保全
-
-先 fetch/prune refs 和 tags，保存本地/远端分支 HEAD、Tag 对象、工作树及可达性清单。忽略的 Work 目录保留经对象核对的完整 Git 备份（含 reflog 与不可达对象），不运行破坏性 prune/gc。
-
-对每条待删分支执行 `git merge-base --is-ancestor <head> <TARGET_HEAD>`：
-
-- 已包含：记录 SAFE_DELETE_ANCESTOR，不额外 Tag。
-- 独立/diverged：先在原 HEAD 建立带中文说明的 annotated archive Tag，推送并核验指向，再删 branch。检查本地未推送提交，不能只看 origin。
-- 不可达历史也要保全，可用专门归档 Tag 与已核验备份；不能将快照当正式技术基线。
-
-验证、main 快进与远端 SHA 核对完成后才清理被替代分支；删除前再次确认远端 HEAD，发生并发变化即停止该 ref 删除。main 仅 fast-forward，出现新独立提交时不 force push，保留现状报告。
-
-正式 `baseline-v1.4-ubuntu20-20260919` 永久保留且指向原验证 SHA。研究 archive Tag 注明“历史研究支线，仅用于追溯；当前生产/现场基线不从该 Tag 开发”。正式 release 用 SemVer，说明 SHA、环境、数据/配置身份、验收、限制与回滚。Archive 不表示 release gate 通过。
-
-历史文档可用 `git show 914f869:docs/<旧文件名>` 读取，不在 HEAD 新建 archive 目录。恢复研究时另开明确范围分支。
-
-## 文档与资产
-
-README 只写当前用途、环境、入口、能力/限制、阅读顺序和目录，不写过程法证或参数历史。docs 保留架构、算法、运行、数据、验收、协作与 V1.4 历史事实约 8 份，每条规则有唯一 canonical 来源。文档标状态、适用版本、日期和 Owner；先迁移有效结论，再删除过程文档并修复引用。
-
-Git 只保存源码、配置/schema、测试、小型元数据、SHA 和当前文档。Raw PCD/PLY/ZIP、客户数据、build、validation、logs、临时包、私有模型、绝对开发机路径及秘密不新增 Git。已有受控合成夹具保留，不能把客户数据冒充夹具。数据与 Work/output 规则见[数据规范](03_数据与证据规范.md)。
-
-## C++17 与 Python
-
-核心 Python 保持 3.8 语法兼容；ROS2 Humble 正式运行使用 Ubuntu22/Python3.10 与 requirements-ros.txt 隔离依赖，不能把新数值依赖直接安装到 Ubuntu20 历史冻结环境。
-
-正确性、追溯、安全失败优先于性能或代码短。物理量命名带单位，浮点比较用具名可配置 tolerance，不改既有阈值以过测试；位姿 double、Eigen::Isometry3d，方向 T_A_B，全部舱共用船体位姿。
-
-C++ 明确 const/RAII、值语义和所有权，优先 unique_ptr；共享所有权有真实需求，raw pointer 仅非拥有。核心接口不暴露不必要第三方类型，头文件自包含，不在头文件 using namespace。不散布 new/delete，不引入隐式可变全局状态。失败用 Status/Result/optional，禁止空矩形继续当成功、非法矩阵/NaN 传播或异常静默回退 Global Deck。
-
-Python 用 pathlib、类型提示、小函数、argparse，无 wildcard import，文件 UTF-8。JSON 禁 NaN/Infinity，schema fail-closed；关键写入 temp、flush/fsync/close、atomic rename。随机采样记录 seed/config/input/output SHA。两端 parser 比较点数、bbox、origin、resolution、栅格尺寸和样本值，不假设布局相同。
-
-核心模块不依赖 legacy 源码、开发机路径、validation 产物或 sealed annotation。保持 IO/proposal/geometry/hypothesis/tracking/evaluation 职责分离，配置显式、尽量不可变并记录哈希。日志有 stage、scan/frame、candidate/hatch、reason 和关键指标，避免逐点刷屏。注释说明物理假设、证据来源和失败边界。格式工具固定版本，只处理本次文件，不重排 frozen 源。
-
-## Codex / Claude 执行规范
-
-开工读 README、AGENTS/CLAUDE 和当前架构、算法、运行、数据、验收及本规范。检查工作树，不覆盖用户改动；先报告 BRANCH、BASE_SHA、HEAD_SHA、WORKTREE、IN_SCOPE、OUT_OF_SCOPE、STOP_CONDITION。用户明确任务优先；常规实施选择不变成反复确认。
-
-不自行改架构、split/holdout、验收门或 V1.4 frozen，不用 GT 补 runtime，不把 Cargo/Wharf 伪装成钢边，不跨阶段顺手实现控制、跟踪联动或大规模调参。只解决明确范围，到 STOP_CONDITION 停止。
-
-Push 前检查 status、diff --check、cached stat、适用格式/测试/构建/frozen、原始数据和秘密。验证使用精确 SHA；提交后必要时刷新编译 SHA 再跑新鲜度相关 Gate。失败保存输入 ID、软件/配置 SHA、命令、stdout/stderr、环境、artifact 路径和 CONFIRMED/LIKELY/OPEN 根因，不删除 case、降门槛或把 unknown 改成功。
-
-结束返回 PREV_SHA、NEW_SHA、CHANGED_FILES、COMMANDS、TEST_RESULT、REGRESSION_RESULT、WORKTREE_CLEAN、PUSH_STATUS、NEXT_BLOCKER；涉及冻结源另报 V1_4_FROZEN。失败和未执行必须明确，不省略、不改为 PASS。
+- 推送前检查工作树、差异、冻结文件和适用测试。区分合成、真实 PCD、Windows、Ubuntu/ROS2 与现场验收。保留失败命令、输入与配置摘要、环境和日志。归主线后的现场放行仍遵循[验收规范](04_测试与验收说明.md)。
+- 原始点云、客户数据、真值、私有模型、秘密、日志和运行产物留在本地。仅提交受控合成测试夹具和获准公开的脱敏展示。详见[数据与证据规范](03_数据与证据规范.md)。
+- README 简述当前用途、环境、入口、输入输出和限制。历史任务与阶段授权见[归档索引](历史任务索引.md)。
