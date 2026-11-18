@@ -328,3 +328,26 @@ os._exit(91)
             self.assertEqual(
                 db.execute("SELECT count(*) FROM revisions").fetchone()[0], 0
             )
+
+    def test_replay_uses_server_pixel_roundtrip_for_raw_measurement(self):
+        from tools.mhr_replay import replay
+        from tools.mhr_synthetic import rect, save_pcd, synthesized
+        from ship_perception.manual_review.matcher import match
+
+        pcd = self.root / "replay.pcd"
+        truth = rect(np.array([12.0, -22.0]), 0, 18.0, 9.0)
+        save_pcd(pcd, synthesized(truth))
+        frame = FrameSession(pcd)
+        rough = rect(np.array([12.11, -22.12]), 0.015, 17.8, 8.9)
+        pixel = frame.projection.uv(rough)
+        server_xy = frame.projection.xy(pixel)
+        request = {
+            **{k: frame.manifest[k] for k in IDENTITY},
+            "operation": "CREATE",
+            "vertices_uv": pixel.tolist(),
+            "client_xy": np.nextafter(server_xy, np.inf).tolist(),
+        }
+        result = match(frame, server_xy, request)
+        self.assertEqual(result["match_state"], "MATCHED_REVIEW")
+        evidence = {"request": request, "result": result}
+        self.assertGreater(replay(frame, evidence)["raw_rows"], 0)

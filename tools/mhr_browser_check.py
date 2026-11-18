@@ -2,6 +2,7 @@
 
 import argparse
 import base64
+from contextlib import suppress
 import json
 from pathlib import Path
 import subprocess
@@ -74,7 +75,9 @@ class Browser:
 
 
 def run(args, server):
-    with TemporaryDirectory(dir=args.evidence.parent) as profile:
+    with TemporaryDirectory(
+        dir=args.evidence.parent, prefix=".mhr-browser-", ignore_cleanup_errors=True
+    ) as profile:
         with subprocess.Popen(
             [
                 str(args.chromium),
@@ -117,9 +120,14 @@ def run(args, server):
                         else exercise(browser, server, args.evidence)
                     )
                 finally:
+                    with suppress(OSError, websocket.WebSocketException, RuntimeError):
+                        browser.call("Browser.close")
                     browser.ws.close()
             finally:
-                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.terminate()
 
 
 def exercise(browser, server, evidence):

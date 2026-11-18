@@ -6,7 +6,12 @@ from pathlib import Path
 
 import numpy as np
 
-from ship_perception.manual_review.contract import RAW_ROWS, digest
+from ship_perception.manual_review.contract import (
+    CLIENT_XY_TOLERANCE_M,
+    RAW_ROWS,
+    digest,
+    points4,
+)
 from ship_perception.manual_review.frame_session import FrameSession
 from ship_perception.manual_review.matcher import match
 from ship_perception.manual_review.side_candidates import CONFIG, raw_set
@@ -39,7 +44,14 @@ def replay(frame, evidence):
             and digest(side["joint_heldout"]) != side["joint_heldout_sha256"]
         ):
             raise ValueError("JOINT_SECTION_DIGEST_MISMATCH")
-    recalculated = match(frame, np.array(request["client_xy"]), request)
+    # Replay from pixel vertices, exactly as the original HTTP selection gate.
+    # Client XY is a cross-check and may legitimately round by a few ULPs.
+    xy = frame.projection.xy(points4(request["vertices_uv"]))
+    if np.max(
+        np.abs(xy - points4(request["client_xy"]))
+    ) > CLIENT_XY_TOLERANCE_M or not np.array_equal(xy, result["rough_xy"]):
+        raise ValueError("REPLAY_COORDINATE_CONTRACT_MISMATCH")
+    recalculated = match(frame, xy, request)
     comparable = ("match_state", "reason", "geometry", "sides", "separators")
     if any(digest(result[k]) != digest(recalculated[k]) for k in comparable):
         raise ValueError("REPLAY_MEASUREMENT_DIFFERENCE")
@@ -56,9 +68,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pcd", type=Path)
     parser.add_argument("evidence", type=Path)
+    parser.add_argument("--cell-m", type=float, default=0.1)
     args = parser.parse_args()
     evidence = json.loads(args.evidence.read_bytes())
-    frame = FrameSession(args.pcd, frame_id=evidence["request"]["frame_id"])
+    frame = FrameSession(
+        args.pcd, cell_m=args.cell_m, frame_id=evidence["request"]["frame_id"]
+    )
     print(json.dumps(replay(frame, evidence)))
 
 
