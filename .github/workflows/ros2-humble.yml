@@ -50,6 +50,7 @@ jobs:
           export PYTHONNOUSERSITE=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
           python3 -s -m unittest discover -s ship_perception/tests -p 'test_*.py'
           python3 -s -m pytest -q ship_perception/tests/test_r3k_review_layers.py
+          python3 -s -m tools.mhr_validation "$SHIP_CI_EVIDENCE/mhr-synthetic"
           python3 -s ship_perception/tools/verify_v14_frozen.py
           python3 -s -c 'from ship_perception.perception.legacy_expert import verify_legacy_b2_core; print(verify_legacy_b2_core())'
           colcon test --base-paths ship_perception --packages-select ship_perception --ctest-args -E '^v15_quick$'
