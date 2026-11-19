@@ -23,7 +23,7 @@ class LocalServer(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 12
 
-    def __init__(self, frame, port=0, review=None):
+    def __init__(self, frame, port=0, review=None, static_assets=None):
         self.frame = frame
         self.review = review
         self.token = token_urlsafe(32)
@@ -31,7 +31,7 @@ class LocalServer(ThreadingHTTPServer):
         ui = Path(__file__).with_name("ui")
         self.static = {
             url: (mime, (ui / file).read_bytes())
-            for url, (file, mime) in STATIC.items()
+            for url, (file, mime) in (static_assets or STATIC).items()
         }
         super().__init__(("127.0.0.1", port), Handler)
         self.host = "127.0.0.1:%d" % self.server_port
@@ -104,11 +104,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
-            self.authorize(private=self.path not in STATIC)
+            self.authorize(private=self.path not in self.server.static)
             frame = self.server.frame
             if self.path in self.server.static:
                 mime, data = self.server.static[self.path]
                 self.reply(data, mime)
+            elif self.path in ("/api/v2/view", "/api/v2/revisions") and hasattr(
+                self.server.review, "read"
+            ):
+                self.json(self.server.review.read(self.path))
             elif self.path == "/api/view":
                 self.json(
                     {

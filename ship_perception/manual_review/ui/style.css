@@ -14,7 +14,7 @@ button:not(:disabled) { cursor: pointer; }
 button:disabled { opacity: .45; }
 button[aria-pressed=true], .primary { background: #20746a; border-color: #76d7bf; }
 :focus-visible { outline: 2px solid #b8f0d8; outline-offset: 2px; }
-#viewport { height: max(22rem, calc(100vh - 8.8rem)); background: #0a121b; position: relative; overflow: hidden; touch-action: none; }
+#viewport, .mhr-viewport { height: max(22rem, calc(100vh - 8.8rem)); background: #0a121b; position: relative; overflow: hidden; touch-action: none; }
 canvas, svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 svg polygon { fill: none; stroke-width: 2; }
 svg text { font: 13px system-ui, sans-serif; paint-order: stroke; stroke: #0a121b; stroke-width: 3px; }
@@ -22,4 +22,11 @@ svg text { font: 13px system-ui, sans-serif; paint-order: stroke; stroke: #0a121
 #geometry { display: block; white-space: pre-line; font-variant-numeric: tabular-nums; margin-bottom: .65rem; }
 #status { padding: .7rem 0; overflow-wrap: anywhere; }
 #evidence { margin-bottom: .7rem; overflow-wrap: anywhere; }
-@media (max-width: 850px) { main { grid-template-columns: 1fr; } #viewport { height: 54vh; } }
+@media (max-width: 850px) { main { grid-template-columns: 1fr; } #viewport, .mhr-viewport { height: 54vh; } }
+
+.mhr-table { border-collapse: collapse; width: 100%; margin-top: .75rem; font-variant-numeric: tabular-nums; }
+.mhr-table th, .mhr-table td { border-bottom: 1px solid #314655; padding: .38rem; text-align: right; }
+aside [role=status] { margin-bottom: .6rem; overflow-wrap: anywhere; }
+aside details { margin: .7rem 0; }
+aside summary { cursor: pointer; margin-bottom: .5rem; }
+@media (max-width: 850px) { .mhr-viewport { height: 54vh; } }

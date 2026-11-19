@@ -1,0 +1,1279 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MHR local workbench",
+    "version": "2.0"
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "LoopbackToken": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "LoopbackToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-MHR-Token"
+      }
+    }
+  },
+  "paths": {
+    "/api/v2/auto/confirm": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Bound workbench result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "steel_certified",
+                    "control_eligible"
+                  ],
+                  "properties": {
+                    "steel_certified": {
+                      "const": false
+                    },
+                    "control_eligible": {
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate or revision"
+          },
+          "413": {
+            "description": "Body budget exceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "annotation_id",
+                  "bundle_digest",
+                  "expected_parent_revision",
+                  "frame_id",
+                  "frame_instance_id",
+                  "geometry_digest",
+                  "manifest_sha256",
+                  "mutation_id",
+                  "semantic_sha256",
+                  "session_id",
+                  "view_id",
+                  "wire_sha256"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "annotation_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "bundle_digest": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "expected_parent_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "frame_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "frame_instance_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "geometry_digest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "manifest_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "mutation_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "semantic_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "view_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "wire_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/auto/void": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Bound workbench result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "steel_certified",
+                    "control_eligible"
+                  ],
+                  "properties": {
+                    "steel_certified": {
+                      "const": false
+                    },
+                    "control_eligible": {
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate or revision"
+          },
+          "413": {
+            "description": "Body budget exceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "annotation_id",
+                  "bundle_digest",
+                  "expected_parent_revision",
+                  "frame_id",
+                  "frame_instance_id",
+                  "geometry_digest",
+                  "manifest_sha256",
+                  "mutation_id",
+                  "semantic_sha256",
+                  "session_id",
+                  "view_id",
+                  "wire_sha256"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "annotation_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "bundle_digest": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "expected_parent_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "frame_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "frame_instance_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "geometry_digest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "manifest_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "mutation_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "semantic_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "view_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "wire_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/refine/confirm": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Bound workbench result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "steel_certified",
+                    "control_eligible"
+                  ],
+                  "properties": {
+                    "steel_certified": {
+                      "const": false
+                    },
+                    "control_eligible": {
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate or revision"
+          },
+          "413": {
+            "description": "Body budget exceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "annotation_id",
+                  "bundle_digest",
+                  "candidate_id",
+                  "draft_digest",
+                  "expected_parent_revision",
+                  "frame_id",
+                  "frame_instance_id",
+                  "geometry_digest",
+                  "manifest_sha256",
+                  "mutation_id",
+                  "request_id",
+                  "semantic_sha256",
+                  "session_id",
+                  "view_id",
+                  "wire_sha256"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "annotation_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "bundle_digest": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "candidate_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "draft_digest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "expected_parent_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "frame_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "frame_instance_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "geometry_digest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "manifest_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "mutation_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "semantic_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "view_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "wire_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/manual/commit": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Bound workbench result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "steel_certified",
+                    "control_eligible"
+                  ],
+                  "properties": {
+                    "steel_certified": {
+                      "const": false
+                    },
+                    "control_eligible": {
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate or revision"
+          },
+          "413": {
+            "description": "Body budget exceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "annotation_id",
+                  "bundle_digest",
+                  "client_xy",
+                  "expected_parent_revision",
+                  "frame_id",
+                  "frame_instance_id",
+                  "manifest_sha256",
+                  "mutation_id",
+                  "operation",
+                  "request_id",
+                  "schema",
+                  "semantic_sha256",
+                  "session_id",
+                  "target_opening_id",
+                  "target_vessel_id",
+                  "vertices_uv",
+                  "view_id",
+                  "wire_sha256"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "annotation_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "bundle_digest": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "client_xy": {
+                    "type": "array",
+                    "minItems": 4,
+                    "maxItems": 4,
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      },
+                      "minItems": 2,
+                      "maxItems": 2
+                    }
+                  },
+                  "expected_parent_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "frame_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "frame_instance_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "manifest_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "mutation_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "operation": {
+                    "enum": [
+                      "CREATE",
+                      "REFINE"
+                    ]
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "schema": {
+                    "const": "manual_selection.1"
+                  },
+                  "semantic_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "target_opening_id": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "target_vessel_id": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "vertices_uv": {
+                    "type": "array",
+                    "minItems": 4,
+                    "maxItems": 4,
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      },
+                      "minItems": 2,
+                      "maxItems": 2
+                    }
+                  },
+                  "view_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "wire_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/undo": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Bound workbench result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "steel_certified",
+                    "control_eligible"
+                  ],
+                  "properties": {
+                    "steel_certified": {
+                      "const": false
+                    },
+                    "control_eligible": {
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate or revision"
+          },
+          "413": {
+            "description": "Body budget exceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "annotation_id",
+                  "bundle_digest",
+                  "expected_parent_revision",
+                  "frame_id",
+                  "frame_instance_id",
+                  "manifest_sha256",
+                  "mutation_id",
+                  "semantic_sha256",
+                  "session_id",
+                  "view_id",
+                  "wire_sha256"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "annotation_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "bundle_digest": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "expected_parent_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "frame_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "frame_instance_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "manifest_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "mutation_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "semantic_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "view_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "wire_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/refine": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Bound workbench result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "steel_certified",
+                    "control_eligible"
+                  ],
+                  "properties": {
+                    "steel_certified": {
+                      "const": false
+                    },
+                    "control_eligible": {
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate or revision"
+          },
+          "413": {
+            "description": "Body budget exceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "annotation_id",
+                  "bundle_digest",
+                  "client_xy",
+                  "expected_parent_revision",
+                  "frame_id",
+                  "frame_instance_id",
+                  "manifest_sha256",
+                  "operation",
+                  "request_id",
+                  "schema",
+                  "semantic_sha256",
+                  "session_id",
+                  "target_opening_id",
+                  "target_vessel_id",
+                  "vertices_uv",
+                  "view_id",
+                  "wire_sha256"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "annotation_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "bundle_digest": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "client_xy": {
+                    "type": "array",
+                    "minItems": 4,
+                    "maxItems": 4,
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      },
+                      "minItems": 2,
+                      "maxItems": 2
+                    }
+                  },
+                  "expected_parent_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "frame_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "frame_instance_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "manifest_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "operation": {
+                    "enum": [
+                      "CREATE",
+                      "REFINE"
+                    ]
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "schema": {
+                    "const": "manual_selection.1"
+                  },
+                  "semantic_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "target_opening_id": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "target_vessel_id": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "vertices_uv": {
+                    "type": "array",
+                    "minItems": 4,
+                    "maxItems": 4,
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      },
+                      "minItems": 2,
+                      "maxItems": 2
+                    }
+                  },
+                  "view_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "wire_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/refine/cancel": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Bound workbench result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "steel_certified",
+                    "control_eligible"
+                  ],
+                  "properties": {
+                    "steel_certified": {
+                      "const": false
+                    },
+                    "control_eligible": {
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate or revision"
+          },
+          "413": {
+            "description": "Body budget exceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "annotation_id",
+                  "frame_id",
+                  "frame_instance_id",
+                  "manifest_sha256",
+                  "request_id",
+                  "semantic_sha256",
+                  "session_id",
+                  "view_id",
+                  "wire_sha256"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "annotation_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "frame_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "frame_instance_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "manifest_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "request_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "semantic_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "view_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "wire_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/scene/confirm": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Bound workbench result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "steel_certified",
+                    "control_eligible"
+                  ],
+                  "properties": {
+                    "steel_certified": {
+                      "const": false
+                    },
+                    "control_eligible": {
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate or revision"
+          },
+          "413": {
+            "description": "Body budget exceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "confirm_empty",
+                  "frame_id",
+                  "frame_instance_id",
+                  "manifest_sha256",
+                  "mutation_id",
+                  "scene_digest",
+                  "semantic_sha256",
+                  "session_id",
+                  "view_id",
+                  "wire_sha256"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "confirm_empty": {
+                    "type": "boolean"
+                  },
+                  "frame_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "frame_instance_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "manifest_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "mutation_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "scene_digest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "semantic_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "view_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "wire_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/export": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Bound workbench result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "steel_certified",
+                    "control_eligible"
+                  ],
+                  "properties": {
+                    "steel_certified": {
+                      "const": false
+                    },
+                    "control_eligible": {
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate or revision"
+          },
+          "413": {
+            "description": "Body budget exceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "frame_id",
+                  "frame_instance_id",
+                  "manifest_sha256",
+                  "scene_digest",
+                  "semantic_sha256",
+                  "session_id",
+                  "view_id",
+                  "wire_sha256"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "frame_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "frame_instance_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "manifest_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "scene_digest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "semantic_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "view_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_:-]{1,64}$"
+                  },
+                  "wire_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/view": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Bound workbench result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "steel_certified",
+                    "control_eligible"
+                  ],
+                  "properties": {
+                    "steel_certified": {
+                      "const": false
+                    },
+                    "control_eligible": {
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate or revision"
+          },
+          "413": {
+            "description": "Body budget exceeded"
+          }
+        }
+      }
+    },
+    "/api/v2/revisions": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Bound workbench result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "steel_certified",
+                    "control_eligible"
+                  ],
+                  "properties": {
+                    "steel_certified": {
+                      "const": false
+                    },
+                    "control_eligible": {
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate or revision"
+          },
+          "413": {
+            "description": "Body budget exceeded"
+          }
+        }
+      }
+    }
+  }
+}
