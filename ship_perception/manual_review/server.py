@@ -5,7 +5,7 @@ import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from secrets import token_urlsafe
-import subprocess
+import re
 from threading import BoundedSemaphore
 
 from .contract import FLAGS, ContractError, canonical, parse_json, selection
@@ -23,7 +23,10 @@ class LocalServer(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 12
 
-    def __init__(self, frame, port=0, review=None, static_assets=None):
+    def __init__(self, frame, port=0, review=None, static_assets=None, *, base_path=""):
+        if not re.fullmatch(r"(?:/[A-Za-z0-9_-]+)*", base_path):
+            raise ContractError("INVALID_BASE_PATH")
+        self.base_path = base_path
         self.frame = frame
         self.review = review
         self.token = token_urlsafe(32)
@@ -102,18 +105,25 @@ class Handler(BaseHTTPRequestHandler):
             ):
                 raise ContractError("BAD_TOKEN", 403)
 
+    def routed_path(self):
+        prefix = self.server.base_path
+        if not self.path.startswith(prefix + "/"):
+            raise ContractError("ROUTE_NOT_FOUND", 404)
+        return self.path[len(prefix):]
+
     def do_GET(self):
         try:
-            self.authorize(private=self.path not in self.server.static)
+            path = self.routed_path()
+            self.authorize(private=path not in self.server.static)
             frame = self.server.frame
-            if self.path in self.server.static:
-                mime, data = self.server.static[self.path]
+            if path in self.server.static:
+                mime, data = self.server.static[path]
                 self.reply(data, mime)
-            elif self.path in ("/api/v2/view", "/api/v2/revisions") and hasattr(
+            elif path in ("/api/v2/view", "/api/v2/revisions", "/api/v3/view") and hasattr(
                 self.server.review, "read"
             ):
-                self.json(self.server.review.read(self.path))
-            elif self.path == "/api/view":
+                self.json(self.server.review.read(path))
+            elif path == "/api/view":
                 self.json(
                     {
                         "manifest": frame.manifest,
@@ -125,8 +135,8 @@ class Handler(BaseHTTPRequestHandler):
                         ),
                     }
                 )
-            elif self.path in {"/layer/" + k + ".png" for k in frame.layers}:
-                self.reply(frame.layers[self.path[7:-4]], "image/png")
+            elif path in {"/layer/" + k + ".png" for k in frame.layers}:
+                self.reply(frame.layers[path[7:-4]], "image/png")
             else:
                 raise ContractError("ROUTE_NOT_FOUND", 404)
         except ContractError as exc:
@@ -154,7 +164,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ContractError("INCOMPLETE_JSON")
             payload = parse_json(data)
             frame = self.server.frame
-            if self.path == "/api/selection":
+            path = self.routed_path()
+            if path == "/api/selection":
                 xy = selection(payload, frame.manifest, frame.projection, frame.targets)
                 self.json(
                     {
@@ -165,7 +176,7 @@ class Handler(BaseHTTPRequestHandler):
                     }
                 )
             elif self.server.review is not None:
-                self.json(self.server.review.handle(self.path, payload))
+                self.json(self.server.review.handle(path, payload))
             else:
                 raise ContractError("ROUTE_NOT_FOUND", 404)
         except ContractError as exc:
@@ -177,16 +188,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def source_sha():
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=Path(__file__).resolve().parent,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=2,
-        ).strip()
-    except (OSError, subprocess.SubprocessError):
-        return None
+    from .source_identity import identify
+
+    return identify()["build_sha"]
 
 
 def main():

@@ -1,4 +1,4 @@
-import { mount } from "/workbench.js";
+import { mount } from "./workbench.js";
 const root = document.querySelector("[data-mhr-mount]");
 const event = document.querySelector("[data-mhr-event]");
 const show = label => { if (event) event.textContent = label; };
@@ -7,7 +7,11 @@ if (location.hash) {
   sessionStorage.setItem("mhr-r2-token", token);
   history.replaceState(null, "", location.pathname);
 }
+const basePath = new URL(".", import.meta.url).pathname.replace(/\/$/, "");
+const reply = await fetch(basePath + "/api/v3/view", {headers:{"X-MHR-Token":token || ""}});
 const workbench = mount(root, {
+  basePath,
+  protocol: reply.ok ? 3 : 2,
   token,
   onReviewChange: view => show("场景 " + view.scene_state),
   onPreview: candidate => show("预览 " + (candidate.match_state || candidate.execution_state)),

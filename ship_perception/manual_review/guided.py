@@ -89,7 +89,7 @@ def equivalent(a, b, length):
     return shared >= 0.65 * max(len(left), len(right))
 
 
-def training_candidates(rows, length, width, cfg, check):
+def training_candidates(rows, length, width, cfg, check, *, cluster=True):
     train = [
         r for r in rows if r["role"] == "INNER_RIM_SUPPORTED" and r["slab"] % 2 == 0
     ]
@@ -143,8 +143,11 @@ def training_candidates(rows, length, width, cfg, check):
                 )
                 if key not in found or rms < found[key][3]:
                     found[key] = (slope_fit, offset_fit, support, rms)
+    ordered = sorted(found.values(), key=lambda m: (-len(m[2]), m[3], m[1], m[0]))
+    if not cluster:
+        return ordered, len(found)
     groups = []
-    for mode in sorted(found.values(), key=lambda m: (-len(m[2]), m[3], m[1], m[0])):
+    for mode in ordered:
         group = next(
             (g for g in groups if all(equivalent(m, mode, length) for m in g)), None
         )

@@ -4,7 +4,8 @@ const STATE = {
   RUNNING:"正在自动识别", LOADING:"正在核验自动结果", READY:"自动结果已加载",
   FAILED:"自动识别或结果校验失败", DISABLED:"自动入口未启用",
   AUTO_PENDING:"待审自动框", ACCEPTED_AUTO:"已确认自动框", ACCEPTED_REFINED:"已确认局部重测",
-  MANUAL_ONLY:"纯人工坐标", VOID:"误检已作废", GUIDED_REFINED_PENDING:"局部结果待确认",
+  ACCEPTED_GUIDED_CHOICE:"已确认所选 Raw 候选", GUIDED_CHOICES_PENDING:"存在竞争，未选择",
+  SEARCH_INCOMPLETE:"搜索未完成", MANUAL_ONLY:"纯人工坐标", VOID:"误检已作废", GUIDED_REFINED_PENDING:"局部结果待确认",
   AMBIGUOUS:"存在竞争，请沿可见边重新框选", PARTIAL:"证据不足，请重新框选",
   NO_MATCH:"局部未匹配", BUDGET_EXCEEDED:"超出预算，请缩小搜索范围",
   TIMEOUT:"测量超时", CANCELLED:"已取消", REVIEW_PENDING:"场景待审核",
@@ -13,6 +14,10 @@ const STATE = {
 
 // The same component mounts on the standalone page and the host integration example.
 export function mount(root, options) {
+  const base = options.basePath || "";
+  if (!/^(?:\/[A-Za-z0-9_-]+)*$/.test(base)) throw Error("INVALID_BASE_PATH");
+  const v3 = options.protocol === 3;
+  const refinePath = v3 ? "/api/v3/refine" : "/api/v2/refine";
   root.innerHTML = `<main><section class="workspace" aria-label="点云地图">
     <div class="toolbar"><label>图层 <select data-id="layer"><option value="height">高度</option>
     <option value="density">密度</option><option value="mask">有效点</option></select></label>
@@ -23,12 +28,14 @@ export function mount(root, options) {
     <aside><div data-id="auto" role="status"></div>
     <label class="field">船舱<select data-id="target"></select></label>
     <div data-id="selectionStatus" role="status"></div>
+    <div data-id="source"></div><div data-id="mapChoices"></div>
+    <div data-id="choices"></div><div data-id="profiles"></div>
     <table class="mhr-table" aria-label="四角 XYZ 米"><thead><tr><th>角点</th><th>X</th><th>Y</th><th>Z</th></tr></thead>
     <tbody data-id="coordinates"></tbody></table><p data-id="dimensions"></p>
     <div class="actions"><button data-id="confirm" class="primary">确认标定</button>
       <button data-id="edit">重新框选</button><button data-id="add">新增船舱</button></div>
     <div data-id="editor" hidden><label class="field">粗框方向（度）<input data-id="angle" type="number" value="0" min="-180" max="180" step="0.25"></label>
-      <div class="actions"><button data-id="measure">重新标定</button><button data-id="cancel">取消</button></div></div>
+      <div class="actions"><button data-id="orient">两点定向</button><button data-id="measure">重新标定</button><button data-id="cancel">取消</button></div></div>
     <div data-id="status" role="status" aria-live="polite"></div>
     <details><summary>其他操作</summary><div class="actions">
        <button data-id="void">作废误检</button><button data-id="undo">撤销</button>
@@ -39,7 +46,8 @@ export function mount(root, options) {
   const viewport = el("viewport"), canvas = viewport.querySelector("canvas"), svg = viewport.querySelector("svg");
   const life = new AbortController();
   const on = (target, name, fun, opts = {}) => target.addEventListener(name, fun, {...opts, signal:life.signal});
-  let view, image, target, draft, preview, drag, timer, inFlight;
+  let view, image, target, draft, preview, drag, timer, inFlight, orienting, baseForm;
+  let profileTicket = 0;
   let epoch = 0, navigation = 0, layerEpoch = 0, zoom = 1, pan = [0,0], editing = false, saving = false, alive = true;
   const manifest = () => view.manifest;
   const identity = () => Object.fromEntries(IDENTITY.map(k=>[k,manifest()[k]]));
@@ -57,7 +65,7 @@ export function mount(root, options) {
     if (data !== undefined) {
       init.method="POST"; init.headers["Content-Type"]="application/json"; init.body=JSON.stringify(data);
     }
-    const r=await fetch(path,init);
+    const r=await fetch(base+path,init);
     if (!r.ok) throw Error((await r.json()).error || "HTTP_"+r.status);
     return r;
   }
@@ -67,21 +75,22 @@ export function mount(root, options) {
     if (inFlight) {
       const op=inFlight;
       op.abort.abort();
-      fetchAPI("/api/v2/refine/cancel",{...op.identity,annotation_id:op.target,request_id:op.id}).catch(()=>{});
+      fetchAPI(refinePath+"/cancel",{...op.identity,annotation_id:op.target,request_id:op.id}).catch(()=>{});
     }
     if (preview && view && target===preview.annotation_id && !inFlight) {
-      fetchAPI("/api/v2/refine/cancel",{...identity(),annotation_id:target,request_id:preview.request_id}).catch(()=>{});
+      fetchAPI(refinePath+"/cancel",{...identity(),annotation_id:target,request_id:preview.request_id}).catch(()=>{});
     }
     inFlight=undefined; preview=null;
+    profileTicket++; el("profiles").replaceChildren();
   }
 
-  function resetDraft() { invalidate(); editing=false; draft=null; drag=null; }
+  function resetDraft() { invalidate(); editing=false; draft=null; drag=null; orienting=null; baseForm=null; }
 
   async function openFrame() {
     const ticket=++navigation;
     clearTimeout(timer);
     try {
-      const next=await (await fetchAPI("/api/v2/view",undefined,life.signal)).json();
+      const next=await (await fetchAPI(v3?"/api/v3/view":"/api/v2/view",undefined,life.signal)).json();
       if (!alive || ticket!==navigation) return;
       const changed=view?.manifest.view_id!==next.manifest.view_id;
       if (changed) { resetDraft(); target=null; zoom=1; pan=[0,0]; }
@@ -98,7 +107,7 @@ export function mount(root, options) {
 
   function setTarget(id) {
     if (!view || (!has(view.auto.targets,id) && !has(view.heads,id))) return false;
-    resetDraft(); target=id; el("target").value=id; status(""); render();
+    resetDraft(); target=id; el("target").value=id; el("mapChoices").replaceChildren(); status(""); render();
     return true;
   }
 
@@ -182,7 +191,13 @@ export function mount(root, options) {
         (saved.state!=="ACCEPTED_AUTO" || preview?.geometry))
       polygon(saved.geometry.xy.map(uv),c,"#b5a6d1",preview?.geometry?"5 5":"","上次确认");
     if (draft && el("rough").checked) polygon(vertices(),c,"#ffc96c","9 5","粗框");
-    if (preview?.geometry) polygon(preview.geometry.xy.map(uv),c,"#70edb4","","重测候选");
+    if (v3 && preview?.match_state==="GUIDED_CHOICES_PENDING") {
+      preview.candidates.forEach((p,i)=>{
+        if (p.confirmable && (p.candidate_id===preview.candidate_id || p.candidate_id===preview.recommendation_id))
+          polygon(p.geometry.xy.map(uv),c,"#70edb4",p.candidate_id===preview.candidate_id?"":"6 3","候选 "+(i+1));
+        else if (p.confirmable) polygon(p.geometry.xy.map(uv),c,"#ffc96c","4 3","候选 "+(i+1));
+      });
+    } else if (preview?.geometry) polygon(preview.geometry.xy.map(uv),c,"#70edb4","","重测候选");
   }
 
   function render() {
@@ -192,7 +207,10 @@ export function mount(root, options) {
     const usable=saved && !view.pending.includes(target) ? saved : null;
     const geometry=candidate || usable?.geometry || (usable?.state==="VOID"?null:auto?.geometry);
     el("auto").textContent=(STATE[view.auto.status] || view.auto.status)+(view.auto.reason?" · "+view.auto.reason:"");
-    el("selectionStatus").textContent=candidate?STATE.GUIDED_REFINED_PENDING:
+    const id = view.source_identity;
+    el("source").textContent=id ? (id.status==="VERIFIED" ? "构建 "+id.build_sha.slice(0,12) : "构建来源未核验") : "";
+    el("selectionStatus").textContent=candidate?(preview.match_state==="GUIDED_CHOICES_PENDING"?
+       (preview.selection_id?"已选 Raw 候选，待确认":STATE.GUIDED_CHOICES_PENDING):STATE.GUIDED_REFINED_PENDING):
        usable?(STATE[usable.state]||usable.state):auto?STATE.AUTO_PENDING+" · "+auto.state:"";
     el("coordinates").replaceChildren();
     const fmt=n=>n==null?"未观测":n.toFixed(3);
@@ -208,7 +226,18 @@ export function mount(root, options) {
       2*Math.max(draft.w,draft.h)*manifest().s<=250;
     el("editor").hidden=!editing;
     el("measure").disabled=!valid||saving;
-    el("confirm").disabled=saving||!!inFlight||(!candidate&&(!auto||editing||!!usable));
+    el("confirm").disabled=saving||!!inFlight||(!candidate&&(!auto||editing||!!usable))
+      || (v3 && !!candidate && (!preview.selection_id || view.source_identity?.status!=="VERIFIED"));
+    el("orient").hidden=!v3;
+    el("choices").replaceChildren();
+    if (v3 && preview?.match_state==="GUIDED_CHOICES_PENDING") preview.candidates.forEach((c,i)=>{
+      if (!c.confirmable) return;
+      const button=document.createElement("button");
+      button.textContent=(preview.candidate_id===c.candidate_id?"已选 ":"选择 ")+"候选 "+(i+1)+" · 四边 Raw";
+      button.disabled=saving || !!inFlight;
+      button.onclick=()=>choose(c);
+      el("choices").append(button);
+    });
     el("edit").disabled=saving||!target;
     el("add").disabled=saving;
     el("manual").disabled=saving||!valid||!!inFlight;
@@ -217,7 +246,14 @@ export function mount(root, options) {
     el("sceneConfirm").disabled=saving||view.pending.length>0||["RUNNING","LOADING"].includes(view.auto.status);
     el("scene").textContent=(STATE[view.scene_state]||view.scene_state)+" · 待审 "+view.pending.length;
     el("evidence").replaceChildren(...(preview?.side_summary || []).map(row=>{
-      const li=document.createElement("li"); li.textContent=row.side_id+" "+row.reason+" ("+row.mode_count+")"; return li;
+      const li=document.createElement("li"); li.textContent=row.side_id+" "+row.reason+" ("+row.mode_count+")";
+      if(v3 && preview && ["PARTIAL","AMBIGUOUS","GUIDED_CHOICES_PENDING","SEARCH_INCOMPLETE"].includes(preview.match_state)){
+        const b=document.createElement("button");
+        b.textContent="剖面";
+        b.onclick=()=>openProfile(row.side_id);
+        li.append(b);
+      }
+      return li;
     }));
   }
 
@@ -229,15 +265,30 @@ export function mount(root, options) {
     if (!view || saving) return;
     resetDraft();
     if (isNew) target=crypto.randomUUID();
-    editing=true; el("angle").value="0"; renderTargets(); render();
+    editing=true;
+    const g = isNew ? null : active()?.geometry || head()?.geometry;
+    const [a,b]=g ? g.xy.slice(0,2).map(uv) : [[0,0],[1,0]];
+    el("angle").value=String(v3 ? Math.atan2(b[1]-a[1],b[0]-a[0])*180/Math.PI : 0);
+    renderTargets(); render();
     status("沿可见内沿拖动圈选。斜舱可先设置粗框方向。");
     viewport.focus();
   }
 
   on(viewport,"pointerdown",event=>{
-    if(!view||event.button!==0||drag) return;
+    if(!view||saving||event.button!==0||drag) return;
     const at=position(event), p=unproject(at,camera());
     if(editing&&!inMap(p)) return;
+    if (orienting) {
+      if (!orienting.start) { orienting.start=p; status("点击方向上的第二点"); }
+      else {
+        const [u,v]=p.map((x,i)=>x-orienting.start[i]);
+        if (Math.hypot(u,v)>1) {
+          el("angle").value=String(Math.atan2(v,u)*180/Math.PI);
+          orienting=null; status("拖动绘制旋转框");
+        }
+      }
+      return;
+    }
     viewport.setPointerCapture(event.pointerId);
     if(editing) { invalidate(); draft={center:p,w:0,h:0}; }
     drag={id:event.pointerId,at,p,pan:[...pan],mode:editing?"draw":"pan"};
@@ -249,7 +300,10 @@ export function mount(root, options) {
     if(drag.mode==="pan") pan=drag.pan.map((v,i)=>v+at[i]-drag.at[i]);
     else {
       const p=unproject(at,camera()),a=drag.p;
-      draft={center:p.map((v,i)=>(v+a[i])/2),w:Math.abs(p[0]-a[0])/2,h:Math.abs(p[1]-a[1])/2};
+      const theta=v3 ? Number(el("angle").value)*Math.PI/180 : 0;
+      const dx=p[0]-a[0], dy=p[1]-a[1];
+      draft={center:p.map((v,i)=>(v+a[i])/2),w:Math.abs(dx*Math.cos(theta)+dy*Math.sin(theta))/2,
+        h:Math.abs(-dx*Math.sin(theta)+dy*Math.cos(theta))/2};
     }
     draw();
   }
@@ -257,10 +311,13 @@ export function mount(root, options) {
   on(viewport,"pointerup", event=>{
     if(!drag||drag.id!==event.pointerId) return;
     const shouldMeasure=drag.mode==="draw";
+    const isClick=drag.mode==="pan" && Math.hypot(...position(event).map((v,i)=>v-drag.at[i])) < 4;
+    const p=drag.p;
     updatePointer(event); drag=null; render();
+    if(v3 && isClick) pickTarget(p);
     if(shouldMeasure&&!el("measure").disabled) measure();
   });
-  on(viewport,"pointercancel",()=>{drag=null;});
+  on(viewport,"pointercancel",()=>{if(drag?.mode==="draw") draft=null; drag=null; render();});
   on(viewport,"wheel",event=>{
     if(!view||drag) return;
     event.preventDefault();
@@ -276,14 +333,84 @@ export function mount(root, options) {
     return {schema:"manual_selection.1", request_id:crypto.randomUUID(),operation:a?"REFINE":"CREATE",
       target_opening_id:a?target:null,target_vessel_id:a?.vessel_id||null,vertices_uv:points,client_xy:points.map(xy)};
   }
-  async function measure() {
+  function pickTarget(p) {
+    const ids=[...new Set([...Object.keys(view.auto.targets),...Object.keys(view.heads)])].filter(id=>{
+      const record=view.heads[id];
+      if(record?.state==="VOID"&&!view.pending.includes(id)) return false;
+      const g=(!view.pending.includes(id)&&record?.geometry)||view.auto.targets[id]?.geometry;
+      if(!g) return false;
+      const poly=g.xy.map(uv);
+      const cross=poly.map((a,i)=>{
+        const b=poly[(i+1)%4];
+        return (b[0]-a[0])*(p[1]-a[1])-(b[1]-a[1])*(p[0]-a[0]);
+      });
+      return cross.every(x=>x>=0)||cross.every(x=>x<=0);
+    });
+    const list=el("mapChoices");
+    list.replaceChildren();
+    if(ids.length===1) return setTarget(ids[0]);
+    if(ids.length>1) status("此处多个船舱重叠，请明确选择");
+    for(const id of ids) {
+      const b=document.createElement("button"); b.textContent=id;
+      b.onclick=()=>setTarget(id); list.append(b);
+    }
+  }
+  function binding(p) {
+    const {mutation_id,...base}=mutation();
+    return {...base,request_id:p.request_id,draft_digest:p.draft_digest,list_digest:p.list_digest};
+  }
+  async function choose(c) {
+    if(saving||inFlight||!preview) return;
+    const p=preview;
+    saving=true; render();
+    try {
+      const next=await(await fetchAPI(refinePath+"/select",{...binding(p),candidate_id:c.candidate_id,
+        geometry_digest:c.geometry_digest},life.signal)).json();
+      if(preview===p && alive) { preview=next; options.onPreview?.(next); }
+    } catch(error){if(preview===p) fail(error);}
+    finally{saving=false;render();}
+  }
+  async function openProfile(side_id) {
+    if (!preview || !baseForm) return;
+    const p=preview, ticket=++profileTicket;
+    try {
+      const data=await(await fetchAPI(refinePath+"/profile",{...binding(p),side_id},life.signal)).json();
+      if(!alive || p!==preview || ticket!==profileTicket) return;
+      const panel=el("profiles"), chart=document.createElement("canvas");
+      const title=document.createElement("p");
+      title.textContent=side_id+" 中段 Raw 高度剖面 · 横轴向舱内为正";
+      panel.replaceChildren(title);
+      if (!data.points.length) {
+        const empty=document.createElement("p"); empty.textContent="中段没有可显示的训练观测";
+        panel.append(empty); return;
+      }
+      chart.width=320; chart.height=130; chart.className="mhr-profile";
+      chart.setAttribute("aria-label","点击表示该边的位置提示");
+      const ctx=chart.getContext("2d"), w=data.offset_window_m;
+      const zs=data.points.map(q=>q[1]), lo=Math.min(...zs), hi=Math.max(...zs);
+      ctx.fillStyle="#a6c8ff";
+      for(const [d,z] of data.points) ctx.fillRect((d+w)/(2*w)*320,124-118*(z-lo)/Math.max(hi-lo,.01),2,2);
+      panel.append(chart);
+      on(chart,"click",event=>{
+        if(saving || preview!==p) return;
+        const r=chart.getBoundingClientRect(), d=((event.clientX-r.left)/r.width*2-1)*w;
+        const point=data.midpoint_uv.map((v,i)=>v+d*data.normal_uv[i]);
+        measure({request_id:p.request_id,side_id,uv:point});
+      },{once:true});
+    }catch(error){if(preview===p) fail(error);}
+  }
+  async function measure(hint) {
     if(!draft||el("measure").disabled) return;
-    invalidate();
-    const {mutation_id,...base}=mutation(), form=selection(), issued=epoch;
+    if(!hint) invalidate();
+    else { epoch++; preview=null; el("profiles").replaceChildren(); }
+    const {mutation_id,...base}=mutation();
+    const form=hint?{...baseForm,request_id:crypto.randomUUID(),edge_hint:hint}:selection();
+    if(!hint) baseForm=form;
+    const issued=epoch;
     const op={abort:new AbortController(),identity:identity(),target,id:form.request_id};
     inFlight=op; status("正在局部重测"); render();
     try {
-      const result=await (await fetchAPI("/api/v2/refine",{...base,...form},op.abort.signal)).json();
+      const result=await (await fetchAPI(refinePath,{...base,...form},op.abort.signal)).json();
       if(!alive||issued!==epoch||inFlight!==op||result.view_id!==manifest().view_id||
          result.annotation_id!==target||result.request_id!==form.request_id) return;
       preview=result;
@@ -310,12 +437,16 @@ export function mount(root, options) {
     reset:()=>{zoom=1;pan=[0,0];draw();},
     edit:()=>startEdit(false), add:()=>startEdit(true),
     cancel:()=>{resetDraft();status("已取消本次编辑");render();},
-    measure,
+    orient:()=>{invalidate(); draft=null; orienting={}; status("点击方向上的第一点");render();},
+    measure:()=>measure(),
     confirm:()=>{
       const p=preview;
-      if(p?.geometry) commit("/api/v2/refine/confirm",{...mutation(),request_id:p.request_id,
+      if(p?.geometry && v3 && p.selection_id) commit(refinePath+"/confirm",{...binding(p),
+        mutation_id:crypto.randomUUID(),selection_id:p.selection_id,candidate_id:p.candidate_id,
+        geometry_digest:p.geometry_digest});
+      else if(p?.geometry && !v3) commit(refinePath+"/confirm",{...mutation(),request_id:p.request_id,
         candidate_id:p.candidate_id,geometry_digest:p.geometry_digest,draft_digest:p.draft_digest});
-      else if(active()) commit("/api/v2/auto/confirm",{...mutation(),geometry_digest:active().geometry_digest});
+      else if(!editing && active()) commit("/api/v2/auto/confirm",{...mutation(),geometry_digest:active().geometry_digest});
     },
     void:()=>{if(active()&&window.confirm("将该舱标记为误检作废？"))
       commit("/api/v2/auto/void",{...mutation(),geometry_digest:active().geometry_digest});},
@@ -332,7 +463,7 @@ export function mount(root, options) {
         const data=await(await fetchAPI("/api/v2/export",{...identity(),scene_digest:view.scene_digest},life.signal)).json();
         const {csv,...summary}=data;
         for(const [ext,type,content] of [["json","application/json",JSON.stringify(summary,null,2)],["csv","text/csv;charset=utf-8",csv]]){
-          const link=document.createElement("a"); link.download="船舱复核-R2."+ext;
+          const link=document.createElement("a"); link.download="船舱复核-R"+(v3?3:2)+"."+ext;
           link.href=URL.createObjectURL(new Blob([content],{type})); link.click();
           setTimeout(()=>URL.revokeObjectURL(link.href),5000);
         }

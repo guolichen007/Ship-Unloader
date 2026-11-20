@@ -146,7 +146,7 @@ class Workbench:
             for a in auto["targets"]
             if a not in eligible
             or eligible[a]["state"]
-            not in ("ACCEPTED_AUTO", "ACCEPTED_REFINED", "MANUAL_ONLY", "VOID")
+            not in ("ACCEPTED_AUTO", "ACCEPTED_REFINED", "ACCEPTED_GUIDED_CHOICE", "MANUAL_ONLY", "VOID")
         )
         scene_digest = digest(
             dict(

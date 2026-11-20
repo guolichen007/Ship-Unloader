@@ -1,4 +1,4 @@
-"""Launch the offline R2 workbench for one trusted local PCD."""
+"""Launch the offline MHR workbench for one trusted local PCD."""
 
 import argparse
 from pathlib import Path
@@ -37,6 +37,8 @@ def main():
     parser.add_argument("--frame-id", default="pcd")
     parser.add_argument("--cell-m", default=0.1, type=float)
     parser.add_argument("--port", default=0, type=int)
+    parser.add_argument("--protocol", choices=(2, 3), default=3, type=int)
+    parser.add_argument("--base-path", default="")
     args = parser.parse_args()
     auto = AutomaticRun(
         "DISABLED" if args.skip_auto else "LOADING" if args.import_run else "RUNNING"
@@ -44,15 +46,21 @@ def main():
     try:
         pcd = args.pcd.resolve()
         frame = FrameSession(pcd, args.cell_m, args.frame_id)
-        workbench = Workbench(frame, args.output, auto, source_sha() or "mhr-r2")
+        if args.protocol == 3:
+            from .source_identity import identify
+            from .workbench_v3 import WorkbenchV3
+
+            workbench = WorkbenchV3(frame, args.output, auto, identify())
+        else:
+            workbench = Workbench(frame, args.output, auto, source_sha() or "UNVERIFIED")
         if args.import_run:
             callback, params = auto.import_result, (args.import_run, frame)
         else:
             callback, params = auto.run, (pcd, args.output, frame)
         if not args.skip_auto:
             Thread(target=callback, args=params, daemon=True).start()
-        with LocalServer(frame, args.port, workbench, STATIC) as server:
-            print("MHR_R2_URL=" + server.origin + "/#" + server.token, flush=True)
+        with LocalServer(frame, args.port, workbench, STATIC, base_path=args.base_path) as server:
+            print(f"MHR_R{args.protocol}_URL=" + server.origin + args.base_path + "/#" + server.token, flush=True)
             server.serve_forever()
     except KeyboardInterrupt:
         return 0

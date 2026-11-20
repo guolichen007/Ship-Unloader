@@ -30,3 +30,7 @@ aside [role=status] { margin-bottom: .6rem; overflow-wrap: anywhere; }
 aside details { margin: .7rem 0; }
 aside summary { cursor: pointer; margin-bottom: .5rem; }
 @media (max-width: 850px) { .mhr-viewport { height: 54vh; } }
+
+[data-id=mapChoices], [data-id=choices] { display: flex; flex-wrap: wrap; gap: .35rem; }
+canvas.mhr-profile { position: static; width: 100%; height: auto; pointer-events: auto; cursor: crosshair; background: #0a121b; }
+[data-id=source] { color: #b5c4d4; font-size: .8rem; }

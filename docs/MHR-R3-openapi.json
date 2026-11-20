@@ -1,0 +1,704 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MHR-R3 loopback workbench",
+    "version": "3.0",
+    "description": "R2 review mutation and export endpoints retain their existing contract."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "LoopbackToken": []
+    }
+  ],
+  "paths": {
+    "/api/v3/view": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Source identity and workbench view"
+          }
+        }
+      }
+    },
+    "/api/v3/refine": {
+      "post": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Draft"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server-bound review result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate, request or parent"
+          },
+          "429": {
+            "description": "Local budget limit"
+          }
+        }
+      }
+    },
+    "/api/v3/refine/select": {
+      "post": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Select"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server-bound review result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate, request or parent"
+          },
+          "429": {
+            "description": "Local budget limit"
+          }
+        }
+      }
+    },
+    "/api/v3/refine/confirm": {
+      "post": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Confirm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server-bound review result"
+          },
+          "400": {
+            "description": "Malformed request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate, request or parent"
+          },
+          "429": {
+            "description": "Local budget limit"
+          }
+        }
+      }
+    },
+    "/api/v3/refine/profile": {
+      "post": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Profile"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server-bound review result"
+          },
+          "400": {
+            "description": "Malformed request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate, request or parent"
+          },
+          "429": {
+            "description": "Local budget limit"
+          }
+        }
+      }
+    },
+    "/api/v3/refine/cancel": {
+      "post": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cancel"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server-bound review result"
+          },
+          "400": {
+            "description": "Malformed request"
+          },
+          "403": {
+            "description": "Origin, Host or token rejected"
+          },
+          "409": {
+            "description": "Stale frame, candidate, request or parent"
+          },
+          "429": {
+            "description": "Local budget limit"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "LoopbackToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-MHR-Token"
+      }
+    },
+    "schemas": {
+      "Digest": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      },
+      "Draft": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "frame_instance_id": {
+            "type": "string"
+          },
+          "view_id": {
+            "type": "string"
+          },
+          "manifest_sha256": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "wire_sha256": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "semantic_sha256": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "frame_id": {
+            "type": "string"
+          },
+          "annotation_id": {
+            "type": "string"
+          },
+          "expected_parent_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bundle_digest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Digest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schema": {
+            "const": "manual_selection.1"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "REFINE",
+              "CREATE"
+            ]
+          },
+          "target_opening_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_vessel_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "vertices_uv": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "client_xy": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "edge_hint": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "request_id": {
+                "type": "string"
+              },
+              "side_id": {
+                "enum": [
+                  "V0",
+                  "U1",
+                  "V1",
+                  "U0"
+                ]
+              },
+              "uv": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            },
+            "required": [
+              "request_id",
+              "side_id",
+              "uv"
+            ]
+          }
+        },
+        "required": [
+          "session_id",
+          "frame_instance_id",
+          "view_id",
+          "manifest_sha256",
+          "wire_sha256",
+          "semantic_sha256",
+          "frame_id",
+          "annotation_id",
+          "expected_parent_revision",
+          "bundle_digest",
+          "schema",
+          "request_id",
+          "operation",
+          "target_opening_id",
+          "target_vessel_id",
+          "vertices_uv",
+          "client_xy"
+        ]
+      },
+      "Select": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "frame_instance_id": {
+            "type": "string"
+          },
+          "view_id": {
+            "type": "string"
+          },
+          "manifest_sha256": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "wire_sha256": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "semantic_sha256": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "frame_id": {
+            "type": "string"
+          },
+          "annotation_id": {
+            "type": "string"
+          },
+          "expected_parent_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bundle_digest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Digest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "list_digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "draft_digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "candidate_id": {
+            "type": "string"
+          },
+          "geometry_digest": {
+            "$ref": "#/components/schemas/Digest"
+          }
+        },
+        "required": [
+          "session_id",
+          "frame_instance_id",
+          "view_id",
+          "manifest_sha256",
+          "wire_sha256",
+          "semantic_sha256",
+          "frame_id",
+          "annotation_id",
+          "expected_parent_revision",
+          "bundle_digest",
+          "request_id",
+          "list_digest",
+          "draft_digest",
+          "candidate_id",
+          "geometry_digest"
+        ]
+      },
+      "Confirm": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "frame_instance_id": {
+            "type": "string"
+          },
+          "view_id": {
+            "type": "string"
+          },
+          "manifest_sha256": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "wire_sha256": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "semantic_sha256": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "frame_id": {
+            "type": "string"
+          },
+          "annotation_id": {
+            "type": "string"
+          },
+          "expected_parent_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bundle_digest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Digest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "list_digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "draft_digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "candidate_id": {
+            "type": "string"
+          },
+          "geometry_digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "selection_id": {
+            "type": "string"
+          },
+          "mutation_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "frame_instance_id",
+          "view_id",
+          "manifest_sha256",
+          "wire_sha256",
+          "semantic_sha256",
+          "frame_id",
+          "annotation_id",
+          "expected_parent_revision",
+          "bundle_digest",
+          "request_id",
+          "list_digest",
+          "draft_digest",
+          "candidate_id",
+          "geometry_digest",
+          "selection_id",
+          "mutation_id"
+        ]
+      },
+      "Profile": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "frame_instance_id": {
+            "type": "string"
+          },
+          "view_id": {
+            "type": "string"
+          },
+          "manifest_sha256": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "wire_sha256": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "semantic_sha256": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "frame_id": {
+            "type": "string"
+          },
+          "annotation_id": {
+            "type": "string"
+          },
+          "expected_parent_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bundle_digest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Digest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "list_digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "draft_digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "side_id": {
+            "enum": [
+              "V0",
+              "U1",
+              "V1",
+              "U0"
+            ]
+          }
+        },
+        "required": [
+          "session_id",
+          "frame_instance_id",
+          "view_id",
+          "manifest_sha256",
+          "wire_sha256",
+          "semantic_sha256",
+          "frame_id",
+          "annotation_id",
+          "expected_parent_revision",
+          "bundle_digest",
+          "request_id",
+          "list_digest",
+          "draft_digest",
+          "side_id"
+        ]
+      },
+      "Cancel": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "frame_instance_id": {
+            "type": "string"
+          },
+          "view_id": {
+            "type": "string"
+          },
+          "manifest_sha256": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "wire_sha256": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "semantic_sha256": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "frame_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "annotation_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "frame_instance_id",
+          "view_id",
+          "manifest_sha256",
+          "wire_sha256",
+          "semantic_sha256",
+          "frame_id",
+          "request_id",
+          "annotation_id"
+        ]
+      },
+      "Preview": {
+        "type": "object",
+        "properties": {
+          "steel_certified": {
+            "const": false
+          },
+          "control_eligible": {
+            "const": false
+          },
+          "execution_state": {
+            "type": "string"
+          },
+          "match_state": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "list_digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "draft_digest": {
+            "$ref": "#/components/schemas/Digest"
+          },
+          "selection_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "search_complete": {
+            "type": "boolean"
+          },
+          "geometry": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "recommendation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "candidate_id": {
+                  "type": "string"
+                },
+                "geometry_digest": {
+                  "$ref": "#/components/schemas/Digest"
+                },
+                "confirmable": {
+                  "type": "boolean"
+                },
+                "geometry": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
