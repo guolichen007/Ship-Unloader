@@ -122,7 +122,15 @@ def exercise(browser, server, evidence):
             "document.querySelector('[data-id=selectionStatus]')?.textContent.includes('已确认局部重测')"
         )
         (item,) = review.view()["heads"].values()
-        error = max(np.linalg.norm(np.array(item["geometry"]["xy"]) - truth, axis=1))
+        # Screen UV reverses physical XY winding. Compare against the known
+        # screen-draft order while retaining the CREATE anchor in the revision.
+        truth_in_screen_order = truth[[3, 2, 1, 0]]
+        error = max(
+            np.linalg.norm(
+                np.array(item["geometry"]["xy"]) - truth_in_screen_order, axis=1
+            )
+        )
+        assert item["geometry"]["corner_mapping"]["request_vertices"] == [0, 1, 2, 3]
         assert error <= 0.05
         failure = None
         kind = "SYNTHETIC_RAW_CREATE"
