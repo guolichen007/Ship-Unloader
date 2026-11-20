@@ -88,7 +88,12 @@ def combinations(groups, lengths, cfg, check, report):
         if i == len(groups):
             yield tuple(groups[j][k] for j, k in enumerate(path))
             continue
-        band = 4 * cfg.residual_m / lengths[i]
+        # A fitted side is allowed to shorten. The endpoint residual bounds
+        # constrain slope over its minimum feasible projected span.
+        minimum_span = max(1, lengths[i] - 2 * cfg.move_m) * np.cos(
+            np.radians(cfg.angle_deg)
+        )
+        band = 4 * cfg.residual_m / minimum_span
         for j, mode in enumerate(groups[i]):
             # Include the complete alias envelope in the direction bound.
             bound = band + 2 * mode["alias_max_displacement_m"] / lengths[i]
@@ -240,7 +245,9 @@ def guided_match(
             )
         training = []
         joint_started = perf_counter()
-        for combination in combinations(groups, lengths, cfg, check, report):
+        for combination in combinations(
+            groups, lengths, replace(cfg, move_m=max(widths)), check, report
+        ):
             if report["examined"] >= SEARCH_LIMIT:
                 raise ExecutionStop("JOINT_COMBINATION_LIMIT")
             report["examined"] += 1
